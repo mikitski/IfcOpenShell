@@ -135,8 +135,20 @@ jobs:
             -DBUILD_GEOMSERVER=OFF `
             -DBUILD_EXAMPLES=OFF `
             -DWITH_CGAL=OFF `
-            -DCOLLADA_SUPPORT=OFF
-          cmake --build build --config Release --target install --parallel
+            -DCOLLADA_SUPPORT=OFF 2>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::group::configure failure (last 80 lines)"
+            Get-Content configure.log -Tail 80 | ForEach-Object { Write-Output "::error::$_" }
+            Write-Output "::endgroup::"
+            exit $LASTEXITCODE
+          }
+          cmake --build build --config Release --target install --parallel 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::group::build failure (last 80 lines)"
+            Get-Content build.log -Tail 80 | ForEach-Object { Write-Output "::error::$_" }
+            Write-Output "::endgroup::"
+            exit $LASTEXITCODE
+          }
 
       - name: npm ci
         working-directory: src/ifcopenshell-ts
@@ -145,7 +157,16 @@ jobs:
       - name: Build native addon (Unix)
         if: matrix.os != 'windows'
         working-directory: src/ifcopenshell-ts
-        run: npm run build:native -- --CDCMAKE_PREFIX_PATH="$INSTALL_PREFIX"
+        run: |
+          set -o pipefail
+          npm run build:native -- --CDCMAKE_PREFIX_PATH="$INSTALL_PREFIX" 2>&1 | tee /tmp/build-native.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::build:native failure (last 80 lines)"
+            tail -n 80 /tmp/build-native.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
 
       - name: Build native addon (Windows)
         if: matrix.os == 'windows'
@@ -155,7 +176,13 @@ jobs:
           npm run build:native -- `
             --CDCMAKE_PREFIX_PATH="$env:INSTALL_PREFIX" `
             --CDCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            --CDVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }}
+            --CDVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }} 2>&1 | Tee-Object -FilePath build-native.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::group::build:native failure (last 80 lines)"
+            Get-Content build-native.log -Tail 80 | ForEach-Object { Write-Output "::error::$_" }
+            Write-Output "::endgroup::"
+            exit $LASTEXITCODE
+          }
 
       - name: Build TS
         working-directory: src/ifcopenshell-ts
