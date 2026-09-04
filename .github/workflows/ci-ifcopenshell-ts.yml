@@ -92,14 +92,13 @@ jobs:
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
-          # boost-dll/boost-algorithm are needed by src/plugin (the schema
-          # plugin loader) - apt/brew pull these in "for free" as part of
-          # their monolithic boost packages, but vcpkg only installs exactly
-          # what's requested, so they need to be listed explicitly here.
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install `
-            boost-program-options boost-regex boost-thread boost-date-time boost-iostreams `
-            boost-dll boost-algorithm eigen3 `
-            --triplet ${{ matrix.vcpkgTriplet }}
+          # apt/brew install boost's full header tree regardless of which
+          # libraries were requested; vcpkg installs only exactly what's
+          # named, which turned into a whack-a-mole of individual missing
+          # header-only libraries (dll, algorithm, logic, ...) pulled in
+          # transitively by ifcparse/plugin. Install the full `boost`
+          # metapackage instead of hand-picking components.
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost eigen3 --triplet ${{ matrix.vcpkgTriplet }}
 
       - name: ccache
         if: matrix.os != 'windows'
