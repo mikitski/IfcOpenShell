@@ -10,6 +10,10 @@ on:
       - '.github/workflows/ci-ifcopenshell-ts.yml'
   pull_request:
 
+concurrency:
+  group: ci-ifcopenshell-ts-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   activate:
     runs-on: ubuntu-22.04
@@ -119,6 +123,7 @@ jobs:
             -DBUILD_GEOMSERVER=OFF \
             -DBUILD_EXAMPLES=OFF \
             -DWITH_CGAL=OFF \
+            -DWITH_OPENCASCADE=OFF \
             -DCOLLADA_SUPPORT=OFF
           cmake --build build --target install --parallel
 
@@ -138,6 +143,7 @@ jobs:
             -DBUILD_GEOMSERVER=OFF `
             -DBUILD_EXAMPLES=OFF `
             -DWITH_CGAL=OFF `
+            -DWITH_OPENCASCADE=OFF `
             -DCOLLADA_SUPPORT=OFF 2>&1 | Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
             Write-Output "::group::configure failure (last 80 lines)"
