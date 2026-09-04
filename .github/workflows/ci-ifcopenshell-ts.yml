@@ -19,6 +19,9 @@ jobs:
 
   build-and-test:
     needs: activate
+    permissions:
+      contents: read
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -209,3 +212,38 @@ jobs:
       - name: npm test
         working-directory: src/ifcopenshell-ts
         run: npm test
+
+      # Temporary Phase 0 bring-up aid: the sandbox this workflow is being
+      # iterated from can only reach api.github.com, not the blob-storage
+      # host GitHub redirects log downloads to, so raw step logs aren't
+      # fetchable there for diagnosis. Post the tail of whichever log files
+      # exist as a PR comment instead - api.github.com only. Remove once the
+      # matrix is green.
+      - name: Post diagnostic log tail as PR comment on failure
+        if: failure() && github.event.pull_request.number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const files = ['configure.log', 'build.log', 'build-native.log', '/tmp/build-native.log'];
+            let body = `### CI diagnostic: ${{ matrix.os }} ${{ matrix.arch }} (${context.sha.slice(0, 8)})\n`;
+            let any = false;
+            for (const f of files) {
+              if (fs.existsSync(f)) {
+                any = true;
+                const lines = fs.readFileSync(f, 'utf8').split('\n').slice(-120).join('\n');
+                body += `\n<details><summary>${f}</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
+              }
+            }
+            if (!any) {
+              body += '\n(no log files found)\n';
+            }
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n... truncated';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
