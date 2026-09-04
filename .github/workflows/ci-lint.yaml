@@ -5,6 +5,25 @@ on:
   pull_request:
 
 jobs:
+  lint-ifcopenshell-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Action - checkout repository
+        uses: actions/checkout@v7
+
+      - name: Action - install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: src/ifcopenshell-ts
+        run: npm ci --ignore-scripts
+
+      - name: Biome check
+        working-directory: src/ifcopenshell-ts
+        run: npm run lint
+
   lint-formatting:
     runs-on: ubuntu-latest
     env:
