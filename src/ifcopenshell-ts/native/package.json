@@ -1,8 +1,8 @@
 {
-  "name": "ifcopenshell-native-addon",
-  "version": "0.0.0",
-  "private": true,
-  "binary": {
-    "napi_versions": [8]
-  }
+	"name": "ifcopenshell-native-addon",
+	"version": "0.0.0",
+	"private": true,
+	"binary": {
+		"napi_versions": [8]
+	}
 }
