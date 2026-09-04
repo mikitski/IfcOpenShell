@@ -39,9 +39,15 @@ jobs:
           - os: linux
             arch: arm64
             runner: ubuntu-22.04-arm
+          # macOS x64 is cross-compiled from the arm64 runner, following
+          # build_osx.yml's established pattern (a separate x86_64 Homebrew
+          # under /usr/local + -DCMAKE_OSX_ARCHITECTURES=x86_64), rather than
+          # requesting a native macos-13 (Intel) runner - those are scarce/
+          # deprioritized on GitHub-hosted CI and can sit queued indefinitely.
           - os: macos
             arch: x64
-            runner: macos-13
+            runner: macos-14
+            macosCrossCompileX64: true
           - os: macos
             arch: arm64
             runner: macos-14
@@ -68,6 +74,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          # For the macOS x64 cross-compile leg, use an x64 Node build (runs
+          # under Rosetta 2 on the arm64 runner) so cmake-js detects arch=x64
+          # and the addon/test both target x86_64, not the host's arm64.
+          architecture: ${{ matrix.macosCrossCompileX64 && 'x64' || '' }}
 
       - name: Install build dependencies (Linux)
         if: matrix.os == 'linux'
@@ -83,10 +93,21 @@ jobs:
             libeigen3-dev
 
       - name: Install build dependencies (macOS)
-        if: matrix.os == 'macos'
+        if: matrix.os == 'macos' && !matrix.macosCrossCompileX64
         run: |
           brew install boost eigen
           echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies (macOS, x64 cross-compile)
+        if: matrix.macosCrossCompileX64
+        run: |
+          # A separate x86_64 Homebrew under /usr/local, distinct from the
+          # arm64 one at /opt/homebrew - matches build_osx.yml's pattern for
+          # cross-compiling x64 from an Apple Silicon runner.
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          /usr/local/bin/brew install boost eigen pkg-config
+          echo "CMAKE_PREFIX_PATH=/usr/local" >> "$GITHUB_ENV"
+          echo "CMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
 
       - name: Install build dependencies (Windows)
         if: matrix.os == 'windows'
@@ -120,6 +141,7 @@ jobs:
             -DCMAKE_INSTALL_LIBDIR=lib \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-}" \
             -DSCHEMA_VERSIONS=4 \
             -DBUILD_IFCGEOM=OFF \
             -DBUILD_IFCPYTHON=OFF \
