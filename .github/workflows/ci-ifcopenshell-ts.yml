@@ -114,7 +114,9 @@ jobs:
             -DBUILD_IFCPYTHON=OFF \
             -DBUILD_CONVERT=OFF \
             -DBUILD_GEOMSERVER=OFF \
-            -DBUILD_EXAMPLES=OFF
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_CGAL=OFF \
+            -DCOLLADA_SUPPORT=OFF
           cmake --build build --target install --parallel
 
       - name: Configure and install IfcOpenShell core (Windows)
@@ -131,7 +133,9 @@ jobs:
             -DBUILD_IFCPYTHON=OFF `
             -DBUILD_CONVERT=OFF `
             -DBUILD_GEOMSERVER=OFF `
-            -DBUILD_EXAMPLES=OFF
+            -DBUILD_EXAMPLES=OFF `
+            -DWITH_CGAL=OFF `
+            -DCOLLADA_SUPPORT=OFF
           cmake --build build --config Release --target install --parallel
 
       - name: npm ci
