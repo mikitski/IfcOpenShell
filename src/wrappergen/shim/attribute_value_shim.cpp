@@ -238,7 +238,15 @@ attribute_value_variant get_attribute_value_variant(const express::base& instanc
         break;
     case ifcopenshell::Argument_LOGICAL: {
         result.kind = ATTRIBUTE_VALUE_KIND_LOGICAL;
-        boost::logic::tribool value = static_cast<boost::logic::tribool>(raw);
+        // `attribute_value` has both `operator bool()` and a direct
+        // `operator boost::logic::tribool()` (instance_data.h) -- `static_cast<tribool>(raw)`
+        // is genuinely ambiguous between the direct conversion operator and the indirect
+        // bool -> tribool(bool) route, and MSVC and clang tie-break this differently (clang
+        // accepts it, MSVC rejects it with C2440/"ambiguous call to overloaded function" --
+        // found by this PR's Windows CI, the first time this pre-existing line was ever
+        // compiled with MSVC). Call the direct conversion operator explicitly to remove the
+        // ambiguity entirely rather than lean on compiler-specific tie-breaking.
+        boost::logic::tribool value = raw.operator boost::logic::tribool();
         result.logical_value = boost::logic::indeterminate(value) ? 2 : (value ? 1 : 0);
         break;
     }
