@@ -92,6 +92,8 @@ typedef enum ifcopenshell_attribute_value_kind_t {
     IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_STRING,
     IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENUMERATION,
     IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE,
+    IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY,
+    IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE,
 } ifcopenshell_attribute_value_kind_t;
 
 typedef struct ifcopenshell_attribute_value_variant_t {
@@ -101,13 +103,21 @@ typedef struct ifcopenshell_attribute_value_variant_t {
     double double_value;
     char* string_value;
     ifcopenshell_express_base_t* entity_value;
+    struct ifcopenshell_attribute_value_variant_t* aggregate_value;
+    int aggregate_value_count;
 } ifcopenshell_attribute_value_variant_t;
+
+typedef struct ifcopenshell_attribute_value_variant_list_t {
+    ifcopenshell_attribute_value_variant_t* items;
+    int count;
+} ifcopenshell_attribute_value_variant_list_t;
 
 const char* ifcopenshell_last_error_message(void);
 void ifcopenshell_last_error_clear(void);
 void ifcopenshell_string_free(char* value);
 
 void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_value_variant_t value);
+void ifcopenshell_attribute_value_variant_list_free(ifcopenshell_attribute_value_variant_list_t list);
 
 ifcopenshell_exception_t* ifcopenshell_exception_new_with_message(const char* message);
 ifcopenshell_attribute_out_of_range_exception_t* ifcopenshell_attribute_out_of_range_exception_new_with_message(const char* message);
@@ -184,6 +194,13 @@ int ifcopenshell_base_identity(ifcopenshell_express_base_t* handle);
 int ifcopenshell_base_id(ifcopenshell_express_base_t* handle);
 ifcopenshell_attribute_value_variant_t ifcopenshell_base_get_attribute_value_variant(ifcopenshell_express_base_t* handle, int attribute_index);
 void ifcopenshell_base_set_attribute_value_variant(ifcopenshell_express_base_t* handle, int attribute_index, ifcopenshell_attribute_value_variant_t value);
+int ifcopenshell_base_attribute_kind_of(ifcopenshell_express_base_t* handle, int attribute_index);
+int ifcopenshell_base_get_argument_index(ifcopenshell_express_base_t* handle, const char* name);
+char* ifcopenshell_base_attribute_name(ifcopenshell_express_base_t* handle, int attribute_index);
+char* ifcopenshell_base_attribute_type(ifcopenshell_express_base_t* handle, int attribute_index);
+int ifcopenshell_base_get_attribute_category(ifcopenshell_express_base_t* handle, const char* name);
+bool ifcopenshell_base_is_a(ifcopenshell_express_base_t* handle, const char* name);
+ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_values(ifcopenshell_express_base_t* handle);
 ifcopenshell_express_entity_list_t* ifcopenshell_entity_get_inverse(ifcopenshell_express_entity_t* handle, const char* attribute_name);
 ifcopenshell_express_select_t* ifcopenshell_select_new();
 ifcopenshell_express_select_t* ifcopenshell_select_new_with_value(ifcopenshell_express_base_t* value);

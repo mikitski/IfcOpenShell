@@ -1,6 +1,6 @@
 #include <node_api.h>
 
-#include "ifcopenshell_napi_spike_c_api.h"
+#include "ifcopenshell_native_c_api.h"
 
 #include <cstring>
 #include <string>
@@ -703,6 +703,15 @@ napi_value ifcopenshell_attribute_value_variant_to_js(napi_env env, const ifcope
     case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE:
         js_result = wrap_express_base(env, value.entity_value);
         break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY:
+        napi_create_string_utf8(env, value.string_value, NAPI_AUTO_LENGTH, &js_result);
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE:
+        napi_create_array_with_length(env, value.aggregate_value_count, &js_result);
+        for (int index = 0; index < value.aggregate_value_count; ++index) {
+            napi_set_element(env, js_result, index, ifcopenshell_attribute_value_variant_to_js(env, value.aggregate_value[index]));
+        }
+        break;
     default:
         napi_get_null(env, &js_result);
         break;
@@ -774,6 +783,26 @@ ifcopenshell_attribute_value_variant_t ifcopenshell_attribute_value_variant_from
         napi_value prop;
         napi_get_named_property(env, value, "entity_value", &prop);
         result.entity_value = unwrap_express_base(env, prop);
+        break;
+    }
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY: {
+        napi_value prop;
+        napi_get_named_property(env, value, "string_value", &prop);
+        result.string_value = napi_duplicate_js_string(env, prop);
+        break;
+    }
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE: {
+        napi_value prop;
+        napi_get_named_property(env, value, "aggregate_value", &prop);
+        uint32_t length = 0;
+        napi_get_array_length(env, prop, &length);
+        result.aggregate_value_count = static_cast<int>(length);
+        result.aggregate_value = length > 0 ? new ifcopenshell_attribute_value_variant_t[length] : nullptr;
+        for (uint32_t index = 0; index < length; ++index) {
+            napi_value element;
+            napi_get_element(env, prop, index, &element);
+            result.aggregate_value[index] = ifcopenshell_attribute_value_variant_from_js(env, element);
+        }
         break;
     }
     default:
@@ -1860,6 +1889,120 @@ napi_value napi_base_set_attribute_value_variant(napi_env env, napi_callback_inf
     napi_value js_undefined;
     napi_get_undefined(env, &js_undefined);
     return js_undefined;
+}
+
+napi_value napi_base_attribute_kind_of(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    int32_t js_attribute_index = 0;
+    napi_get_value_int32(env, argv[1], &js_attribute_index);
+    int result = ifcopenshell_base_attribute_kind_of(handle, js_attribute_index);
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_int64(env, result, &js_result);
+    return js_result;
+}
+
+napi_value napi_base_get_argument_index(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    std::string js_name = napi_string_value(env, argv[1]);
+    int result = ifcopenshell_base_get_argument_index(handle, js_name.c_str());
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_int64(env, result, &js_result);
+    return js_result;
+}
+
+napi_value napi_base_attribute_name(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    int32_t js_attribute_index = 0;
+    napi_get_value_int32(env, argv[1], &js_attribute_index);
+    char* result = ifcopenshell_base_attribute_name(handle, js_attribute_index);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);
+    ifcopenshell_string_free(result);
+    return js_result;
+}
+
+napi_value napi_base_attribute_type(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    int32_t js_attribute_index = 0;
+    napi_get_value_int32(env, argv[1], &js_attribute_index);
+    char* result = ifcopenshell_base_attribute_type(handle, js_attribute_index);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);
+    ifcopenshell_string_free(result);
+    return js_result;
+}
+
+napi_value napi_base_get_attribute_category(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    std::string js_name = napi_string_value(env, argv[1]);
+    int result = ifcopenshell_base_get_attribute_category(handle, js_name.c_str());
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_int64(env, result, &js_result);
+    return js_result;
+}
+
+napi_value napi_base_is_a(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    std::string js_name = napi_string_value(env, argv[1]);
+    bool result = ifcopenshell_base_is_a(handle, js_name.c_str());
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_get_boolean(env, result, &js_result);
+    return js_result;
+}
+
+napi_value napi_base_get_all_attribute_values(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    ifcopenshell_attribute_value_variant_list_t result = ifcopenshell_base_get_all_attribute_values(handle);
+    if (ifcopenshell_last_error_message() != nullptr) {
+        ifcopenshell_attribute_value_variant_list_free(result);
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_array_with_length(env, result.count, &js_result);
+    for (int index = 0; index < result.count; ++index) {
+        napi_set_element(env, js_result, index, ifcopenshell_attribute_value_variant_to_js(env, result.items[index]));
+    }
+    ifcopenshell_attribute_value_variant_list_free(result);
+    return js_result;
 }
 
 napi_value napi_entity_get_inverse(napi_env env, napi_callback_info info) {
@@ -4056,6 +4199,41 @@ napi_value Init(napi_env env, napi_value exports) {
     }
     {
         napi_value fn;
+        napi_create_function(env, "base_attribute_kind_of", NAPI_AUTO_LENGTH, napi_base_attribute_kind_of, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_attribute_kind_of", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_get_argument_index", NAPI_AUTO_LENGTH, napi_base_get_argument_index, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_get_argument_index", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_attribute_name", NAPI_AUTO_LENGTH, napi_base_attribute_name, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_attribute_name", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_attribute_type", NAPI_AUTO_LENGTH, napi_base_attribute_type, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_attribute_type", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_get_attribute_category", NAPI_AUTO_LENGTH, napi_base_get_attribute_category, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_get_attribute_category", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_is_a", NAPI_AUTO_LENGTH, napi_base_is_a, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_is_a", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_get_all_attribute_values", NAPI_AUTO_LENGTH, napi_base_get_all_attribute_values, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_get_all_attribute_values", fn);
+    }
+    {
+        napi_value fn;
         napi_create_function(env, "entity_get_inverse", NAPI_AUTO_LENGTH, napi_entity_get_inverse, nullptr, &fn);
         napi_set_named_property(env, exports, "entity_get_inverse", fn);
     }
@@ -4843,6 +5021,16 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value value;
         napi_create_int32(env, IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE, &value);
         napi_set_named_property(env, exports, "ENTITY_INSTANCE", value);
+    }
+    {
+        napi_value value;
+        napi_create_int32(env, IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY, &value);
+        napi_set_named_property(env, exports, "BINARY", value);
+    }
+    {
+        napi_value value;
+        napi_create_int32(env, IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE, &value);
+        napi_set_named_property(env, exports, "AGGREGATE", value);
     }
     return exports;
 }

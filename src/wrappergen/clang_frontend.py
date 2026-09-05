@@ -330,11 +330,45 @@ def _handle_kind(cpp_name: str, config: WrapperConfig) -> str:
     return config.class_handle_kinds.get(cpp_name, config.default_class_handle_kind)
 
 
+def _exact_pointee_class_key(clang_type, class_models_by_cpp: dict[str, ClassModel]) -> str | None:
+    """Resolves a pointer/reference clang `Type` to its pointee's exact, fully-qualified
+    class name via the cursor graph (`Type.get_pointee().get_declaration()`), bypassing
+    `resolve_cpp_type_key`'s bare-leaf-name string matching entirely.
+
+    Needed because that string-based fallback is genuinely ambiguous whenever two
+    selected classes share a leaf name in different namespaces -- exactly the
+    `express::entity` / `ifcopenshell::entity` collision `class_names` already works
+    around for *py_name* assignment (research/06-wrappergen-spike-results.md), but which
+    silently drops any *unqualified* pointer/reference to either one instead (e.g.
+    `ifcopenshell::declaration::as_entity() const -> const entity*`, spelled `entity`
+    from inside the `ifcopenshell` namespace, has 2 leaf-name matches so
+    `resolve_cpp_type_key` returns `None` and `_resolve_return_adapter` drops the whole
+    method) -- a real functional gap in the schema-introspection surface (no way to
+    safely downcast a generic `declaration` handle to `entity`), found while building
+    Phase 1's full primitive-binding config, not spike scope.
+    """
+    if clang_type is None:
+        return None
+    cindex = _require_clang()
+    pointee_type = clang_type.get_pointee()
+    if pointee_type is None or pointee_type.kind == cindex.TypeKind.INVALID:
+        return None
+    declaration_cursor = pointee_type.get_declaration()
+    if declaration_cursor is None or declaration_cursor.kind == cindex.CursorKind.NO_DECL_FOUND:
+        return None
+    qualified_name = _qualified_name(declaration_cursor)
+    if not qualified_name:
+        return None
+    normalized = normalize_cpp_type(qualified_name)
+    return normalized if normalized in class_models_by_cpp else None
+
+
 def _resolve_parameter_adapter(
     cpp_type: str,
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
     class_models_by_cpp: dict[str, ClassModel] | None = None,
+    clang_type=None,
 ) -> str | None:
     canonical = normalize_cpp_type(cpp_type)
     if canonical in scalar_adapters:
@@ -350,6 +384,9 @@ def _resolve_parameter_adapter(
     # `_parameter_c_type`, both Python-extension parameter branches already handle
     # `is_handle_adapter`) -- this was purely a discovery-side gap.
     if class_models_by_cpp is not None:
+        exact = _exact_pointee_class_key(clang_type, class_models_by_cpp)
+        if exact is not None:
+            return handle_adapter_name(exact)
         pointee = resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
         if pointee is not None:
             return handle_adapter_name(pointee)
@@ -369,6 +406,7 @@ def _resolve_return_adapter(
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
     class_models_by_cpp: dict[str, ClassModel],
+    clang_type=None,
 ) -> str | None:
     canonical = normalize_cpp_type(cpp_type)
     if canonical in scalar_adapters:
@@ -381,7 +419,8 @@ def _resolve_return_adapter(
         sequence_key = resolve_cpp_type_key(vector_inner, set(class_models_by_cpp))
         if sequence_key is not None:
             return sequence_adapter_name(sequence_key)
-    pointee = resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
+    exact = _exact_pointee_class_key(clang_type, class_models_by_cpp)
+    pointee = exact if exact is not None else resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
     if pointee is not None:
         target = class_models_by_cpp[pointee]
         if canonical.endswith("*") and target.handle_kind == "shared_ptr":
@@ -426,7 +465,7 @@ def _build_parameter_models(
     parameter_models: list[ParameterModel] = []
     for index, parameter in enumerate(cursor.get_arguments()):
         adapter = _resolve_parameter_adapter(
-            parameter.type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp
+            parameter.type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp, clang_type=parameter.type
         )
         if adapter is None:
             return None
@@ -585,7 +624,7 @@ def _discover_methods(
         if _matches_ignore(qualified_name, config.ignore.methods):
             continue
         return_adapter = _resolve_return_adapter(
-            child.result_type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp
+            child.result_type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp, clang_type=child.result_type
         )
         if return_adapter is None:
             continue

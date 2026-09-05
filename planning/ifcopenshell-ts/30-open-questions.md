@@ -62,6 +62,18 @@ are the project's working assumptions going in, not blanks to fill.
 11. **Version sync vs. independent semver: sync to root `VERSION` for the 0.x line**, with the
     option to break out to independent semver at a stable 1.0. See `50-repo-and-tooling.md` §7.
 
+## A2. Resolved by real code during Phase 1 (empirical answers, not desk decisions)
+
+12. **"Fresh wrapper per access" question — resolved: fresh wrapper, confirmed.** The Phase 1
+    primitive-binding chunk answered this empirically (a real `.node` addon, real Node process,
+    `!==` on two calls to the same accessor on the same handle) rather than by inspection or
+    assumption. N-API mints a new JS wrapper object on every handle-returning call — never a stable
+    identity per native pointer — the same shape Python's own SWIG binding already has. Phase 2's
+    Proxy design (`10-architecture.md` §6) now has a confirmed, non-hypothetical requirement: an
+    identity-keyed shared-state registry (`file_mixin`/`entity_instance_mixin`'s pattern, ported
+    close to verbatim), not an optional simplification. Full writeup, including the code-level
+    explanation of why, in `research/07-fresh-wrapper-per-access.md`.
+
 ## C. Still genuinely open — needs a spike/code, or is post-v1
 
 These aren't desk decisions — they need a short technical spike, real code, or don't block anything
@@ -69,16 +81,6 @@ yet. Grouped by what they block.
 
 ### Blocking Phase 0/1 (native-addon build)
 
-- **"Fresh wrapper per access" question** (`research/01` §1): does the chosen N-API approach hand
-  back a stable JS object per C++ pointer, or a new one per property access? Determines whether the
-  TS core layer needs `file_mixin`'s identity-keyed shared-state registry trick or can be simpler.
-  Resolve via a short spike at the start of Phase 1, not by assumption — this is exactly the kind
-  of thing the item-1 validation spike should answer as a side effect. **Higher-stakes than
-  originally scoped** (flagged by `plan-eng-review`'s outside-voice pass): `10-architecture.md` §6's
-  entire attribute-access design (the Proxy, its equality semantics, the differential
-  cache-correctness test) assumes stable per-pointer identity and needs rework if the spike finds
-  otherwise — this blocks starting Phase 2 in earnest, not just an implementation detail to settle
-  along the way.
 - Prebuilt-binary distribution mechanism for the addon (`prebuildify`/`node-gyp-build` vs. a
   postinstall fetch script mirroring the Python side's S3-zip download) — `50-repo-and-tooling.md`
   §3. Low-stakes, can decide during Phase 0 itself rather than needing a pre-decision.

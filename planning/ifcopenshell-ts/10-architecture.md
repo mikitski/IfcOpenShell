@@ -180,19 +180,23 @@ should target") apply equally to an N-API `ArrayBuffer`/`TypedArray` return — 
 zero-copy bulk transfer instead of per-vertex calls, regardless of which native-binding technology
 is in play. Full design deferred to Phase G1 per `20-roadmap.md`.
 
-## 6. Attribute access design (confirmed *choice*, implementation pending a still-open spike):
-Proxy over primitives + generated per-schema `.d.ts`
+## 6. Attribute access design (confirmed choice, identity question now resolved): Proxy over
+primitives + generated per-schema `.d.ts`, backed by an identity-keyed registry
 
 Resolved by the project owner, 2026-09-03 (`00-overview.md` §2), from the three options
-`30-open-questions.md` item 4 originally posed — **this section describes the chosen design**, not
-a fully closed implementation. Flagged by `plan-eng-review`'s outside-voice pass: the design below
-is written assuming stable object identity per native pointer, but `30-open-questions.md` §C still
-lists "fresh wrapper per access vs. stable identity per pointer" as unresolved, pending the Phase 1
-spike (`10-architecture.md` §3). **If the spike finds fresh-wrapper-per-access instead of stable
-identity, the Proxy/cache design below, its equality semantics, and the differential
-cache-correctness test in `40-testing-strategy.md` §5.5 need rework** — this section is not a
-green light to build against without that spike result confirmed first. Two independent halves,
-deliberately decoupled:
+`30-open-questions.md` item 4 originally posed. **Update, Phase 1 primitive-binding chunk**: the
+"fresh wrapper per access vs. stable identity per pointer" question this section originally flagged
+as blocking is now empirically resolved — **fresh wrapper per access, confirmed** (real `.node`
+addon, real Node process, `!==` on two calls to the same accessor on the same handle; see
+`research/07-fresh-wrapper-per-access.md` for the test and the code-level explanation of why). This
+is the same shape Python's own SWIG binding already has, which is exactly why `file_mixin`/
+`entity_instance_mixin` already carry an identity-keyed registry (`research/01` §1) — Phase 2 needs
+to port that pattern close to verbatim, not simplify it away. Concretely: `EntityInstance`'s
+equality (`__eq__`) must compare via `identity()` (a stable native-side value), never via `===` on
+two JS wrapper objects; any per-instance mutable state Phase 2's mixin layer wants to attach
+(`Transaction`/undo-redo history, etc.) needs a `Map<nativeIdentity, State>`-shaped registry, not a
+`WeakMap` keyed on the wrapper object (which would silently fragment two wrappers of the same
+instance into two unrelated entries). Two independent halves, deliberately decoupled:
 
 **Runtime half — a `Proxy`, not per-class generated code.** `EntityInstance` (the TS port of
 `entity_instance_mixin`, `20-roadmap.md` Phase 2) wraps every native handle in a JS `Proxy` whose

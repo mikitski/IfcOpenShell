@@ -8,6 +8,7 @@ export type IfcopenshellAttributeValueVariantT = {
     double_value?: unknown;
     string_value?: unknown;
     entity_value?: unknown;
+    aggregate_value?: IfcopenshellAttributeValueVariantT[];
 };
 
 export class exception {
@@ -478,6 +479,34 @@ export class entity_instance {
 
     set_attribute_value(attribute_index: number, value: IfcopenshellAttributeValueVariantT): void {
         native.base_set_attribute_value_variant(this._handle, attribute_index, value);
+    }
+
+    attribute_kind_of(attribute_index: number): number {
+        return native.base_attribute_kind_of(this._handle, attribute_index);
+    }
+
+    get_argument_index(name: string): number {
+        return native.base_get_argument_index(this._handle, name);
+    }
+
+    attribute_name(attribute_index: number): string {
+        return native.base_attribute_name(this._handle, attribute_index);
+    }
+
+    attribute_type(attribute_index: number): string {
+        return native.base_attribute_type(this._handle, attribute_index);
+    }
+
+    get_attribute_category(name: string): number {
+        return native.base_get_attribute_category(this._handle, name);
+    }
+
+    is_a(name: string): boolean {
+        return native.base_is_a(this._handle, name);
+    }
+
+    get_all_attribute_values(): unknown {
+        return native.base_get_all_attribute_values(this._handle);
     }
 
 }

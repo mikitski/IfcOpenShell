@@ -166,3 +166,58 @@ at all, before assuming it's already settled).
 
 **Depends on / blocked by:** Should be resolved before Phase 0's first public prebuilt-binary
 publish; does not block earlier planning or Phase 0/1 engineering work.
+
+---
+
+### Phase 1 primitive binding: real, disclosed gaps left for follow-up
+
+**What:** The Phase 1 primitive-binding PR (`file`/`entity_instance` primitives + full
+schema-introspection class set, generated via `src/wrappergen/napi_binding.py`) intentionally ships
+a smaller-but-complete slice rather than force every listed primitive in at lower quality. Specific,
+disclosed gaps:
+
+1. **Static-method discovery is entirely missing from `wrappergen`.** `clang_frontend.py`'s
+   `_discover_methods` skips every `is_static_method()` cursor unconditionally (mirrors how
+   constructors are discovered, but static factory-style methods get no equivalent path at all).
+   Concretely blocks: `ifcopenshell::file::traverse`/`traverse_breadth_first` (both static, listed
+   in `20-roadmap.md` Phase 1's required primitive list) and `ifcopenshell::logger::root()`. Fix
+   shape: a new `kind="static_method"` `CallableModel`, emitted like `"free_function"` but with no
+   leading `handle` self-argument at the C-API/N-API layer.
+2. **Several `file`-level primitives only exist as SWIG `%extend` glue, not real C++ methods, and
+   are not yet shimmed:** `file_pointer()` (identity key, needed by Phase 2's `file_mixin.post_init`
+   registry per `research/07-fresh-wrapper-per-access.md`), `to_string()`/`from_string()` (whole-file
+   SPF serialization), `_write(fn)` (atomic file write), `entity_names()`, `schema_identifier()`,
+   `storage_mode()`. Same pattern as the entity_instance primitives this PR *did* add
+   (`attribute_value_shim.h`/`.cpp`'s `get_argument_index`/`attribute_name`/`attribute_type`/
+   `get_attribute_category`/`is_a`) — bounded, one-function-at-a-time follow-up work, not a design
+   gap.
+3. **`get_attribute_names()`/`get_inverse_attribute_names()` bulk fetch not implemented** (would need
+   a third adapter kind, "sequence of scalar," alongside this PR's new `sequence_of_variant:`
+   adapter — the *capability* to enumerate attribute names one at a time already exists via
+   `entity.attribute_count()` + `attribute.name()`, just not as one bulk call).
+4. **TS facade doesn't support C++ default-argument parameters** (unlike the existing Python facade,
+   which already does via `default_python_value`) — a class constructor whose shortest usable arity
+   omits an optional trailing parameter (e.g. `ifcopenshell::file`'s trailing `logger&`, which has no
+   way to be constructed via the primitive layer at all, since `logger` has a deleted copy/move
+   constructor) is only exposed as a raw flat native function
+   (`native.file_new()`), not as a class-level convenience method. Concrete fix: mirror
+   `_python_default_value` for TS syntax and emit one method per arity (or a single method with
+   real TS default parameters), same technique the Python facade already uses.
+5. **Recursion-depth guard missing** in the new recursive variant<->JS/C-ABI conversion helpers
+   (`emit.py`'s `_emit_variant_helper_functions`/`_emit_napi_variant_helpers`) — a maliciously deep
+   nested JS array passed into `set_attribute_value` could exhaust the call stack. Not a concern for
+   real EXPRESS schema usage (aggregates never nest past 2 levels), but worth a depth cap if this
+   primitive layer is ever exposed to less-trusted input than "generated Phase 2 code."
+
+**Why:** Each is real, understood, and bounded — the kind of thing worth landing as its own small,
+reviewable PR rather than bundling into an already-large primitive-binding PR. None blocks Phase 1's
+actual exit criterion (create an `IfcWall`, set/get every attribute-type category once, read it back
+via schema introspection — verified end-to-end, including the previously-missing BINARY and
+AGGREGATE (1- and 2-level nested) dispatch cases).
+
+**Context:** See the Phase 1 PR description and `planning/ifcopenshell-ts/research/07-fresh-wrapper-per-access.md`
+for the full writeup, including the empirically-verified answer to the "fresh wrapper per access"
+question (confirmed: fresh JS wrapper per accessor call, not stable per-pointer identity — Phase 2's
+Proxy design needs the identity-keyed registry it was written anticipating it might not need).
+
+**Depends on / blocked by:** None block each other; pick up independently as needed.

@@ -1,4 +1,4 @@
-#include "ifcopenshell_napi_spike_c_api.h"
+#include "ifcopenshell_native_c_api.h"
 
 #include "argument_type.h"
 #include "attribute_value_shim.h"
@@ -226,6 +226,16 @@ ifcopenshell_attribute_value_variant_t ifcopenshell_attribute_value_variant_from
     case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE:
         result.entity_value = new ifcopenshell_express_base_t{ owner, native.entity_value };
         break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_BINARY:
+        result.string_value = duplicate_string(native.string_value);
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_AGGREGATE:
+        result.aggregate_value_count = static_cast<int>(native.aggregate_value.size());
+        result.aggregate_value = result.aggregate_value_count > 0 ? new ifcopenshell_attribute_value_variant_t[static_cast<size_t>(result.aggregate_value_count)] : nullptr;
+        for (int index = 0; index < result.aggregate_value_count; ++index) {
+            result.aggregate_value[index] = ifcopenshell_attribute_value_variant_from_native(native.aggregate_value[static_cast<size_t>(index)], owner);
+        }
+        break;
     default:
         break;
     }
@@ -266,6 +276,17 @@ ifcopenshell::wrappergen::attribute_value_variant ifcopenshell_attribute_value_v
             result.entity_value = value.entity_value->value;
         }
         break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY:
+        if (value.string_value != nullptr) {
+            result.string_value = value.string_value;
+        }
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE:
+        result.aggregate_value.reserve(static_cast<size_t>(value.aggregate_value_count));
+        for (int index = 0; index < value.aggregate_value_count; ++index) {
+            result.aggregate_value.push_back(ifcopenshell_attribute_value_variant_to_native(value.aggregate_value[index]));
+        }
+        break;
     default:
         break;
     }
@@ -294,9 +315,25 @@ void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_v
     case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENUMERATION:
         ifcopenshell_string_free(value.string_value);
         break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BINARY:
+        ifcopenshell_string_free(value.string_value);
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_AGGREGATE:
+        for (int index = 0; index < value.aggregate_value_count; ++index) {
+            ifcopenshell_attribute_value_variant_free_contents(value.aggregate_value[index]);
+        }
+        delete[] value.aggregate_value;
+        break;
     default:
         break;
     }
+}
+
+void ifcopenshell_attribute_value_variant_list_free(ifcopenshell_attribute_value_variant_list_t list) {
+    for (int index = 0; index < list.count; ++index) {
+        ifcopenshell_attribute_value_variant_free_contents(list.items[index]);
+    }
+    delete[] list.items;
 }
 
 ifcopenshell_exception_t* ifcopenshell_exception_new_with_message(const char* message) {
@@ -1378,6 +1415,106 @@ void ifcopenshell_base_set_attribute_value_variant(ifcopenshell_express_base_t* 
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return;
+    }
+}
+
+int ifcopenshell_base_attribute_kind_of(ifcopenshell_express_base_t* handle, int attribute_index) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        return ifcopenshell::wrappergen::attribute_kind_of(handle->value, attribute_index);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return 0;
+    }
+}
+
+int ifcopenshell_base_get_argument_index(ifcopenshell_express_base_t* handle, const char* name) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        return ifcopenshell::wrappergen::get_argument_index(handle->value, std::string(name ? name : ""));
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return 0;
+    }
+}
+
+char* ifcopenshell_base_attribute_name(ifcopenshell_express_base_t* handle, int attribute_index) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::get_attribute_name(handle->value, attribute_index);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_base_attribute_type(ifcopenshell_express_base_t* handle, int attribute_index) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::get_attribute_type_name(handle->value, attribute_index);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+int ifcopenshell_base_get_attribute_category(ifcopenshell_express_base_t* handle, const char* name) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        return ifcopenshell::wrappergen::get_attribute_category(handle->value, std::string(name ? name : ""));
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return 0;
+    }
+}
+
+bool ifcopenshell_base_is_a(ifcopenshell_express_base_t* handle, const char* name) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        return ifcopenshell::wrappergen::is_a(handle->value, std::string(name ? name : ""));
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return 0;
+    }
+}
+
+ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_values(ifcopenshell_express_base_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = ifcopenshell::wrappergen::get_all_attribute_values(handle->value);
+        ifcopenshell_attribute_value_variant_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new ifcopenshell_attribute_value_variant_t[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = ifcopenshell_attribute_value_variant_from_native(native_result[static_cast<size_t>(index)], handle->owner);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
     }
 }
 
