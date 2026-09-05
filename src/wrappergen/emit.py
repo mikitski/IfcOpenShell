@@ -545,7 +545,9 @@ def _emit_variant_helper_functions(lines: list[str], model: ModuleModel) -> None
         from_native = _variant_from_native_name(variant_model)
         to_native = _variant_to_native_name(variant_model)
         owner_case = _variant_owner_case(variant_model, model)
-        owner_cpp_name = _class_index(model)[owner_case.handle_target].owner_cpp_name if owner_case is not None else None
+        owner_cpp_name = (
+            _class_index(model)[owner_case.handle_target].owner_cpp_name if owner_case is not None else None
+        )
         owner_parameter = f", std::shared_ptr<{owner_cpp_name}> owner" if owner_cpp_name is not None else ""
         owner_argument = ", owner" if owner_cpp_name is not None else ""
 
@@ -601,7 +603,11 @@ def _emit_variant_helper_functions(lines: list[str], model: ModuleModel) -> None
             lines.append(f"    case {case.kind_c_name}:")
             if case.field_kind == "handle":
                 target = _class_index(model)[case.handle_target]
-                deref = f"*value.{case.field}->value" if target.handle_kind == "shared_ptr" else f"value.{case.field}->value"
+                deref = (
+                    f"*value.{case.field}->value"
+                    if target.handle_kind == "shared_ptr"
+                    else f"value.{case.field}->value"
+                )
                 lines.append(f"        if (value.{case.field} != nullptr) {{")
                 lines.append(f"            result.{case.field} = {deref};")
                 lines.append("        }")
@@ -1462,7 +1468,9 @@ def _emit_napi_variant_helpers(lines: list[str], model: ModuleModel, class_model
             elif case.field_kind == "sequence":
                 lines.append(f"        napi_create_array_with_length(env, value.{case.field}_count, &js_result);")
                 lines.append(f"        for (int index = 0; index < value.{case.field}_count; ++index) {{")
-                lines.append(f"            napi_set_element(env, js_result, index, {to_js}(env, value.{case.field}[index]));")
+                lines.append(
+                    f"            napi_set_element(env, js_result, index, {to_js}(env, value.{case.field}[index]));"
+                )
                 lines.append("        }")
             elif case.kind_name == "BOOL":
                 lines.append(f"        napi_get_boolean(env, value.{case.field} != 0, &js_result);")
@@ -1511,9 +1519,7 @@ def _emit_napi_variant_helpers(lines: list[str], model: ModuleModel, class_model
                 lines.append("        uint32_t length = 0;")
                 lines.append("        napi_get_array_length(env, prop, &length);")
                 lines.append(f"        result.{case.field}_count = static_cast<int>(length);")
-                lines.append(
-                    f"        result.{case.field} = length > 0 ? new {c_type}[length] : nullptr;"
-                )
+                lines.append(f"        result.{case.field} = length > 0 ? new {c_type}[length] : nullptr;")
                 lines.append("        for (uint32_t index = 0; index < length; ++index) {")
                 lines.append("            napi_value element;")
                 lines.append("            napi_get_element(env, prop, index, &element);")

@@ -284,7 +284,9 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
         "set_attribute_value_variant",
         [
             index_parameter,
-            ParameterModel(name="value", cpp_name="value", cpp_type=variant_adapter.cpp_type, adapter=variant_adapter_name),
+            ParameterModel(
+                name="value", cpp_name="value", cpp_type=variant_adapter.cpp_type, adapter=variant_adapter_name
+            ),
         ],
     )
     attribute_kind_of = _free_function(
