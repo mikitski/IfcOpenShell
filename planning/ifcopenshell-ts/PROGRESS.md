@@ -14,9 +14,15 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-🔄 Phase 1's real primitive binding surface dispatched, working in `ts/phase-1-primitive-binding`
-off `v0.9.0` (`a8b2a7517`). Also: a small docs-only tracker-sync PR (#4) is in flight, unrelated to
-this work.
+✅ Phase 1's real primitive binding surface landed (squash-merged to `v0.9.0` as `bf11a824e`).
+The implementation agent's session died mid-flight to an unrelated OAuth token revocation right
+after opening the PR (transcript unrecoverable) — I completed the review and all CI-fix iteration
+myself directly from the diff. Found and fixed 4 real issues along the way: Black formatting, a
+diagnostic-pipeline path bug, an MSVC-vs-clang ambiguous-overload compile error (tribool
+conversion), and an `IFC_PARSE_API`/dllimport linkage bug (LNK2019 on Windows only, silent on
+Unix). Phase 1 is now complete except async variants, native memory accounting, and ASAN/fuzz CI
+(3 remaining chunks) — Phase 2 is unblocked, with a confirmed identity-registry requirement from
+the fresh-wrapper-per-access finding. Next chunk not yet dispatched.
 
 ## Operational note: worktree isolation workaround
 
@@ -51,7 +57,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
 | `wrappergen` validation spike (generated vs. hand-written decision) | ✅ | [#3](https://github.com/mikitski/IfcOpenShell/pull/3) | Landed `a8b2a7517` — **PASS**: extend wrappergen. 5 bugs found+fixed, incl. a confirmed use-after-free (new "borrowed" handle-kind). See `research/06-wrappergen-spike-results.md`. |
-| `file`/`entity_instance` primitives + schema introspection | 🔄 | — | dispatched, `ts/phase-1-primitive-binding` |
+| `file`/`entity_instance` primitives + schema introspection | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Landed `bf11a824e`. Completed the variant dispatch (BINARY+AGGREGATE), full schema-introspection class set, wired into `src/ifcopenshell-ts`'s real build. **Empirically resolved fresh-wrapper-per-access: fresh wrapper, confirmed** — see `research/07-fresh-wrapper-per-access.md`. 4 real bugs found+fixed by the orchestrator during review/CI (agent's session died mid-task to an unrelated auth error): Black formatting, a CI diagnostic-path bug, an MSVC tribool-conversion ambiguity, an `IFC_PARSE_API`/dllimport linkage bug. |
 | Async primitive variants (`napi_create_async_work`) | 🔲 | — | — |
 | Native memory accounting (`napi_adjust_external_memory`) | 🔲 | — | — |
 | ASAN/UBSan CI + fuzz testing of parse primitives | 🔲 | — | — |
