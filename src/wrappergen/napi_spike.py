@@ -26,7 +26,12 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from wrappergen.clang_frontend import build_module_model
     from wrappergen.config import CompilationConfig, IgnoreConfig, WrapperConfig
-    from wrappergen.emit import emit_c_api_header, emit_c_api_implementation, emit_napi_extension, emit_typescript_facade
+    from wrappergen.emit import (
+        emit_c_api_header,
+        emit_c_api_implementation,
+        emit_napi_extension,
+        emit_typescript_facade,
+    )
     from wrappergen.model import CallableModel, ParameterModel, VariantAdapterModel, VariantCaseModel
 else:
     from .clang_frontend import build_module_model
@@ -257,7 +262,9 @@ def _inject_attribute_value_accessors(model, variant_adapter: VariantAdapterMode
         return_adapter="void",
         parameters=[
             ParameterModel(name="attribute_index", cpp_name="attribute_index", cpp_type="int", adapter="integer"),
-            ParameterModel(name="value", cpp_name="value", cpp_type=variant_adapter.cpp_type, adapter=variant_adapter_name),
+            ParameterModel(
+                name="value", cpp_name="value", cpp_type=variant_adapter.cpp_type, adapter=variant_adapter_name
+            ),
         ],
     )
     entity_instance.callables.extend([get_value, set_value])

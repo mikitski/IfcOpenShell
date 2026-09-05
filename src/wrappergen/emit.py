@@ -237,7 +237,9 @@ def _call_expression(variant: CallableVariant, model: ModuleModel) -> str:
         # rather than being an actual C++ method of `variant.owner` -- see
         # `research/06-wrappergen-spike-results.md` for why the real attribute-value accessors
         # can't be discovered as ordinary methods.
-        self_expression = "*handle->value" if variant.owner.handle_kind in {"shared_ptr", "borrowed"} else "handle->value"
+        self_expression = (
+            "*handle->value" if variant.owner.handle_kind in {"shared_ptr", "borrowed"} else "handle->value"
+        )
         all_arguments = ", ".join([self_expression, arguments]) if arguments else self_expression
         return f"{variant.callable.cpp_name}({all_arguments})"
     access = "handle->value->" if variant.owner.handle_kind in {"shared_ptr", "borrowed"} else "handle->value."
@@ -367,11 +369,17 @@ def _emit_variant_parameter_conversion(lines: list[str], parameter: ParameterMod
     native_type = variant_adapter_target(parameter.adapter)
     local_name = f"{parameter.name}_native"
     lines.append(f"        {native_type} {local_name};")
-    lines.append(f"        {local_name}.{variant_model.kind_field} = static_cast<decltype({local_name}.{variant_model.kind_field})>({parameter.name}.{variant_model.kind_field});")
+    lines.append(
+        f"        {local_name}.{variant_model.kind_field} = static_cast<decltype({local_name}.{variant_model.kind_field})>({parameter.name}.{variant_model.kind_field});"
+    )
     for case in variant_model.cases:
         if case.field_kind == "handle":
             target = _class_index(model)[case.handle_target]
-            deref = f"*{parameter.name}.{case.field}->value" if target.handle_kind == "shared_ptr" else f"{parameter.name}.{case.field}->value"
+            deref = (
+                f"*{parameter.name}.{case.field}->value"
+                if target.handle_kind == "shared_ptr"
+                else f"{parameter.name}.{case.field}->value"
+            )
             lines.append(f"        if ({parameter.name}.{case.field} != nullptr) {{")
             lines.append(f"            {local_name}.{case.field} = {deref};")
             lines.append("        }")
@@ -737,7 +745,9 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
         )
         if class_model.handle_kind == "borrowed":
             # `handle->value.at(index)` is already the raw pointer this class wraps.
-            lines.append(f"        return new {_class_c_type(class_model, model)}{{ handle->value.at(static_cast<size_t>(index)) }};")
+            lines.append(
+                f"        return new {_class_c_type(class_model, model)}{{ handle->value.at(static_cast<size_t>(index)) }};"
+            )
         elif class_model.handle_kind == "shared_ptr":
             lines.append(
                 f"        auto item_value = std::make_shared<{class_model.cpp_name}>(handle->value.at(static_cast<size_t>(index)));"
@@ -1198,7 +1208,9 @@ def emit_napi_extension(model: ModuleModel) -> str:
         argument_index = 0
         call_arguments: list[str] = []
         if variant.callable.kind in {"method", "free_function"}:
-            lines.append(f"    auto* handle = {_napi_unwrap_name(class_models[variant.owner.cpp_name])}(env, argv[{argument_index}]);")
+            lines.append(
+                f"    auto* handle = {_napi_unwrap_name(class_models[variant.owner.cpp_name])}(env, argv[{argument_index}]);"
+            )
             call_arguments.append("handle")
             argument_index += 1
         for parameter in variant.parameters:
@@ -1234,7 +1246,9 @@ def emit_napi_extension(model: ModuleModel) -> str:
                 lines.append(f'    napi_get_named_property(env, argv[{argument_index}], "kind", &{js_name}_kind_prop);')
                 lines.append(f"    int32_t {js_name}_kind = 0;")
                 lines.append(f"    napi_get_value_int32(env, {js_name}_kind_prop, &{js_name}_kind);")
-                lines.append(f"    {js_name}.{variant_model.kind_field} = static_cast<decltype({js_name}.{variant_model.kind_field})>({js_name}_kind);")
+                lines.append(
+                    f"    {js_name}.{variant_model.kind_field} = static_cast<decltype({js_name}.{variant_model.kind_field})>({js_name}_kind);"
+                )
                 # Owns the backing storage for any string-typed case below -- `.c_str()`
                 # on a *temporary* `std::string` (e.g. inline in the assignment) dangles
                 # the instant that temporary is destroyed at the end of the full
@@ -1248,13 +1262,19 @@ def emit_napi_extension(model: ModuleModel) -> str:
                     prop_name = normalize_identifier(case.field)
                     lines.append(f"    if ({js_name}_kind == {case.kind_c_name}) {{")
                     lines.append(f"        napi_value {js_name}_prop;")
-                    lines.append(f'        napi_get_named_property(env, argv[{argument_index}], "{prop_name}", &{js_name}_prop);')
+                    lines.append(
+                        f'        napi_get_named_property(env, argv[{argument_index}], "{prop_name}", &{js_name}_prop);'
+                    )
                     if case.field_kind == "string":
                         lines.append(f"        {js_name}_string_storage = napi_string_value(env, {js_name}_prop);")
-                        lines.append(f"        {js_name}.{case.field} = const_cast<char*>({js_name}_string_storage.c_str());")
+                        lines.append(
+                            f"        {js_name}.{case.field} = const_cast<char*>({js_name}_string_storage.c_str());"
+                        )
                     elif case.field_kind == "handle":
                         target = class_models[case.handle_target]
-                        lines.append(f"        {js_name}.{case.field} = {_napi_unwrap_name(target)}(env, {js_name}_prop);")
+                        lines.append(
+                            f"        {js_name}.{case.field} = {_napi_unwrap_name(target)}(env, {js_name}_prop);"
+                        )
                     elif case.field_kind == "double":
                         lines.append(f"        double {js_name}_value = 0;")
                         lines.append(f"        napi_get_value_double(env, {js_name}_prop, &{js_name}_value);")
@@ -1354,7 +1374,9 @@ def emit_napi_extension(model: ModuleModel) -> str:
                     continue
                 lines.append(f"    case {case.kind_c_name}:")
                 if case.field_kind == "string":
-                    lines.append(f"        napi_create_string_utf8(env, result.{case.field}, NAPI_AUTO_LENGTH, &js_result);")
+                    lines.append(
+                        f"        napi_create_string_utf8(env, result.{case.field}, NAPI_AUTO_LENGTH, &js_result);"
+                    )
                 elif case.field_kind == "handle":
                     target = class_models[case.handle_target]
                     lines.append(f"        js_result = {_napi_wrap_name(target)}(env, result.{case.field});")
@@ -1371,16 +1393,20 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    }")
             lines.append("    return js_result;")
         else:
-            raise RuntimeError(f"Unsupported return adapter in N-API extension emitter: {variant.callable.return_adapter}")
+            raise RuntimeError(
+                f"Unsupported return adapter in N-API extension emitter: {variant.callable.return_adapter}"
+            )
         lines.append("}")
         lines.append("")
     lines.append("}  // namespace")
     lines.append("")
     lines.append("napi_value Init(napi_env env, napi_value exports) {")
     for variant in _all_variants(model):
-        lines.append(f'    {{')
+        lines.append(f"    {{")
         lines.append("        napi_value fn;")
-        lines.append(f'        napi_create_function(env, "{variant.api_name}", NAPI_AUTO_LENGTH, napi_{variant.api_name}, nullptr, &fn);')
+        lines.append(
+            f'        napi_create_function(env, "{variant.api_name}", NAPI_AUTO_LENGTH, napi_{variant.api_name}, nullptr, &fn);'
+        )
         lines.append(f'        napi_set_named_property(env, exports, "{variant.api_name}", fn);')
         lines.append("    }")
     for enum_model in model.enums:
@@ -1441,7 +1467,9 @@ def _ts_type_for_return(adapter: str, model: ModuleModel) -> str:
         # whatever JS type the attribute's runtime kind actually is, not a wrapper object.
         variant_model = _variant_model(adapter, model)
         handle_case_types = {
-            _class_index(model)[case.handle_target].py_name for case in variant_model.cases if case.field_kind == "handle"
+            _class_index(model)[case.handle_target].py_name
+            for case in variant_model.cases
+            if case.field_kind == "handle"
         }
         alternatives = ["string", "number", "boolean", *sorted(handle_case_types), "null"]
         return " | ".join(alternatives)
@@ -1476,7 +1504,8 @@ def emit_typescript_facade(model: ModuleModel) -> str:
         for callable_model in class_model.callables:
             full_variant = _full_variant(class_model, callable_model)
             parameters = ", ".join(
-                f"{parameter.name}: {_ts_type_for_parameter(parameter, model)}" for parameter in callable_model.parameters
+                f"{parameter.name}: {_ts_type_for_parameter(parameter, model)}"
+                for parameter in callable_model.parameters
             )
             call_arguments = ", ".join(parameter.name for parameter in callable_model.parameters)
             if callable_model.kind == "constructor":
@@ -1495,7 +1524,9 @@ def emit_typescript_facade(model: ModuleModel) -> str:
                 elif is_handle_adapter(callable_model.return_adapter):
                     target = _class_index(model)[handle_adapter_target(callable_model.return_adapter)]
                     lines.append(f"        const result = {native_call};")
-                    lines.append(f"        return result === null ? null as unknown as {target.py_name} : new {target.py_name}(result);")
+                    lines.append(
+                        f"        return result === null ? null as unknown as {target.py_name} : new {target.py_name}(result);"
+                    )
                 elif is_sequence_adapter(callable_model.return_adapter):
                     target = _class_index(model)[sequence_adapter_target(callable_model.return_adapter)]
                     lines.append(f"        const result = {native_call} as unknown[];")

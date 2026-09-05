@@ -197,13 +197,13 @@ def _build_translation_unit(config: WrapperConfig, header: Path):
 def _check_diagnostics(translation_unit, header: Path) -> None:
     cindex = _require_clang()
     serious = [
-        diagnostic
-        for diagnostic in translation_unit.diagnostics
-        if diagnostic.severity >= cindex.Diagnostic.Error
+        diagnostic for diagnostic in translation_unit.diagnostics if diagnostic.severity >= cindex.Diagnostic.Error
     ]
     if not serious:
         return
-    messages = "\n".join(f"  {diagnostic.severity}: {diagnostic.spelling} ({diagnostic.location})" for diagnostic in serious)
+    messages = "\n".join(
+        f"  {diagnostic.severity}: {diagnostic.spelling} ({diagnostic.location})" for diagnostic in serious
+    )
     raise RuntimeError(
         f"clang reported {len(serious)} error(s)/fatal error(s) parsing '{header}'. This usually means "
         "the compiler couldn't find standard-library/system headers (missing -isysroot, missing "
@@ -425,7 +425,9 @@ def _build_parameter_models(
     parameter_specs = _parse_parameter_specs(cursor)
     parameter_models: list[ParameterModel] = []
     for index, parameter in enumerate(cursor.get_arguments()):
-        adapter = _resolve_parameter_adapter(parameter.type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp)
+        adapter = _resolve_parameter_adapter(
+            parameter.type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp
+        )
         if adapter is None:
             return None
         spec = parameter_specs[index] if index < len(parameter_specs) else _ParameterSpec(False, None)
