@@ -17,11 +17,22 @@
 #define IFCOPENSHELL_WRAPPERGEN_ATTRIBUTE_VALUE_SHIM_H
 
 #include "express.h"
-#include "ifc_parse_api.h"
 
 #include <cstdint>
 #include <string>
 #include <vector>
+
+// Deliberately no IFC_PARSE_API (or any dllexport/dllimport) on the declarations
+// below. That macro means "this symbol lives in ifcparse.dll, import/export it
+// across that boundary" (ifc_parse_api.h) -- it does not apply here: this shim is
+// not part of ifcparse.dll, it is compiled directly into whichever binary
+// includes attribute_value_shim.cpp (the native addon, wrappergen's own spike/
+// binding targets, etc.), so these symbols never cross a DLL boundary. Tagging
+// them dllimport on Windows told the linker to expect an external DLL to provide
+// them, producing a real LNK2019 (unresolved external symbol) the first time this
+// shim was linked into a real Windows build -- found by this PR's CI, silent on
+// Unix, where IFC_PARSE_API's visibility attribute has no import/export
+// distinction to get wrong.
 
 namespace ifcopenshell {
 namespace wrappergen {
@@ -68,7 +79,7 @@ enum attribute_value_kind {
 // corresponding type (number/boolean/string/EntityInstance-handle/array/null) --
 // matching Python's `get_argument`/`set_attribute_value_py` ergonomics, where
 // callers get back a plain value, not a wrapper object they have to unwrap.
-class IFC_PARSE_API attribute_value_variant {
+class attribute_value_variant {
   public:
     attribute_value_kind kind = ATTRIBUTE_VALUE_KIND_NULL;
     int64_t integer_value = 0;
@@ -88,7 +99,7 @@ class IFC_PARSE_API attribute_value_variant {
 // INTEGER, DOUBLE, STRING, BINARY, ENUMERATION, ENTITY_INSTANCE, every
 // AGGREGATE_OF_*/AGGREGATE_OF_AGGREGATE_OF_* case (via the recursive
 // ATTRIBUTE_VALUE_KIND_AGGREGATE case), and NULL for an unset attribute.
-IFC_PARSE_API attribute_value_variant get_attribute_value_variant(const express::base& instance, int attribute_index);
+attribute_value_variant get_attribute_value_variant(const express::base& instance, int attribute_index);
 
 // Inverse: dispatches on `value.kind` and calls the correctly-typed
 // `express::base::set_attribute_value` overload. A `kind` of
@@ -100,7 +111,7 @@ IFC_PARSE_API attribute_value_variant get_attribute_value_variant(const express:
 // aggregate typing) -- an empty aggregate is written as an empty
 // `std::vector<express::base>` (`Argument_EMPTY_AGGREGATE`'s usual role: an
 // untyped placeholder for an unset list-typed attribute).
-IFC_PARSE_API void set_attribute_value_variant(express::base& instance, int attribute_index, const attribute_value_variant& value);
+void set_attribute_value_variant(express::base& instance, int attribute_index, const attribute_value_variant& value);
 
 // Re-derives the *declared* argument type of attribute `attribute_index` from
 // schema metadata (`ifcopenshell::from_parameter_type`, argument_type.h) --
@@ -115,7 +126,7 @@ IFC_PARSE_API void set_attribute_value_variant(express::base& instance, int attr
 // looking at the incoming value. The Phase 2 TS mixin layer (not this PR) is
 // expected to call this before converting a bare `wall.Name = "x"` assignment
 // into the structured `{kind, ...}` value `set_attribute_value_variant` expects.
-IFC_PARSE_API attribute_value_kind attribute_kind_of(const express::base& instance, int attribute_index);
+attribute_value_kind attribute_kind_of(const express::base& instance, int attribute_index);
 
 // --- entity_instance primitives (research/01-python-core-and-lowlevel.md SS5 point 3) ---
 //
@@ -136,28 +147,28 @@ IFC_PARSE_API attribute_value_kind attribute_kind_of(const express::base& instan
 // Python binding returns (`research/01` SS5) -- matches this project's decided
 // last-error-string / thrown-JS-Error contract (`10-architecture.md` SS2)
 // instead of replicating the sentinel-return convention.
-IFC_PARSE_API int get_argument_index(const express::base& instance, const std::string& name);
+int get_argument_index(const express::base& instance, const std::string& name);
 
 // `entity_instance.attribute_name(index)`.
-IFC_PARSE_API std::string get_attribute_name(const express::base& instance, int attribute_index);
+std::string get_attribute_name(const express::base& instance, int attribute_index);
 
 // `entity_instance.attribute_type(index)` -- the ~20-value string union
 // (`ifcopenshell::argument_type_to_string`, argument.h) research/01 SS3.1 flags as
 // "the canonical IFC attribute type taxonomy an [N-API] layer must mirror".
-IFC_PARSE_API std::string get_attribute_type_name(const express::base& instance, int attribute_index);
+std::string get_attribute_type_name(const express::base& instance, int attribute_index);
 
 // `entity_instance.get_attribute_category(name)` -> 0=invalid, 1=forward,
 // 2=inverse, 3=derived -- mirrors `IfcParseWrapper.i`'s `%extend
 // express::base { get_attribute_category }` linear scan over
 // `all_attributes()`/`derived()`/`all_inverse_attributes()`.
-IFC_PARSE_API int get_attribute_category(const express::base& instance, const std::string& name);
+int get_attribute_category(const express::base& instance, const std::string& name);
 
 // `entity_instance.get_attribute_names()` / `get_inverse_attribute_names()`.
-IFC_PARSE_API std::vector<std::string> get_attribute_names(const express::base& instance);
-IFC_PARSE_API std::vector<std::string> get_inverse_attribute_names(const express::base& instance);
+std::vector<std::string> get_attribute_names(const express::base& instance);
+std::vector<std::string> get_inverse_attribute_names(const express::base& instance);
 
 // `entity_instance.is_a(name)`.
-IFC_PARSE_API bool is_a(const express::base& instance, const std::string& name);
+bool is_a(const express::base& instance, const std::string& name);
 
 // The bulk, single-call attribute-value fetch this PR's Phase 1 primitive
 // layer offers in place of Python's fully-recursive `get_info_cpp`
@@ -174,7 +185,7 @@ IFC_PARSE_API bool is_a(const express::base& instance, const std::string& name);
 // the Phase 2 TS mixin layer, which can call this same bulk primitive once
 // per nested entity_instance handle it encounters, still avoiding
 // per-attribute (as opposed to per-instance) boundary crossings.
-IFC_PARSE_API std::vector<attribute_value_variant> get_all_attribute_values(const express::base& instance);
+std::vector<attribute_value_variant> get_all_attribute_values(const express::base& instance);
 
 } // namespace wrappergen
 } // namespace ifcopenshell
