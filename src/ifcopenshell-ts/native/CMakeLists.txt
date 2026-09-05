@@ -1,23 +1,29 @@
 # This file was generated with the assistance of an AI coding tool.
 #
-# IfcOpenShell-TS - Phase 0 smoke-test native addon.
+# IfcOpenShell-TS - Phase 1 primitive-binding native addon.
 #
-# This is intentionally minimal and disposable: hand-written node-addon-api
-# glue built with cmake-js, just enough to open an in-memory IFC-SPF buffer,
-# read its schema identifier, and close it - de-risking the native-addon
-# build/CI pipeline before any real porting work starts. Phase 1 decides the
-# real primitive surface (hand-written vs. generated) and will likely replace
-# this file wholesale; see ../../../planning/ifcopenshell-ts/20-roadmap.md.
+# Replaces Phase 0's hand-written smoke-test addon (native/src/binding.cpp,
+# removed) with the real, generated primitive surface: the checked-in
+# wrappergen output under ../../wrappergen/generated_napi/ (produced by
+# ../../wrappergen/napi_binding.py -- see that file and
+# planning/ifcopenshell-ts/research/06-wrappergen-spike-results.md for why
+# this is generated, and checked in rather than generated at build/CI time:
+# no libclang/Boost-dev toolchain is set up for this CI leg, and a
+# deterministic, reviewable diff is preferable to a codegen step every
+# consumer's build would otherwise need to reproduce) plus the hand-written
+# variant/entity_instance shim (../../wrappergen/shim/attribute_value_shim.*)
+# that gives the generator's variant adapter something to point at -- see
+# that file's own doc comment for why this one piece has to be hand-written
+# regardless of binding technology (SWIG's `.i` typemaps solve the identical
+# problem by hand for Python).
 #
-# Unlike src/wrappergen (which is wired into the top-level cmake/CMakeLists.txt
-# as an in-tree subdirectory), this addon is built as a standalone CMake
-# project driven by cmake-js and consumes an already-built-and-installed
-# IfcOpenShell via its exported CMake package config (the same
-# `find_package(IfcOpenShell CONFIG REQUIRED)` mechanism src/examples uses to
-# demonstrate out-of-tree consumption). This keeps Node/N-API-specific build
-# concerns (Windows import-library generation, node-addon-api header
-# resolution) out of the shared top-level build that every other package
-# depends on.
+# Unlike src/wrappergen (gated behind BUILD_IFCPARSE_EXPERIMENTAL_WRAPPER,
+# off by default, not wired into any CI workflow), this addon is a normal,
+# always-built part of the ifcopenshell-ts package -- it consumes an
+# already-built-and-installed IfcOpenShell via its exported CMake package
+# config, exactly like Phase 0's addon did (see this file's git history for
+# that version's fuller rationale on staying out of the shared top-level
+# build).
 #
 # Expects `-DCMAKE_PREFIX_PATH=<path-to-installed-ifcopenshell>` (cmake-js:
 # `--CDCMAKE_PREFIX_PATH=...`); see ../README.md.
@@ -32,11 +38,37 @@ add_compile_definitions(NAPI_VERSION=8)
 
 find_package(IfcOpenShell CONFIG REQUIRED)
 
-file(GLOB SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+# `IfcOpenShell::IfcParse`'s exported INTERFACE_INCLUDE_DIRECTORIES resolves
+# `#include "ifcparse/file.h"` (prefixed -- the convention its own public
+# consumers, e.g. src/examples, use). The generated primitive binding and the
+# hand-written shim instead `#include "file.h"`/`#include "express.h"`
+# unprefixed, matching how wrappergen itself compiles against
+# src/ifcparse directly (`-I src/ifcparse`, no `ifcparse/` subdirectory
+# component) -- so both include styles need to resolve here. `IfcOpenShell_DIR`
+# (set by the successful find_package(CONFIG) above, pointing at
+# <prefix>/lib/cmake/IfcOpenShell) is a more robust way to recover
+# <prefix>/include/ifcparse than assuming CMAKE_PREFIX_PATH is a single,
+# unlisted path -- it can legitimately be a list (e.g. also carrying a vcpkg
+# toolchain prefix on Windows).
+get_filename_component(IFCOPENSHELL_INSTALL_PREFIX "${IfcOpenShell_DIR}/../../.." ABSOLUTE)
 
-add_library(${PROJECT_NAME} SHARED ${SOURCE_FILES} ${CMAKE_JS_SRC})
+set(WRAPPERGEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../wrappergen")
+set(GENERATED_NAPI_DIR "${WRAPPERGEN_DIR}/generated_napi")
+set(SHIM_DIR "${WRAPPERGEN_DIR}/shim")
+
+add_library(${PROJECT_NAME} SHARED
+    "${GENERATED_NAPI_DIR}/ifcopenshell_native_c_api.cpp"
+    "${GENERATED_NAPI_DIR}/ifcopenshell_native.cpp"
+    "${SHIM_DIR}/attribute_value_shim.cpp"
+    ${CMAKE_JS_SRC}
+)
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_JS_INC})
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_JS_INC}
+    "${GENERATED_NAPI_DIR}"
+    "${SHIM_DIR}"
+    "${IFCOPENSHELL_INSTALL_PREFIX}/include/ifcparse"
+)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_JS_LIB} IfcOpenShell::IfcParse)
 
 if(MSVC AND CMAKE_JS_NODELIB_DEF AND CMAKE_JS_NODELIB_TARGET)

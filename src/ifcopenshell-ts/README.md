@@ -4,17 +4,24 @@ TypeScript port of [`ifcopenshell-python`](../ifcopenshell-python), running agai
 binding onto the IfcOpenShell C++ core (`src/ifcparse`, `src/ifcgeom`, ...) - the same relationship
 `ifcopenshell-python` has to its SWIG-generated `ifcopenshell_wrapper` extension.
 
-**Status: Phase 0 (scaffolding).** There is no real API surface yet. This package currently exists
-to prove the native-addon build/CI pipeline works end-to-end: open an in-memory IFC-SPF buffer, read
-its schema identifier, close it. See `planning/ifcopenshell-ts/` at the repository root for the full
-design and phased roadmap.
+**Status: Phase 1 (low-level binding).** The public surface is still the *raw* primitive layer
+(`file`, `entity_instance`, and the full schema-introspection class set — `declaration`, `entity`,
+`attribute`, `schema_definition`, ...), named and shaped mechanically after their C++/Python
+counterparts, generated from the real C++ core by `src/wrappergen/napi_binding.py`. There is no
+friendly `IfcFile`/`EntityInstance` API yet (Phase 2's `file_mixin`/`entity_instance_mixin` port) —
+see `planning/ifcopenshell-ts/` at the repository root for the full design and phased roadmap.
 
 ## Layout
 
 ```
-native/        the N-API addon (node-addon-api), built with cmake-js against an
-                already-built-and-installed IfcOpenShell CMake package
-src/           the TS package itself (published to npm)
+native/        the N-API addon: the generated primitive binding
+                (../wrappergen/generated_napi/, from src/wrappergen/napi_binding.py) plus the
+                hand-written variant/entity_instance shim (../wrappergen/shim/) it depends on,
+                built with cmake-js against an already-built-and-installed IfcOpenShell CMake
+                package
+src/           the TS package itself (published to npm) - src/native/ holds a checked-in copy
+                of the generated TS facade (ifcopenshell_native.ts) plus the hand-written
+                addon loader (native_loader.ts) it imports
 esm/           thin hand-written ESM wrapper re-exporting the CJS build
 test/          Vitest tests, mirrors src/
 ```
@@ -53,8 +60,10 @@ schema plugin shared libraries) must be on the platform's shared-library search 
 
 ## Testing
 
-[Vitest](https://vitest.dev). `npm test` runs the suite once; `test/native/` holds the Phase 0
-smoke test.
+[Vitest](https://vitest.dev). `npm test` runs the suite once; `test/native/primitives.test.ts` is
+the Phase 1 integration test (creates an `IfcWall`, sets/gets every attribute-type category once,
+reads it back via schema introspection - see `planning/ifcopenshell-ts/20-roadmap.md`'s Phase 1
+exit criterion).
 
 ## Linting/formatting
 
