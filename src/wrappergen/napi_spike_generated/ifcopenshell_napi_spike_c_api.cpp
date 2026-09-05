@@ -198,6 +198,80 @@ struct ifcopenshell_express_base_list_t {
     std::vector<express::base> value;
 };
 
+ifcopenshell_attribute_value_variant_t ifcopenshell_attribute_value_variant_from_native(const ifcopenshell::wrappergen::attribute_value_variant& native, std::shared_ptr<ifcopenshell::file> owner) {
+    ifcopenshell_attribute_value_variant_t result{};
+    result.kind = static_cast<decltype(result.kind)>(native.kind);
+    switch (native.kind) {
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_NULL:
+        result.integer_value = native.integer_value;
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_BOOL:
+        result.integer_value = native.integer_value;
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_LOGICAL:
+        result.logical_value = native.logical_value;
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_INTEGER:
+        result.integer_value = native.integer_value;
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_DOUBLE:
+        result.double_value = native.double_value;
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_STRING:
+        result.string_value = duplicate_string(native.string_value);
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_ENUMERATION:
+        result.string_value = duplicate_string(native.string_value);
+        break;
+    case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE:
+        result.entity_value = new ifcopenshell_express_base_t{ owner, native.entity_value };
+        break;
+    default:
+        break;
+    }
+    return result;
+}
+
+ifcopenshell::wrappergen::attribute_value_variant ifcopenshell_attribute_value_variant_to_native(const ifcopenshell_attribute_value_variant_t& value) {
+    ifcopenshell::wrappergen::attribute_value_variant result;
+    result.kind = static_cast<decltype(result.kind)>(value.kind);
+    switch (value.kind) {
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_NULL:
+        result.integer_value = value.integer_value;
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_BOOL:
+        result.integer_value = value.integer_value;
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_LOGICAL:
+        result.logical_value = value.logical_value;
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_INTEGER:
+        result.integer_value = value.integer_value;
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_DOUBLE:
+        result.double_value = value.double_value;
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_STRING:
+        if (value.string_value != nullptr) {
+            result.string_value = value.string_value;
+        }
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENUMERATION:
+        if (value.string_value != nullptr) {
+            result.string_value = value.string_value;
+        }
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE:
+        if (value.entity_value != nullptr) {
+            result.entity_value = value.entity_value->value;
+        }
+        break;
+    default:
+        break;
+    }
+    return result;
+}
+
 extern "C" {
 
 const char* ifcopenshell_last_error_message(void) {
@@ -210,6 +284,19 @@ void ifcopenshell_last_error_clear(void) {
 
 void ifcopenshell_string_free(char* value) {
     delete[] value;
+}
+
+void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_value_variant_t value) {
+    switch (value.kind) {
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_STRING:
+        ifcopenshell_string_free(value.string_value);
+        break;
+    case IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_ENUMERATION:
+        ifcopenshell_string_free(value.string_value);
+        break;
+    default:
+        break;
+    }
 }
 
 ifcopenshell_exception_t* ifcopenshell_exception_new_with_message(const char* message) {
@@ -536,6 +623,20 @@ ifcopenshell_enumeration_type_t* ifcopenshell_declaration_as_enumeration_type(if
     }
 }
 
+ifcopenshell_entity_t* ifcopenshell_declaration_as_entity(ifcopenshell_declaration_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto* result_ptr = handle->value->as_entity();
+        return result_ptr == nullptr ? nullptr : new ifcopenshell_entity_t{ const_cast<ifcopenshell::entity*>(result_ptr) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
 bool ifcopenshell_declaration_is_with_name(ifcopenshell_declaration_t* handle, const char* name) {
     ifcopenshell_last_error_clear();
     try {
@@ -802,6 +903,20 @@ int ifcopenshell_inverse_attribute_bound2(ifcopenshell_inverse_attribute_t* hand
     }
 }
 
+ifcopenshell_entity_t* ifcopenshell_inverse_attribute_entity_reference(ifcopenshell_inverse_attribute_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto* result_ptr = handle->value->entity_reference();
+        return result_ptr == nullptr ? nullptr : new ifcopenshell_entity_t{ const_cast<ifcopenshell::entity*>(result_ptr) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
 ifcopenshell_attribute_t* ifcopenshell_inverse_attribute_attribute_reference(ifcopenshell_inverse_attribute_t* handle) {
     ifcopenshell_last_error_clear();
     try {
@@ -810,6 +925,20 @@ ifcopenshell_attribute_t* ifcopenshell_inverse_attribute_attribute_reference(ifc
         }
         auto* result_ptr = handle->value->attribute_reference();
         return result_ptr == nullptr ? nullptr : new ifcopenshell_attribute_t{ const_cast<ifcopenshell::attribute*>(result_ptr) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+ifcopenshell_entity_t* ifcopenshell_entity_new_with_name_is_abstract_index_in_schema_supertype(const char* name, bool is_abstract, int index_in_schema, ifcopenshell_entity_t* supertype) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (supertype == nullptr) {
+            throw std::runtime_error("Null handle parameter received for supertype");
+        }
+        auto constructed_value = ifcopenshell::entity(std::string(name ? name : ""), is_abstract, index_in_schema, supertype->value);
+        return new ifcopenshell_entity_t{ new ifcopenshell::entity(std::move(constructed_value)) };
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return nullptr;
@@ -929,6 +1058,34 @@ int ifcopenshell_entity_attribute_count(ifcopenshell_entity_t* handle) {
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return 0;
+    }
+}
+
+ifcopenshell_entity_t* ifcopenshell_entity_supertype(ifcopenshell_entity_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto* result_ptr = handle->value->supertype();
+        return result_ptr == nullptr ? nullptr : new ifcopenshell_entity_t{ const_cast<ifcopenshell::entity*>(result_ptr) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+ifcopenshell_entity_t* ifcopenshell_entity_as_entity(ifcopenshell_entity_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto* result_ptr = handle->value->as_entity();
+        return result_ptr == nullptr ? nullptr : new ifcopenshell_entity_t{ const_cast<ifcopenshell::entity*>(result_ptr) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
     }
 }
 
@@ -1202,37 +1359,7 @@ ifcopenshell_attribute_value_variant_t ifcopenshell_base_get_attribute_value_var
             throw std::runtime_error("Null handle received");
         }
         auto native_result = ifcopenshell::wrappergen::get_attribute_value_variant(handle->value, attribute_index);
-        ifcopenshell_attribute_value_variant_t c_result{};
-        c_result.kind = static_cast<decltype(c_result.kind)>(native_result.kind);
-        switch (native_result.kind) {
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_NULL:
-            c_result.integer_value = native_result.integer_value;
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_BOOL:
-            c_result.integer_value = native_result.integer_value;
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_LOGICAL:
-            c_result.logical_value = native_result.logical_value;
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_INTEGER:
-            c_result.integer_value = native_result.integer_value;
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_DOUBLE:
-            c_result.double_value = native_result.double_value;
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_STRING:
-            c_result.string_value = duplicate_string(native_result.string_value);
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_ENUMERATION:
-            c_result.string_value = duplicate_string(native_result.string_value);
-            break;
-        case ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_ENTITY_INSTANCE:
-            c_result.entity_value = new ifcopenshell_express_base_t{ handle->owner, native_result.entity_value };
-            break;
-        default:
-            break;
-        }
-        return c_result;
+        return ifcopenshell_attribute_value_variant_from_native(native_result, handle->owner);
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return {};
@@ -1245,22 +1372,7 @@ void ifcopenshell_base_set_attribute_value_variant(ifcopenshell_express_base_t* 
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
-        ifcopenshell::wrappergen::attribute_value_variant value_native;
-        value_native.kind = static_cast<decltype(value_native.kind)>(value.kind);
-        value_native.integer_value = value.integer_value;
-        value_native.integer_value = value.integer_value;
-        value_native.logical_value = value.logical_value;
-        value_native.integer_value = value.integer_value;
-        value_native.double_value = value.double_value;
-        if (value.string_value != nullptr) {
-            value_native.string_value = value.string_value;
-        }
-        if (value.string_value != nullptr) {
-            value_native.string_value = value.string_value;
-        }
-        if (value.entity_value != nullptr) {
-            value_native.entity_value = value.entity_value->value;
-        }
+        ifcopenshell::wrappergen::attribute_value_variant value_native = ifcopenshell_attribute_value_variant_to_native(value);
         ifcopenshell::wrappergen::set_attribute_value_variant(handle->value, attribute_index, value_native);
         return;
     } catch (const std::exception& exception) {

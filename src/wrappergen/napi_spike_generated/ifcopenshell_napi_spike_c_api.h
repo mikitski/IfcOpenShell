@@ -107,6 +107,8 @@ const char* ifcopenshell_last_error_message(void);
 void ifcopenshell_last_error_clear(void);
 void ifcopenshell_string_free(char* value);
 
+void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_value_variant_t value);
+
 ifcopenshell_exception_t* ifcopenshell_exception_new_with_message(const char* message);
 ifcopenshell_attribute_out_of_range_exception_t* ifcopenshell_attribute_out_of_range_exception_new_with_message(const char* message);
 ifcopenshell_invalid_token_exception_t* ifcopenshell_invalid_token_exception_new_with_token_start_token_string_expected_type(int token_start, const char* token_string, const char* expected_type);
@@ -131,6 +133,7 @@ char* ifcopenshell_declaration_name_uc(ifcopenshell_declaration_t* handle);
 ifcopenshell_type_declaration_t* ifcopenshell_declaration_as_type_declaration(ifcopenshell_declaration_t* handle);
 ifcopenshell_select_type_t* ifcopenshell_declaration_as_select_type(ifcopenshell_declaration_t* handle);
 ifcopenshell_enumeration_type_t* ifcopenshell_declaration_as_enumeration_type(ifcopenshell_declaration_t* handle);
+ifcopenshell_entity_t* ifcopenshell_declaration_as_entity(ifcopenshell_declaration_t* handle);
 bool ifcopenshell_declaration_is_with_name(ifcopenshell_declaration_t* handle, const char* name);
 bool ifcopenshell_declaration_is_with_decl(ifcopenshell_declaration_t* handle, ifcopenshell_declaration_t* decl);
 int ifcopenshell_declaration_index_in_schema(ifcopenshell_declaration_t* handle);
@@ -150,7 +153,9 @@ bool ifcopenshell_attribute_optional(ifcopenshell_attribute_t* handle);
 char* ifcopenshell_inverse_attribute_name(ifcopenshell_inverse_attribute_t* handle);
 int ifcopenshell_inverse_attribute_bound1(ifcopenshell_inverse_attribute_t* handle);
 int ifcopenshell_inverse_attribute_bound2(ifcopenshell_inverse_attribute_t* handle);
+ifcopenshell_entity_t* ifcopenshell_inverse_attribute_entity_reference(ifcopenshell_inverse_attribute_t* handle);
 ifcopenshell_attribute_t* ifcopenshell_inverse_attribute_attribute_reference(ifcopenshell_inverse_attribute_t* handle);
+ifcopenshell_entity_t* ifcopenshell_entity_new_with_name_is_abstract_index_in_schema_supertype(const char* name, bool is_abstract, int index_in_schema, ifcopenshell_entity_t* supertype);
 bool ifcopenshell_entity_is_abstract(ifcopenshell_entity_t* handle);
 ifcopenshell_attribute_list_t* ifcopenshell_entity_attributes(ifcopenshell_entity_t* handle);
 ifcopenshell_inverse_attribute_list_t* ifcopenshell_entity_inverse_attributes(ifcopenshell_entity_t* handle);
@@ -158,6 +163,8 @@ ifcopenshell_attribute_list_t* ifcopenshell_entity_all_attributes(ifcopenshell_e
 ifcopenshell_inverse_attribute_list_t* ifcopenshell_entity_all_inverse_attributes(ifcopenshell_entity_t* handle);
 ifcopenshell_attribute_t* ifcopenshell_entity_attribute_by_index(ifcopenshell_entity_t* handle, int index);
 int ifcopenshell_entity_attribute_count(ifcopenshell_entity_t* handle);
+ifcopenshell_entity_t* ifcopenshell_entity_supertype(ifcopenshell_entity_t* handle);
+ifcopenshell_entity_t* ifcopenshell_entity_as_entity(ifcopenshell_entity_t* handle);
 ifcopenshell_declaration_t* ifcopenshell_schema_definition_declaration_by_name_with_name(ifcopenshell_schema_definition_t* handle, const char* name);
 ifcopenshell_declaration_t* ifcopenshell_schema_definition_declaration_by_name_with_declaration_index(ifcopenshell_schema_definition_t* handle, int declaration_index);
 ifcopenshell_declaration_list_t* ifcopenshell_schema_definition_declarations(ifcopenshell_schema_definition_t* handle);
