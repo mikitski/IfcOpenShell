@@ -10,11 +10,14 @@ from .conventions import (
     is_enum_adapter,
     is_handle_adapter,
     is_sequence_adapter,
+    is_variant_adapter,
     normalize_cpp_type,
     normalize_identifier,
+    pascal_case,
     sequence_adapter_target,
+    variant_adapter_target,
 )
-from .model import CallableModel, ClassModel, EnumModel, ModuleModel, ParameterModel
+from .model import CallableModel, ClassModel, EnumModel, ModuleModel, ParameterModel, VariantAdapterModel
 
 
 def _class_index(model: ModuleModel) -> dict[str, ClassModel]:
@@ -23,6 +26,17 @@ def _class_index(model: ModuleModel) -> dict[str, ClassModel]:
 
 def _enum_index(model: ModuleModel) -> dict[str, EnumModel]:
     return {normalize_cpp_type(enum_model.cpp_name): enum_model for enum_model in model.enums}
+
+
+def _variant_index(model: ModuleModel) -> dict[str, VariantAdapterModel]:
+    return {normalize_cpp_type(variant.cpp_type): variant for variant in model.variant_adapters}
+
+
+def _variant_model(adapter: str, model: ModuleModel) -> VariantAdapterModel:
+    variant = _variant_index(model).get(variant_adapter_target(adapter))
+    if variant is None:
+        raise RuntimeError(f"Unable to resolve variant adapter '{adapter}'")
+    return variant
 
 
 def _class_c_type(class_model: ClassModel, model: ModuleModel) -> str:
@@ -145,6 +159,8 @@ def _return_c_type(adapter: str, model: ModuleModel) -> str:
         return f"{_class_c_type(_class_index(model)[handle_adapter_target(adapter)], model)}*"
     if is_sequence_adapter(adapter):
         return f"{_list_c_type(_class_index(model)[sequence_adapter_target(adapter)], model)}*"
+    if is_variant_adapter(adapter):
+        return _variant_model(adapter, model).c_type_name
     raise RuntimeError(f"Unsupported return adapter: {adapter}")
 
 
@@ -155,11 +171,20 @@ def _parameter_c_type(parameter: ParameterModel, model: ModuleModel) -> str:
         return "int"
     if parameter.adapter == "bool":
         return "bool"
+    if parameter.adapter == "buffer":
+        # A raw `void* data` parameter paired with an adjacent `int` length parameter
+        # (the real C++ signature, e.g. `ifcopenshell::file(void* data, int data_size, ...)`)
+        # -- see research/06-wrappergen-spike-results.md for why this is a parameter-adapter
+        # addition rather than a new emitted C API function: the length is already the very
+        # next ordinary `integer`-adapter parameter, nothing else needs to change.
+        return "const char*"
     if is_enum_adapter(parameter.adapter):
         return _enum_c_type(parameter.adapter, model)
     if is_handle_adapter(parameter.adapter):
         target = _class_index(model)[handle_adapter_target(parameter.adapter)]
         return f"{_class_c_type(target, model)}*"
+    if is_variant_adapter(parameter.adapter):
+        return f"{_variant_model(parameter.adapter, model).c_type_name}"
     raise RuntimeError(f"Unsupported parameter adapter: {parameter.adapter}")
 
 
@@ -174,11 +199,17 @@ def _class_or_enum_cpp_name(adapter: str, model: ModuleModel) -> str:
 def _cpp_argument(parameter: ParameterModel, model: ModuleModel) -> str:
     if parameter.adapter == "string":
         return f'std::string({parameter.name} ? {parameter.name} : "")'
+    if parameter.adapter == "buffer":
+        return f"static_cast<void*>(const_cast<char*>({parameter.name}))"
     if is_enum_adapter(parameter.adapter):
         return f"static_cast<{_class_or_enum_cpp_name(parameter.adapter, model)}>({parameter.name})"
     if is_handle_adapter(parameter.adapter):
         target = _class_index(model)[handle_adapter_target(parameter.adapter)]
         actual_type = normalize_cpp_type(parameter.cpp_type)
+        if target.handle_kind == "borrowed":
+            # `handle->value` is already the raw pointer this class wraps (see
+            # `_emit_handle_return_lines`/`emit_c_api_implementation`'s struct body).
+            return f"{parameter.name}->value" if actual_type.endswith("*") else f"*{parameter.name}->value"
         if actual_type.endswith("*"):
             if target.handle_kind == "shared_ptr":
                 return f"{parameter.name}->value.get()"
@@ -186,6 +217,11 @@ def _cpp_argument(parameter: ParameterModel, model: ModuleModel) -> str:
         if target.handle_kind == "shared_ptr":
             return f"*{parameter.name}->value"
         return f"{parameter.name}->value"
+    if is_variant_adapter(parameter.adapter):
+        # The real conversion is multi-statement (a switch over `.kind`), emitted just
+        # above the call expression by `_emit_variant_parameter_conversion` into a local
+        # named exactly this -- see `emit_c_api_implementation`.
+        return f"{parameter.name}_native"
     return parameter.name
 
 
@@ -195,7 +231,18 @@ def _call_expression(variant: CallableVariant, model: ModuleModel) -> str:
         if variant.owner.handle_kind == "shared_ptr":
             return f"std::make_shared<{variant.owner.cpp_name}>({arguments})"
         return f"{variant.owner.cpp_name}({arguments})"
-    access = "handle->value->" if variant.owner.handle_kind == "shared_ptr" else "handle->value."
+    if variant.callable.kind == "free_function":
+        # A hand-written free function taking the owning instance explicitly as its first
+        # argument (e.g. `ifcopenshell::wrappergen::get_attribute_value_variant(instance, index)`)
+        # rather than being an actual C++ method of `variant.owner` -- see
+        # `research/06-wrappergen-spike-results.md` for why the real attribute-value accessors
+        # can't be discovered as ordinary methods.
+        self_expression = (
+            "*handle->value" if variant.owner.handle_kind in {"shared_ptr", "borrowed"} else "handle->value"
+        )
+        all_arguments = ", ".join([self_expression, arguments]) if arguments else self_expression
+        return f"{variant.callable.cpp_name}({all_arguments})"
+    access = "handle->value->" if variant.owner.handle_kind in {"shared_ptr", "borrowed"} else "handle->value."
     return f"{access}{variant.callable.cpp_name}({arguments})"
 
 
@@ -230,6 +277,33 @@ def _emit_handle_return_lines(
     model: ModuleModel,
 ) -> None:
     normalized_return = normalize_cpp_type(callable_model.return_cpp_type)
+    if target.handle_kind == "borrowed":
+        # A "borrowed" handle wraps a raw, non-owning pointer directly -- no dereference,
+        # no copy, no delete. Needed for classes whose lifetime is tied to something with
+        # no representable owner in `class_owner_types`' single-parent model (e.g. a
+        # process-wide schema registry singleton), and whose destructor deletes the
+        # objects it points to on the assumption that it's the unique owner
+        # (`schema_definition::~schema_definition()` deletes every `declaration*` it
+        # holds). Copying such a class BY VALUE (the "value" handle_kind's pointer-return
+        # handling, below) compiles cleanly -- it isn't a deleted/non-copyable type -- but
+        # is a real double-free/use-after-free: the wrapper's copy's destructor and the
+        # singleton's own destructor both free the same underlying declarations. Found by
+        # this spike via an actual runtime crash, not just a compile check -- see
+        # `06-wrappergen-spike-results.md`.
+        if normalized_return.endswith("*"):
+            lines.append(f"        auto* result_ptr = {call_expression};")
+        else:
+            # A reference return (e.g. `express::base::declaration() const` returns
+            # `const ifcopenshell::declaration&`) -- take its address to get the same
+            # "just store the pointer" handling as the pointer-return case. Always safe:
+            # a C++ reference is never null, and (per this handle_kind's whole premise)
+            # the referent already outlives this call.
+            lines.append(f"        const auto& result_ref = {call_expression};")
+            lines.append("        auto* result_ptr = &result_ref;")
+        lines.append(
+            f"        return result_ptr == nullptr ? nullptr : new {_class_c_type(target, model)}{{ const_cast<{target.cpp_name}*>(result_ptr) }};"
+        )
+        return
     if normalized_return.endswith("*"):
         lines.append(f"        auto result_ptr = {call_expression};")
         lines.append("        if (result_ptr == nullptr) {")
@@ -258,7 +332,17 @@ def _emit_sequence_return_lines(
     model: ModuleModel,
 ) -> None:
     vector_inner = _vector_inner_type(callable_model.return_cpp_type)
-    if vector_inner is not None and vector_inner.endswith("*"):
+    if target.handle_kind == "borrowed":
+        # Same rationale as the single-handle "borrowed" case: a vector of raw pointers,
+        # copied as pointers (cheap, and safe regardless of what `target.cpp_name`'s own
+        # destructor does), never a vector of by-value copies of the pointees.
+        lines.append(f"        const auto& source_result = {call_expression};")
+        lines.append(f"        std::vector<{target.cpp_name}*> result;")
+        lines.append("        result.reserve(source_result.size());")
+        lines.append("        for (const auto* item : source_result) {")
+        lines.append(f"            result.push_back(const_cast<{target.cpp_name}*>(item));")
+        lines.append("        }")
+    elif vector_inner is not None and vector_inner.endswith("*"):
         lines.append(f"        auto source_result = {call_expression};")
         lines.append(f"        std::vector<{target.cpp_name}> result;")
         lines.append("        result.reserve(source_result.size());")
@@ -276,6 +360,76 @@ def _emit_sequence_return_lines(
     lines.append(f"        return new {_list_c_type(target, model)}{{ std::move(result) }};")
 
 
+def _emit_variant_parameter_conversion(lines: list[str], parameter: ParameterModel, model: ModuleModel) -> None:
+    """Converts an incoming C `<variant>_t` value into the C++ shim type the real call
+    expects, storing it in a `{name}_native` local (`_cpp_argument` references that name
+    directly). This is the parameter-direction half of the variant adapter -- the return
+    direction is `_emit_variant_return_lines`, below."""
+    variant_model = _variant_model(parameter.adapter, model)
+    native_type = variant_adapter_target(parameter.adapter)
+    local_name = f"{parameter.name}_native"
+    lines.append(f"        {native_type} {local_name};")
+    lines.append(
+        f"        {local_name}.{variant_model.kind_field} = static_cast<decltype({local_name}.{variant_model.kind_field})>({parameter.name}.{variant_model.kind_field});"
+    )
+    for case in variant_model.cases:
+        if case.field_kind == "handle":
+            target = _class_index(model)[case.handle_target]
+            deref = (
+                f"*{parameter.name}.{case.field}->value"
+                if target.handle_kind == "shared_ptr"
+                else f"{parameter.name}.{case.field}->value"
+            )
+            lines.append(f"        if ({parameter.name}.{case.field} != nullptr) {{")
+            lines.append(f"            {local_name}.{case.field} = {deref};")
+            lines.append("        }")
+        elif case.field_kind == "string":
+            lines.append(f"        if ({parameter.name}.{case.field} != nullptr) {{")
+            lines.append(f"            {local_name}.{case.field} = {parameter.name}.{case.field};")
+            lines.append("        }")
+        else:
+            lines.append(f"        {local_name}.{case.field} = {parameter.name}.{case.field};")
+
+
+def _emit_variant_return_lines(
+    lines: list[str],
+    owner: ClassModel,
+    return_adapter: str,
+    call_expression: str,
+    model: ModuleModel,
+) -> None:
+    """The return-direction half of the variant adapter: builds the C `<variant>_t` value
+    from the C++ shim value `call_expression` evaluates to, wrapping the handle case's
+    field through the same owner-propagation logic ordinary handle returns use
+    (`_owner_expression`) so the returned entity-reference handle's lifetime is tied to
+    the same owning `file` as everything else."""
+    variant_model = _variant_model(return_adapter, model)
+    c_type = variant_model.c_type_name
+    lines.append(f"        auto native_result = {call_expression};")
+    lines.append(f"        {c_type} c_result{{}};")
+    lines.append(
+        f"        c_result.{variant_model.kind_field} = static_cast<decltype(c_result.{variant_model.kind_field})>(native_result.{variant_model.kind_field});"
+    )
+    lines.append(f"        switch (native_result.{variant_model.kind_field}) {{")
+    for case in variant_model.cases:
+        lines.append(f"        case {case.native_kind_name}:")
+        if case.field_kind == "handle":
+            target = _class_index(model)[case.handle_target]
+            owner_expression = _owner_expression(owner, target) if target.owner_cpp_name is not None else "{}"
+            lines.append(
+                f"            c_result.{case.field} = new {_class_c_type(target, model)}{{ {owner_expression}, native_result.{case.field} }};"
+            )
+        elif case.field_kind == "string":
+            lines.append(f"            c_result.{case.field} = duplicate_string(native_result.{case.field});")
+        else:
+            lines.append(f"            c_result.{case.field} = native_result.{case.field};")
+        lines.append("            break;")
+    lines.append("        default:")
+    lines.append("            break;")
+    lines.append("        }")
+    lines.append("        return c_result;")
+
+
 def emit_c_api_header(model: ModuleModel) -> str:
     sequence_targets = _sequence_targets(model)
     lines = [
@@ -284,6 +438,7 @@ def emit_c_api_header(model: ModuleModel) -> str:
         "",
         "#include <stdbool.h>",
         "#include <stddef.h>",
+        "#include <stdint.h>",
         "",
         "#ifdef __cplusplus",
         'extern "C" {',
@@ -304,6 +459,32 @@ def emit_c_api_header(model: ModuleModel) -> str:
             lines.append(f"    {value.c_name} = {value.value},")
         lines.append(f"}} {enum_model.c_name};")
         lines.append("")
+    for variant_model in model.variant_adapters:
+        lines.append(f"typedef enum {variant_model.kind_enum_c_name} {{")
+        for case in variant_model.cases:
+            lines.append(f"    {case.kind_c_name},")
+        lines.append(f"}} {variant_model.kind_enum_c_name};")
+        lines.append("")
+        lines.append(f"typedef struct {variant_model.c_type_name} {{")
+        lines.append(f"    {variant_model.kind_enum_c_name} {variant_model.kind_field};")
+        seen_fields: set[str] = set()
+        for case in variant_model.cases:
+            if case.field in seen_fields:
+                continue
+            seen_fields.add(case.field)
+            if case.field_kind == "integer":
+                field_type = "int64_t"
+            elif case.field_kind == "double":
+                field_type = "double"
+            elif case.field_kind == "string":
+                field_type = "char*"
+            elif case.field_kind == "handle":
+                field_type = f"{_class_c_type(_class_index(model)[case.handle_target], model)}*"
+            else:
+                raise RuntimeError(f"Unsupported variant case field_kind: {case.field_kind}")
+            lines.append(f"    {field_type} {case.field};")
+        lines.append(f"}} {variant_model.c_type_name};")
+        lines.append("")
     lines.extend(
         [
             "const char* ifcopenshell_last_error_message(void);",
@@ -317,7 +498,7 @@ def emit_c_api_header(model: ModuleModel) -> str:
         parameters = ", ".join(
             f"{_parameter_c_type(parameter, model)} {parameter.name}" for parameter in variant.parameters
         )
-        if variant.callable.kind == "method":
+        if variant.callable.kind in {"method", "free_function"}:
             self_type = f"{_class_c_type(variant.owner, model)}* handle"
             parameters = f"{self_type}, {parameters}" if parameters else self_type
         lines.append(f"{return_type} {model.c_prefix}_{variant.api_name}({parameters});")
@@ -390,6 +571,18 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append(f"    std::shared_ptr<{class_model.owner_cpp_name}> owner;")
         if class_model.handle_kind == "shared_ptr":
             lines.append(f"    std::shared_ptr<{class_model.cpp_name}> value;")
+        elif class_model.handle_kind == "borrowed":
+            # A raw, non-owning pointer -- see `_emit_handle_return_lines`. `_free`'s
+            # generic `delete handle;` only destroys this wrapper struct; a raw pointer
+            # member has no destructor of its own to run, so the pointee is untouched.
+            # Deliberately non-const: the real API is inconsistent about const-ness for
+            # these types (e.g. `named_type`'s constructor takes a non-const
+            # `declaration*` while `express::base::declaration()` returns a const
+            # reference) -- a non-const pointer converts implicitly wherever a const one
+            # is needed, so this avoids a combinatorial const-matching problem for a
+            # class of object this generator otherwise treats as logically immutable
+            # once constructed.
+            lines.append(f"    {class_model.cpp_name}* value;")
         else:
             lines.append(f"    {class_model.cpp_name} value;")
         lines.append("};")
@@ -398,7 +591,12 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
         lines.append(f"struct {_list_c_type(class_model, model)} {{")
         if class_model.owner_cpp_name is not None:
             lines.append(f"    std::shared_ptr<{class_model.owner_cpp_name}> owner;")
-        lines.append(f"    std::vector<{class_model.cpp_name}> value;")
+        if class_model.handle_kind == "borrowed":
+            # Same rationale as the single-handle "borrowed" struct field: a vector of
+            # raw, non-owning pointers, never a vector of by-value copies.
+            lines.append(f"    std::vector<{class_model.cpp_name}*> value;")
+        else:
+            lines.append(f"    std::vector<{class_model.cpp_name}> value;")
         lines.append("};")
         lines.append("")
     lines.extend(
@@ -424,13 +622,13 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
         parameter_list = ", ".join(
             f"{_parameter_c_type(parameter, model)} {parameter.name}" for parameter in variant.parameters
         )
-        if variant.callable.kind == "method":
+        if variant.callable.kind in {"method", "free_function"}:
             self_type = f"{_class_c_type(variant.owner, model)}* handle"
             parameter_list = f"{self_type}, {parameter_list}" if parameter_list else self_type
         lines.append(f"{return_type} {model.c_prefix}_{variant.api_name}({parameter_list}) {{")
         lines.append("    ifcopenshell_last_error_clear();")
         lines.append("    try {")
-        if variant.callable.kind == "method":
+        if variant.callable.kind in {"method", "free_function"}:
             lines.append("        if (handle == nullptr) {")
             lines.append('            throw std::runtime_error("Null handle received");')
             lines.append("        }")
@@ -441,10 +639,24 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
                     f'            throw std::runtime_error("Null handle parameter received for {parameter.name}");'
                 )
                 lines.append("        }")
+            if is_variant_adapter(parameter.adapter):
+                _emit_variant_parameter_conversion(lines, parameter, model)
         call_expression = _call_expression(variant, model)
         if variant.callable.kind == "constructor":
             lines.append(f"        auto constructed_value = {call_expression};")
-            if variant.owner.handle_kind == "shared_ptr":
+            if variant.owner.handle_kind == "borrowed":
+                # Heap-allocate so the wrapper's `const T*` field has something valid (and
+                # non-dangling past this function) to point at. This intentionally leaks
+                # (matching the lifetime model every other genuinely "borrowed" instance of
+                # this class already has -- schema-owned objects are never freed piecemeal)
+                # rather than risk a dangling pointer; constructing new schema-introspection
+                # objects directly isn't part of this spike's file/entity_instance/
+                # declaration exit criteria, so this path isn't exercised by the spike's own
+                # verification, only left correctly-typed for completeness.
+                lines.append(
+                    f"        return new {_class_c_type(variant.owner, model)}{{ new {variant.owner.cpp_name}(std::move(constructed_value)) }};"
+                )
+            elif variant.owner.handle_kind == "shared_ptr":
                 lines.append(
                     f"        return new {_class_c_type(variant.owner, model)}{{ std::move(constructed_value) }};"
                 )
@@ -465,6 +677,14 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             if variant.callable.return_adapter == "void":
                 lines.append(f"        {call_expression};")
                 lines.append("        return;")
+            elif is_enum_adapter(variant.callable.return_adapter):
+                # Not exercised by any callable in the checked-in `generated/` snapshot
+                # (every enum there is parameter-only) until this spike's broader,
+                # full-header-set model started returning one directly -- an
+                # un-cross-cast return of a C++ enum where the function signature
+                # promises the *generated* C enum type doesn't reliably compile (found
+                # by this spike; see 06-wrappergen-spike-results.md).
+                lines.append(f"        return static_cast<{return_type}>({call_expression});")
             else:
                 lines.append(f"        return {call_expression};")
         elif is_handle_adapter(variant.callable.return_adapter):
@@ -473,14 +693,23 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
         elif is_sequence_adapter(variant.callable.return_adapter):
             target = _class_index(model)[sequence_adapter_target(variant.callable.return_adapter)]
             _emit_sequence_return_lines(lines, variant.owner, target, variant.callable, call_expression, model)
+        elif is_variant_adapter(variant.callable.return_adapter):
+            _emit_variant_return_lines(lines, variant.owner, variant.callable.return_adapter, call_expression, model)
         else:
             raise RuntimeError(f"Unsupported return adapter in C API emitter: {variant.callable.return_adapter}")
         lines.append("    } catch (const std::exception& exception) {")
         lines.append("        set_last_error(exception);")
         if return_type == "void":
             lines.append("        return;")
-        elif return_type in {"int", "bool"} or is_enum_adapter(variant.callable.return_adapter):
+        elif is_enum_adapter(variant.callable.return_adapter):
+            # Same "0 doesn't implicitly become an enum" issue as the success path above --
+            # again unreachable in the checked-in `generated/` snapshot until this spike's
+            # broader model returned an enum directly for the first time.
+            lines.append(f"        return static_cast<{return_type}>(0);")
+        elif return_type in {"int", "bool"}:
             lines.append("        return 0;")
+        elif is_variant_adapter(variant.callable.return_adapter):
+            lines.append("        return {};")
         else:
             lines.append("        return nullptr;")
         lines.append("    }")
@@ -514,7 +743,12 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
                 "        }",
             ]
         )
-        if class_model.handle_kind == "shared_ptr":
+        if class_model.handle_kind == "borrowed":
+            # `handle->value.at(index)` is already the raw pointer this class wraps.
+            lines.append(
+                f"        return new {_class_c_type(class_model, model)}{{ handle->value.at(static_cast<size_t>(index)) }};"
+            )
+        elif class_model.handle_kind == "shared_ptr":
             lines.append(
                 f"        auto item_value = std::make_shared<{class_model.cpp_name}>(handle->value.at(static_cast<size_t>(index)));"
             )
@@ -888,6 +1122,421 @@ def emit_python_facade(model: ModuleModel) -> str:
         if not class_model.callables:
             lines.append("    pass")
             lines.append("")
+    return "\n".join(lines)
+
+
+def _napi_finalizer_name(class_model: ClassModel) -> str:
+    return f"{normalize_identifier(class_model.cpp_name)}_finalize"
+
+
+def _napi_wrap_name(class_model: ClassModel) -> str:
+    return f"wrap_{normalize_identifier(class_model.cpp_name)}"
+
+
+def _napi_unwrap_name(class_model: ClassModel) -> str:
+    return f"unwrap_{normalize_identifier(class_model.cpp_name)}"
+
+
+def emit_napi_extension(model: ModuleModel) -> str:
+    """N-API C++ glue -- structurally parallel to `emit_python_extension`: the same
+    per-class/per-callable walk over the same `ModuleModel`/`_all_variants(model)`,
+    replacing `PyArg_ParseTuple`/`PyCapsule_New`/`PyCapsule_GetPointer` with N-API's
+    `napi_get_cb_info`/`napi_create_external`/`napi_get_value_external`. Handles are kept
+    as flat opaque JS "external" values (N-API's PyCapsule analogue, including a
+    finalizer callback for cleanup) rather than real JS classes -- exactly like the
+    Python extension, the friendly per-language class shape is the facade's job
+    (`emit_typescript_facade`), not this layer's.
+    """
+    class_models = _class_index(model)
+    lines = [
+        "#include <node_api.h>",
+        "",
+        f'#include "{model.api_header_name}"',
+        "",
+        "#include <cstring>",
+        "#include <string>",
+        "",
+        "namespace {",
+        "",
+        "napi_value throw_last_error(napi_env env, const char* fallback_message) {",
+        "    const char* message = ifcopenshell_last_error_message();",
+        "    napi_throw_error(env, nullptr, message ? message : fallback_message);",
+        "    return nullptr;",
+        "}",
+        "",
+        "std::string napi_string_value(napi_env env, napi_value value) {",
+        "    size_t length = 0;",
+        "    napi_get_value_string_utf8(env, value, nullptr, 0, &length);",
+        "    std::string result(length, '\\0');",
+        "    napi_get_value_string_utf8(env, value, result.data(), length + 1, &length);",
+        "    return result;",
+        "}",
+        "",
+    ]
+    for class_model in model.classes:
+        lines.extend(
+            [
+                f"void {_napi_finalizer_name(class_model)}(napi_env, void* data, void*) {{",
+                f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(static_cast<{_class_c_type(class_model, model)}*>(data));",
+                "}",
+                "",
+                f"napi_value {_napi_wrap_name(class_model)}(napi_env env, {_class_c_type(class_model, model)}* handle) {{",
+                "    if (handle == nullptr) {",
+                "        napi_value null_value;",
+                "        napi_get_null(env, &null_value);",
+                "        return null_value;",
+                "    }",
+                "    napi_value result;",
+                f"    napi_create_external(env, handle, {_napi_finalizer_name(class_model)}, nullptr, &result);",
+                "    return result;",
+                "}",
+                "",
+                f"{_class_c_type(class_model, model)}* {_napi_unwrap_name(class_model)}(napi_env env, napi_value value) {{",
+                "    void* data = nullptr;",
+                "    napi_get_value_external(env, value, &data);",
+                f"    return static_cast<{_class_c_type(class_model, model)}*>(data);",
+                "}",
+                "",
+            ]
+        )
+    for variant in _all_variants(model):
+        lines.append(f"napi_value napi_{variant.api_name}(napi_env env, napi_callback_info info) {{")
+        argument_count = len(variant.parameters) + (1 if variant.callable.kind in {"method", "free_function"} else 0)
+        lines.append(f"    size_t argc = {max(argument_count, 1)};")
+        lines.append(f"    napi_value argv[{max(argument_count, 1)}];")
+        lines.append("    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);")
+        argument_index = 0
+        call_arguments: list[str] = []
+        if variant.callable.kind in {"method", "free_function"}:
+            lines.append(
+                f"    auto* handle = {_napi_unwrap_name(class_models[variant.owner.cpp_name])}(env, argv[{argument_index}]);"
+            )
+            call_arguments.append("handle")
+            argument_index += 1
+        for parameter in variant.parameters:
+            js_name = f"js_{parameter.name}"
+            if parameter.adapter == "string":
+                lines.append(f"    std::string {js_name} = napi_string_value(env, argv[{argument_index}]);")
+                call_arguments.append(f"{js_name}.c_str()")
+            elif parameter.adapter == "buffer":
+                lines.append(f"    void* {js_name} = nullptr;")
+                lines.append(f"    size_t {js_name}_length = 0;")
+                lines.append(f"    napi_get_buffer_info(env, argv[{argument_index}], &{js_name}, &{js_name}_length);")
+                call_arguments.append(f"static_cast<const char*>({js_name})")
+            elif parameter.adapter == "integer":
+                lines.append(f"    int32_t {js_name} = 0;")
+                lines.append(f"    napi_get_value_int32(env, argv[{argument_index}], &{js_name});")
+                call_arguments.append(js_name)
+            elif parameter.adapter == "bool":
+                lines.append(f"    bool {js_name} = false;")
+                lines.append(f"    napi_get_value_bool(env, argv[{argument_index}], &{js_name});")
+                call_arguments.append(js_name)
+            elif is_enum_adapter(parameter.adapter):
+                lines.append(f"    int32_t {js_name} = 0;")
+                lines.append(f"    napi_get_value_int32(env, argv[{argument_index}], &{js_name});")
+                call_arguments.append(f"static_cast<{_enum_c_type(parameter.adapter, model)}>({js_name})")
+            elif is_handle_adapter(parameter.adapter):
+                target = class_models[handle_adapter_target(parameter.adapter)]
+                lines.append(f"    auto* {js_name} = {_napi_unwrap_name(target)}(env, argv[{argument_index}]);")
+                call_arguments.append(js_name)
+            elif is_variant_adapter(parameter.adapter):
+                variant_model = _variant_model(parameter.adapter, model)
+                lines.append(f"    {variant_model.c_type_name} {js_name}{{}};")
+                lines.append(f"    napi_value {js_name}_kind_prop;")
+                lines.append(f'    napi_get_named_property(env, argv[{argument_index}], "kind", &{js_name}_kind_prop);')
+                lines.append(f"    int32_t {js_name}_kind = 0;")
+                lines.append(f"    napi_get_value_int32(env, {js_name}_kind_prop, &{js_name}_kind);")
+                lines.append(
+                    f"    {js_name}.{variant_model.kind_field} = static_cast<decltype({js_name}.{variant_model.kind_field})>({js_name}_kind);"
+                )
+                # Owns the backing storage for any string-typed case below -- `.c_str()`
+                # on a *temporary* `std::string` (e.g. inline in the assignment) dangles
+                # the instant that temporary is destroyed at the end of the full
+                # expression, before the native call downstream ever reads it. Found by
+                # this spike via a real (silent, no crash -- the attribute just read back
+                # as unset) data-corruption bug, not a compile error -- see
+                # `06-wrappergen-spike-results.md`. Declared once per variant parameter
+                # (not per case) since at most one string-typed case is populated per call.
+                lines.append(f"    std::string {js_name}_string_storage;")
+                for case in variant_model.cases:
+                    prop_name = normalize_identifier(case.field)
+                    lines.append(f"    if ({js_name}_kind == {case.kind_c_name}) {{")
+                    lines.append(f"        napi_value {js_name}_prop;")
+                    lines.append(
+                        f'        napi_get_named_property(env, argv[{argument_index}], "{prop_name}", &{js_name}_prop);'
+                    )
+                    if case.field_kind == "string":
+                        lines.append(f"        {js_name}_string_storage = napi_string_value(env, {js_name}_prop);")
+                        lines.append(
+                            f"        {js_name}.{case.field} = const_cast<char*>({js_name}_string_storage.c_str());"
+                        )
+                    elif case.field_kind == "handle":
+                        target = class_models[case.handle_target]
+                        lines.append(
+                            f"        {js_name}.{case.field} = {_napi_unwrap_name(target)}(env, {js_name}_prop);"
+                        )
+                    elif case.field_kind == "double":
+                        lines.append(f"        double {js_name}_value = 0;")
+                        lines.append(f"        napi_get_value_double(env, {js_name}_prop, &{js_name}_value);")
+                        lines.append(f"        {js_name}.{case.field} = {js_name}_value;")
+                    else:
+                        lines.append(f"        int64_t {js_name}_value = 0;")
+                        lines.append(f"        napi_get_value_int64(env, {js_name}_prop, &{js_name}_value);")
+                        lines.append(f"        {js_name}.{case.field} = {js_name}_value;")
+                    lines.append("    }")
+                call_arguments.append(js_name)
+            else:
+                raise RuntimeError(f"Unsupported parameter adapter in N-API extension emitter: {parameter.adapter}")
+            argument_index += 1
+        native_call = f"{model.c_prefix}_{variant.api_name}({', '.join(call_arguments)})"
+        if variant.callable.return_adapter == "string":
+            lines.append(f"    char* result = {native_call};")
+            lines.append("    if (result == nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);")
+            lines.append("    ifcopenshell_string_free(result);")
+            lines.append("    return js_result;")
+        elif variant.callable.return_adapter == "integer":
+            lines.append(f"    int result = {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_create_int64(env, result, &js_result);")
+            lines.append("    return js_result;")
+        elif variant.callable.return_adapter == "bool":
+            lines.append(f"    bool result = {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_get_boolean(env, result, &js_result);")
+            lines.append("    return js_result;")
+        elif variant.callable.return_adapter == "void":
+            lines.append(f"    {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_undefined;")
+            lines.append("    napi_get_undefined(env, &js_undefined);")
+            lines.append("    return js_undefined;")
+        elif is_enum_adapter(variant.callable.return_adapter):
+            lines.append(f"    int result = {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_create_int32(env, result, &js_result);")
+            lines.append("    return js_result;")
+        elif is_handle_adapter(variant.callable.return_adapter):
+            target = class_models[handle_adapter_target(variant.callable.return_adapter)]
+            lines.append(f"    auto* result = {native_call};")
+            lines.append("    if (result == nullptr && ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append(f"    return {_napi_wrap_name(target)}(env, result);")
+        elif is_sequence_adapter(variant.callable.return_adapter):
+            target = class_models[sequence_adapter_target(variant.callable.return_adapter)]
+            list_prefix = f"{model.c_prefix}_{_class_c_identifier(target, model)}_list"
+            lines.append(f"    auto* result = {native_call};")
+            lines.append("    if (result == nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append(f"    int size = {list_prefix}_size(result);")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_create_array_with_length(env, size, &js_result);")
+            lines.append("    for (int index = 0; index < size; ++index) {")
+            lines.append(f"        auto* item = {list_prefix}_get(result, index);")
+            lines.append(f"        napi_set_element(env, js_result, index, {_napi_wrap_name(target)}(env, item));")
+            lines.append("    }")
+            lines.append(f"    {list_prefix}_free(result);")
+            lines.append("    return js_result;")
+        elif is_variant_adapter(variant.callable.return_adapter):
+            variant_model = _variant_model(variant.callable.return_adapter, model)
+            lines.append(f"    {variant_model.c_type_name} result = {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append(f"    switch (result.{variant_model.kind_field}) {{")
+            for case in variant_model.cases:
+                if case.kind_name == "NULL":
+                    # Deliberately falls through to `default:` below (`napi_get_null`) --
+                    # a JS `null`, matching Python's `None`, is exactly what an unset/blank
+                    # attribute value should read back as. Found by this spike: without
+                    # this, NULL fell into the generic "else" branch further down and
+                    # produced a JS *number* `0` instead -- a real, silent (no crash, no
+                    # exception -- just the wrong JS type) correctness bug in the emitter
+                    # itself, only caught by actually running the round-trip, not by
+                    # anything compiling cleanly. See `06-wrappergen-spike-results.md`.
+                    continue
+                lines.append(f"    case {case.kind_c_name}:")
+                if case.field_kind == "string":
+                    lines.append(
+                        f"        napi_create_string_utf8(env, result.{case.field}, NAPI_AUTO_LENGTH, &js_result);"
+                    )
+                elif case.field_kind == "handle":
+                    target = class_models[case.handle_target]
+                    lines.append(f"        js_result = {_napi_wrap_name(target)}(env, result.{case.field});")
+                elif case.field_kind == "double":
+                    lines.append(f"        napi_create_double(env, result.{case.field}, &js_result);")
+                elif case.kind_name == "BOOL":
+                    lines.append(f"        napi_get_boolean(env, result.{case.field} != 0, &js_result);")
+                else:
+                    lines.append(f"        napi_create_int64(env, result.{case.field}, &js_result);")
+                lines.append("        break;")
+            lines.append("    default:")
+            lines.append("        napi_get_null(env, &js_result);")
+            lines.append("        break;")
+            lines.append("    }")
+            lines.append("    return js_result;")
+        else:
+            raise RuntimeError(
+                f"Unsupported return adapter in N-API extension emitter: {variant.callable.return_adapter}"
+            )
+        lines.append("}")
+        lines.append("")
+    lines.append("}  // namespace")
+    lines.append("")
+    lines.append("napi_value Init(napi_env env, napi_value exports) {")
+    for variant in _all_variants(model):
+        lines.append(f"    {{")
+        lines.append("        napi_value fn;")
+        lines.append(
+            f'        napi_create_function(env, "{variant.api_name}", NAPI_AUTO_LENGTH, napi_{variant.api_name}, nullptr, &fn);'
+        )
+        lines.append(f'        napi_set_named_property(env, exports, "{variant.api_name}", fn);')
+        lines.append("    }")
+    for enum_model in model.enums:
+        for value in enum_model.values:
+            lines.append("    {")
+            lines.append("        napi_value value;")
+            lines.append(f"        napi_create_int32(env, {value.c_name}, &value);")
+            lines.append(f'        napi_set_named_property(env, exports, "{value.name}", value);')
+            lines.append("    }")
+    for variant_model in model.variant_adapters:
+        for case in variant_model.cases:
+            lines.append("    {")
+            lines.append("        napi_value value;")
+            lines.append(f"        napi_create_int32(env, {case.kind_c_name}, &value);")
+            lines.append(f'        napi_set_named_property(env, exports, "{case.kind_name}", value);')
+            lines.append("    }")
+    lines.append("    return exports;")
+    lines.append("}")
+    lines.append("")
+    lines.append("NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _ts_type_for_parameter(parameter: ParameterModel, model: ModuleModel) -> str:
+    if parameter.adapter == "string":
+        return "string"
+    if parameter.adapter in {"integer"} or is_enum_adapter(parameter.adapter):
+        return "number"
+    if parameter.adapter == "bool":
+        return "boolean"
+    if parameter.adapter == "buffer":
+        return "Buffer"
+    if is_handle_adapter(parameter.adapter):
+        return _class_index(model)[handle_adapter_target(parameter.adapter)].py_name
+    if is_variant_adapter(parameter.adapter):
+        return pascal_case(_variant_model(parameter.adapter, model).c_type_name)
+    return "unknown"
+
+
+def _ts_type_for_return(adapter: str, model: ModuleModel) -> str:
+    if adapter == "string":
+        return "string"
+    if adapter == "integer" or is_enum_adapter(adapter):
+        return "number"
+    if adapter == "bool":
+        return "boolean"
+    if adapter == "void":
+        return "void"
+    if is_handle_adapter(adapter):
+        return _class_index(model)[handle_adapter_target(adapter)].py_name
+    if is_sequence_adapter(adapter):
+        target = _class_index(model)[sequence_adapter_target(adapter)]
+        return f"{target.py_name}[]"
+    if is_variant_adapter(adapter):
+        # Faithful to Python's `get_argument`/`set_attribute_value_py` ergonomics on the
+        # *return* side (research/01-python-core-and-lowlevel.md SS5): a plain value of
+        # whatever JS type the attribute's runtime kind actually is, not a wrapper object.
+        variant_model = _variant_model(adapter, model)
+        handle_case_types = {
+            _class_index(model)[case.handle_target].py_name
+            for case in variant_model.cases
+            if case.field_kind == "handle"
+        }
+        alternatives = ["string", "number", "boolean", *sorted(handle_case_types), "null"]
+        return " | ".join(alternatives)
+    return "unknown"
+
+
+def emit_typescript_facade(model: ModuleModel) -> str:
+    """TypeScript facade -- structurally parallel to `emit_python_facade`: the same
+    per-`ClassModel`/`CallableModel` walk, replacing Python's `__slots__` class
+    generation with a TS class-with-a-private-handle-field, emitting `.d.ts`-friendly
+    signatures directly rather than Python type hints.
+    """
+    lines = [
+        "// AUTO-GENERATED by wrappergen's `emit_typescript_facade` -- do not edit by hand.",
+        f'import * as native from "./{Path(model.extension_source_name).stem}.node";',
+        "",
+    ]
+    for variant_model in model.variant_adapters:
+        lines.append(f"export type {pascal_case(variant_model.c_type_name)} = {{")
+        lines.append(f"    kind: number;")
+        for case in variant_model.cases:
+            lines.append(f"    {normalize_identifier(case.field)}?: unknown;")
+        lines.append("};")
+        lines.append("")
+    for class_model in model.classes:
+        lines.append(f"export class {class_model.py_name} {{")
+        lines.append("    /** @internal */ readonly _handle: unknown;")
+        lines.append("    /** @internal */ constructor(handle: unknown) {")
+        lines.append("        this._handle = handle;")
+        lines.append("    }")
+        lines.append("")
+        for callable_model in class_model.callables:
+            full_variant = _full_variant(class_model, callable_model)
+            parameters = ", ".join(
+                f"{parameter.name}: {_ts_type_for_parameter(parameter, model)}"
+                for parameter in callable_model.parameters
+            )
+            call_arguments = ", ".join(parameter.name for parameter in callable_model.parameters)
+            if callable_model.kind == "constructor":
+                lines.append(f"    static {callable_model.py_name}({parameters}): {class_model.py_name} {{")
+                lines.append(
+                    f"        return new {class_model.py_name}(native.{full_variant.api_name}({call_arguments}));"
+                )
+                lines.append("    }")
+            else:
+                return_type = _ts_type_for_return(callable_model.return_adapter, model)
+                lines.append(f"    {callable_model.py_name}({parameters}): {return_type} {{")
+                separator = ", " if call_arguments else ""
+                native_call = f"native.{full_variant.api_name}(this._handle{separator}{call_arguments})"
+                if callable_model.return_adapter == "void":
+                    lines.append(f"        {native_call};")
+                elif is_handle_adapter(callable_model.return_adapter):
+                    target = _class_index(model)[handle_adapter_target(callable_model.return_adapter)]
+                    lines.append(f"        const result = {native_call};")
+                    lines.append(
+                        f"        return result === null ? null as unknown as {target.py_name} : new {target.py_name}(result);"
+                    )
+                elif is_sequence_adapter(callable_model.return_adapter):
+                    target = _class_index(model)[sequence_adapter_target(callable_model.return_adapter)]
+                    lines.append(f"        const result = {native_call} as unknown[];")
+                    lines.append(f"        return result.map((item) => new {target.py_name}(item));")
+                else:
+                    lines.append(f"        return {native_call};")
+                lines.append("    }")
+            lines.append("")
+        lines.append("}")
+        lines.append("")
     return "\n".join(lines)
 
 

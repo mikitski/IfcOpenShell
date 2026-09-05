@@ -91,6 +91,18 @@ def enum_adapter_target(adapter: str) -> str:
     return adapter.split(":", 1)[1]
 
 
+def variant_adapter_name(cpp_name: str) -> str:
+    return f"variant:{normalize_cpp_type(cpp_name)}"
+
+
+def is_variant_adapter(adapter: str) -> bool:
+    return adapter.startswith("variant:")
+
+
+def variant_adapter_target(adapter: str) -> str:
+    return adapter.split(":", 1)[1]
+
+
 def sequence_adapter_name(cpp_name: str) -> str:
     return f"sequence:{normalize_cpp_type(cpp_name)}"
 
