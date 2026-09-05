@@ -257,7 +257,13 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const files = ['configure.log', 'build.log', 'build-native.log', '/tmp/build-native.log'];
+            const files = [
+              'configure.log',
+              'build.log',
+              'build-native.log',
+              'src/ifcopenshell-ts/build-native.log',
+              '/tmp/build-native.log',
+            ];
             let body = `### CI diagnostic: ${{ matrix.os }} ${{ matrix.arch }} (${context.sha.slice(0, 8)})\n`;
             let any = false;
             for (const f of files) {
