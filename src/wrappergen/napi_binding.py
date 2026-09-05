@@ -50,12 +50,18 @@ if __package__ in {None, ""}:
         emit_napi_extension,
         emit_typescript_facade,
     )
-    from wrappergen.model import CallableModel, ParameterModel, VariantAdapterModel, VariantCaseModel
+    from wrappergen.model import (
+        AsyncVariantModel,
+        CallableModel,
+        ParameterModel,
+        VariantAdapterModel,
+        VariantCaseModel,
+    )
 else:
     from .clang_frontend import build_module_model
     from .config import CompilationConfig, IgnoreConfig, WrapperConfig
     from .emit import emit_c_api_header, emit_c_api_implementation, emit_napi_extension, emit_typescript_facade
-    from .model import CallableModel, ParameterModel, VariantAdapterModel, VariantCaseModel
+    from .model import AsyncVariantModel, CallableModel, ParameterModel, VariantAdapterModel, VariantCaseModel
 
 # See `napi_spike.py`'s identical constant for the full rationale: a real, pre-existing
 # `src/ifcparse/rocksdb_map_adapter.h` header-hygiene bug (missing `<vector>`/
@@ -67,9 +73,11 @@ _ROCKSDB_HEADER_ORDERING_WORKAROUND = ["-include", "vector", "-include", "string
 def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
     src_ifcparse = repo_root / "src" / "ifcparse"
     shim_header = repo_root / "src" / "wrappergen" / "shim" / "attribute_value_shim.h"
+    file_shim_header = repo_root / "src" / "wrappergen" / "shim" / "file_shim.h"
     headers = [str(path.resolve()) for path in sorted(src_ifcparse.glob("*.h")) if path.parent.name != "schemas"]
     headers = [header for header in headers if not header.endswith(("rocksdb_map_adapter.h", "rocksdb_set_view.h"))]
     headers.append(str(shim_header.resolve()))
+    headers.append(str(file_shim_header.resolve()))
 
     include_dirs = [str(src_ifcparse.resolve())]
 
@@ -368,18 +376,94 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
     )
 
 
+def _inject_file_primitives(model) -> None:
+    """Appends the one `ifcopenshell::file`-level primitive this PR's async work needs
+    that only exists as SWIG `%extend` glue today (`file_shim.h`/`.cpp`'s `write_file`,
+    TODOS.md's "Phase 1 primitive binding" gap #2): `write`. Same injection technique
+    `_inject_entity_instance_primitives` already established for `express::base`.
+    """
+    file_class = next(class_model for class_model in model.classes if class_model.cpp_name == "ifcopenshell::file")
+    path_parameter = ParameterModel(name="path", cpp_name="path", cpp_type="std::string", adapter="string")
+    write = _free_function(
+        file_class,
+        "ifcopenshell::wrappergen::write_file",
+        "write",
+        "write",
+        [path_parameter],
+    )
+    file_class.callables.append(write)
+
+
+def _inject_async_variants(model) -> None:
+    """The three primitives planning/ifcopenshell-ts/10-architecture.md's "Async story"
+    section names as needing a `napi_create_async_work`-based sibling alongside their
+    sync counterpart: file open/parse (path- and buffer-based), the bulk
+    `get_all_attribute_values` serializer, and `write` (see `_inject_file_primitives`
+    above for the sync primitive this last one needed first). Each entry names an
+    already-emitted sync `CallableVariant` by its `api_name` -- resolved back to its full
+    signature by `emit.py`'s `_variant_by_api_name` at emission time -- plus where/how the
+    TS facade should additionally expose it.
+
+    File open only gets an async sibling for its *minimal*-arity sync entry point
+    (`file_new_with_path`/`file_new_with_data_data_size`, i.e. no explicit filetype/
+    readonly/logger) -- the same disclosed, bounded scope the sync facade's own
+    constructors already have (TODOS.md gap #4: the TS facade doesn't support C++
+    default-argument parameters, so only the maximal-arity overload of each constructor
+    family gets a class-level convenience method; the minimal-arity ones are only
+    reachable via the raw `native.*` function either way). Extending async file-open to
+    the fuller-arity overloads is the same bounded follow-up as that existing gap, not a
+    new one this PR introduces.
+    """
+    model.async_variants.extend(
+        [
+            AsyncVariantModel(
+                sync_api_name="file_new_with_path",
+                async_api_name="file_new_with_path_async",
+                ts_owner_py_name="file",
+                ts_method_name="open_path_async",
+                ts_is_static=True,
+            ),
+            AsyncVariantModel(
+                sync_api_name="file_new_with_data_data_size",
+                async_api_name="file_new_with_data_data_size_async",
+                ts_owner_py_name="file",
+                ts_method_name="open_buffer_async",
+                ts_is_static=True,
+            ),
+            AsyncVariantModel(
+                sync_api_name="base_get_all_attribute_values",
+                async_api_name="base_get_all_attribute_values_async",
+                ts_owner_py_name="entity_instance",
+                ts_method_name="get_all_attribute_values_async",
+                ts_is_static=False,
+            ),
+            AsyncVariantModel(
+                sync_api_name="file_write",
+                async_api_name="file_write_async",
+                ts_owner_py_name="file",
+                ts_method_name="write_async",
+                ts_is_static=False,
+            ),
+        ]
+    )
+
+
 def build_napi_binding_model(repo_root: Path):
     config = build_napi_binding_config(repo_root)
     model = build_module_model(config)
     variant_adapter = _attribute_value_variant_model()
     model.variant_adapters.append(variant_adapter)
     _inject_entity_instance_primitives(model, variant_adapter)
+    _inject_file_primitives(model)
+    _inject_async_variants(model)
     # The injected free functions above aren't discovered from any clang cursor, so
     # `build_module_model`'s `source_headers` computation (which only walks
     # *discovered* classes' cursor locations) never has a reason to include the shim
     # header that declares them -- see `napi_spike.py`'s identical fix.
     if "attribute_value_shim.h" not in model.source_headers:
         model.source_headers.append("attribute_value_shim.h")
+    if "file_shim.h" not in model.source_headers:
+        model.source_headers.append("file_shim.h")
     return model
 
 

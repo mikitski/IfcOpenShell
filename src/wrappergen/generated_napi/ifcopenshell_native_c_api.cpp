@@ -8,6 +8,7 @@
 #include "file.h"
 #include "file_open_status.h"
 #include "file_reader.h"
+#include "file_shim.h"
 #include "global_id.h"
 #include "instance_data.h"
 #include "logger.h"
@@ -3190,6 +3191,20 @@ void ifcopenshell_file_reset_identity_cache(ifcopenshell_file_t* handle) {
             throw std::runtime_error("Null handle received");
         }
         handle->value->reset_identity_cache();
+        return;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return;
+    }
+}
+
+void ifcopenshell_file_write(ifcopenshell_file_t* handle, const char* path) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        ifcopenshell::wrappergen::write_file(*handle->value, std::string(path ? path : ""));
         return;
     } catch (const std::exception& exception) {
         set_last_error(exception);

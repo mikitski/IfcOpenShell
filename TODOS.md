@@ -186,11 +186,12 @@ disclosed gaps:
 2. **Several `file`-level primitives only exist as SWIG `%extend` glue, not real C++ methods, and
    are not yet shimmed:** `file_pointer()` (identity key, needed by Phase 2's `file_mixin.post_init`
    registry per `research/07-fresh-wrapper-per-access.md`), `to_string()`/`from_string()` (whole-file
-   SPF serialization), `_write(fn)` (atomic file write), `entity_names()`, `schema_identifier()`,
-   `storage_mode()`. Same pattern as the entity_instance primitives this PR *did* add
-   (`attribute_value_shim.h`/`.cpp`'s `get_argument_index`/`attribute_name`/`attribute_type`/
-   `get_attribute_category`/`is_a`) — bounded, one-function-at-a-time follow-up work, not a design
-   gap.
+   SPF serialization), `entity_names()`, `schema_identifier()`, `storage_mode()`. Same pattern as the
+   entity_instance primitives this PR *did* add (`attribute_value_shim.h`/`.cpp`'s
+   `get_argument_index`/`attribute_name`/`attribute_type`/`get_attribute_category`/`is_a`) —
+   bounded, one-function-at-a-time follow-up work, not a design gap. (`_write(fn)` — as
+   `write(path)` — was picked up and shimmed by the async-primitives PR, `file_shim.h`/`.cpp`; the
+   rest of this list is still deferred.)
 3. **`get_attribute_names()`/`get_inverse_attribute_names()` bulk fetch not implemented** (would need
    a third adapter kind, "sequence of scalar," alongside this PR's new `sequence_of_variant:`
    adapter — the *capability* to enumerate attribute names one at a time already exists via
@@ -221,3 +222,57 @@ question (confirmed: fresh JS wrapper per accessor call, not stable per-pointer 
 Proxy design needs the identity-keyed registry it was written anticipating it might not need).
 
 **Depends on / blocked by:** None block each other; pick up independently as needed.
+
+---
+
+### Async primitive variants: disclosed scope cuts
+
+**What:** The async-primitives PR (`napi_create_async_work`-based siblings of file open/parse,
+`get_all_attribute_values`, and `write`, per `10-architecture.md`'s "Async story") intentionally
+narrows scope in two ways:
+
+1. **File open only gets an async sibling for its *minimal*-arity sync entry point**
+   (`file_new_with_path`/`file_new_with_data_data_size` — just `path`, or `data`+`data_size`), not
+   the fuller-arity overloads that also take an explicit `filetype`/`readonly`/`logger`. This is the
+   same disclosed, bounded scope gap #4 above already describes for the *sync* facade (only the
+   maximal-arity overload of each C++ constructor family gets a class-level TS convenience method;
+   the async siblings piggyback on the one arity that already has no such gap either way, the
+   minimal one). Extending async file-open to the fuller-arity overloads is the same bounded
+   follow-up as gap #4, not a new one.
+2. **The N-API async emitter (`emit.py`'s `_emit_napi_async_extension`/`_emit_async_facade_members`)
+   only handles the parameter/return adapter shapes the three hand-picked async targets actually
+   use** (parameters: `string`, `integer`, a `buffer`+its `integer` length; returns: `void`, a
+   `handle`, `sequence_of_variant`) — it raises rather than silently mis-emitting for anything else
+   (a `handle`- or `variant`-typed *parameter*, an `enum` return, etc.). `model.async_variants` is a
+   short, explicit, hand-picked list (not "every callable gets an async twin"), so this has not been
+   a real limitation yet — flagged here so whoever adds the next async variant knows to extend this
+   function rather than assume it's fully generic.
+
+**Why:** Both are real, understood, and match the scope-discipline precedent set by the prior two
+Phase 1 PRs (ship a smaller, complete, well-tested slice; disclose the rest rather than force it in).
+Neither blocks this PR's own correctness — both are documented, deliberate omissions, not bugs.
+
+**Context:** Verified locally (this sandbox has no `cmake`/full C++ toolchain for the addon's real
+CMake target): `ifcopenshell_native_c_api.cpp`/`.h` and `ifcopenshell_native.cpp` both pass a full
+`clang++ -fsyntax-only` check against the *real* `src/ifcparse` headers (plus real Boost 1.86
+headers and real `node_api.h`) — this caught and fixed one genuine bug during development (the
+generated C-ABI wrapper structs, e.g. `ifcopenshell_file_t`, are only forward-declared in the header
+wrappergen emits; their full definition lives only in the separately-compiled implementation file,
+so an async "self" argument can't be deep-copied by value the way an earlier draft of this PR tried
+— fixed by pinning the original JS wrapper alive with a `napi_ref` instead and using its raw pointer
+directly, since a full CMake build wasn't available to catch this at native-addon build time).
+Beyond static checking, the full C++ core (`ifcparse`, `plugin`, the shims, the generated C API) was
+compiled and linked into both a standalone executable and a real loadable `.node` addon via manual
+`clang++` invocations (bypassing the missing `cmake`), and exercised end-to-end under the locally
+available Node 20.12.2: `write()`/`write_async()` round-tripped a real `IfcWall` through SPF text,
+`open_path_async()`/`open_buffer_async()` reopened it, `get_all_attribute_values_async()` matched
+its sync counterpart, the rejection path produced a real JS `Error`, a `setImmediate` scheduled
+right after an async write ran and completed *before* the write's promise resolved (confirming the
+event loop is not blocked during the call — the entire point of this PR), and repeated
+`--expose-gc`-forced GC passes while a write/attribute-fetch was in flight did not crash or corrupt
+memory (confirming the `napi_ref`-pinning fix above actually works). The real CMake-driven,
+CI-built addon (all 6 OS×arch legs) still needs to confirm this compiles/links/runs identically
+under the project's actual build system and every target compiler (MSVC in particular, given this
+exact code area's history of clang/MSVC divergences per the prior two Phase 1 PRs).
+
+**Depends on / blocked by:** None.

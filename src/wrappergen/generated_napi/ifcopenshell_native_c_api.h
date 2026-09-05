@@ -319,6 +319,7 @@ ifcopenshell_express_base_t* ifcopenshell_file_create_with_declaration_instance_
 void ifcopenshell_file_batch(ifcopenshell_file_t* handle);
 void ifcopenshell_file_unbatch(ifcopenshell_file_t* handle);
 void ifcopenshell_file_reset_identity_cache(ifcopenshell_file_t* handle);
+void ifcopenshell_file_write(ifcopenshell_file_t* handle, const char* path);
 ifcopenshell_global_id_t* ifcopenshell_global_id_new();
 ifcopenshell_global_id_t* ifcopenshell_global_id_new_with_logger(ifcopenshell_logger_t* logger);
 ifcopenshell_global_id_t* ifcopenshell_global_id_new_with_value(const char* value);

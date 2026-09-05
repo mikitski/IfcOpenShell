@@ -108,6 +108,20 @@ mixin layer (Phase 2) exposes both: sync for convenience/small files and REPL-st
 server-safe handling of large or untrusted files. This is Phase 1 scope, alongside the primitives
 already listed in §2 — real, well-trodden N-API work, not exploratory.
 
+**Implemented** (async-primitives PR, `20-roadmap.md`'s Phase 1 tracker): `file_new_with_path`,
+`file_new_with_data_data_size`, `get_all_attribute_values`, and the newly-shimmed `write` each got
+an `_async` N-API sibling returning a JS `Promise`. One load-bearing implementation detail for
+whoever builds on this: a handle-typed "self" argument (e.g. the `file`/`entity_instance` a method
+runs against) can't be deep-copied into an independently-owned C-ABI wrapper struct from the N-API
+translation unit — `emit_c_api_header` only forward-declares those structs, their full definition
+lives only in the separately-compiled implementation file. Each async variant instead takes a
+`napi_ref` on the original JS wrapper object for the duration of the worker-thread call (pinning it,
+and therefore the native object it owns, alive even if the JS wrapper itself becomes unreachable and
+a GC pass runs mid-flight), and uses the already-unwrapped raw pointer directly. Verified end-to-end
+under real Node (manually built, this sandbox lacked `cmake`): correct results, a real rejected
+`Promise` on error, the event loop staying responsive during a slow call, and no crash/corruption
+under repeated forced-GC pressure while a call was in flight.
+
 **Error-propagation contract (added by `plan-eng-review`, was previously undecided between two
 incompatible patterns described in the research).** SWIG's Python binding translates C++
 exceptions 1:1 into Python exceptions per call (`research/01` §5: `attribute_out_of_range_exception`

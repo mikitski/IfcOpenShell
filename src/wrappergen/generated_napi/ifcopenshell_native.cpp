@@ -2,8 +2,11 @@
 
 #include "ifcopenshell_native_c_api.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -3756,6 +3759,21 @@ napi_value napi_file_reset_identity_cache(napi_env env, napi_callback_info info)
     return js_undefined;
 }
 
+napi_value napi_file_write(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_ifcopenshell_file(env, argv[0]);
+    std::string js_path = napi_string_value(env, argv[1]);
+    ifcopenshell_file_write(handle, js_path.c_str());
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_undefined;
+    napi_get_undefined(env, &js_undefined);
+    return js_undefined;
+}
+
 napi_value napi_global_id_new(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1];
@@ -3817,6 +3835,253 @@ napi_value napi_global_id_formatted(napi_env env, napi_callback_info info) {
     napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);
     ifcopenshell_string_free(result);
     return js_result;
+}
+
+napi_value make_async_error(napi_env env, const std::string& message) {
+    napi_value error_message;
+    napi_create_string_utf8(env, message.c_str(), NAPI_AUTO_LENGTH, &error_message);
+    napi_value error;
+    napi_create_error(env, nullptr, error_message, &error);
+    return error;
+}
+
+struct file_new_with_path_async_data_t {
+    std::string path;
+    ifcopenshell_file_t* result = nullptr;
+    std::string error;
+    napi_deferred deferred = nullptr;
+    napi_async_work work = nullptr;
+};
+
+void file_new_with_path_async_execute(napi_env, void* raw_data) {
+    auto* data = static_cast<file_new_with_path_async_data_t*>(raw_data);
+    data->result = ifcopenshell_file_new_with_path(data->path.c_str());
+    const char* message = ifcopenshell_last_error_message();
+    if (message != nullptr) {
+        data->error = message;
+    }
+}
+
+void file_new_with_path_async_complete(napi_env env, napi_status status, void* raw_data) {
+    auto* data = static_cast<file_new_with_path_async_data_t*>(raw_data);
+    if (status != napi_ok) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));
+    } else if (!data->error.empty()) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));
+    } else {
+        napi_resolve_deferred(env, data->deferred, wrap_ifcopenshell_file(env, data->result));
+    }
+    napi_delete_async_work(env, data->work);
+    delete data;
+}
+
+// Async sibling of `napi_file_new_with_path`: the file path is copied into an owned
+// `std::string` here on the main thread, then the parse itself
+// (`ifcopenshell_file_new_with_path` -- the exact same, already-emitted synchronous
+// C-ABI function, pure C++ with no V8/N-API calls inside it) runs on a libuv worker
+// thread via `napi_create_async_work`, so a large file's parse no longer blocks the
+// event loop for every other concurrent request (planning/ifcopenshell-ts/
+// 10-architecture.md's "Async story").
+napi_value napi_file_new_with_path_async(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* data = new file_new_with_path_async_data_t();
+    data->path = napi_string_value(env, argv[0]);
+    napi_value promise;
+    napi_create_promise(env, &data->deferred, &promise);
+    napi_value resource_name;
+    napi_create_string_utf8(env, "file_new_with_path_async", NAPI_AUTO_LENGTH, &resource_name);
+    napi_create_async_work(env, nullptr, resource_name, file_new_with_path_async_execute, file_new_with_path_async_complete, data, &data->work);
+    napi_queue_async_work(env, data->work);
+    return promise;
+}
+
+struct file_new_with_data_data_size_async_data_t {
+    std::vector<char> data;
+    ifcopenshell_file_t* result = nullptr;
+    std::string error;
+    napi_deferred deferred = nullptr;
+    napi_async_work work = nullptr;
+};
+
+void file_new_with_data_data_size_async_execute(napi_env, void* raw_data) {
+    auto* data = static_cast<file_new_with_data_data_size_async_data_t*>(raw_data);
+    data->result = ifcopenshell_file_new_with_data_data_size(data->data.data(), static_cast<int>(data->data.size()));
+    const char* message = ifcopenshell_last_error_message();
+    if (message != nullptr) {
+        data->error = message;
+    }
+}
+
+void file_new_with_data_data_size_async_complete(napi_env env, napi_status status, void* raw_data) {
+    auto* data = static_cast<file_new_with_data_data_size_async_data_t*>(raw_data);
+    if (status != napi_ok) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));
+    } else if (!data->error.empty()) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));
+    } else {
+        napi_resolve_deferred(env, data->deferred, wrap_ifcopenshell_file(env, data->result));
+    }
+    napi_delete_async_work(env, data->work);
+    delete data;
+}
+
+// Async sibling of `napi_file_new_with_data_data_size`. The input `Buffer`'s bytes are
+// copied into an owned `std::vector<char>` on the main thread (not just its raw pointer
+// captured across the async boundary): the underlying C++ constructor
+// (`ifcopenshell::file(void* data, int data_size, ...)`, parse.cpp) already copies the
+// bytes it needs into its own internal storage before returning, so this isn't required
+// for *that* call's own correctness -- it's required because nothing may assume a
+// JS-managed `Buffer` allocation survives untouched while a GC pass can run
+// concurrently on the main thread during the worker thread's (possibly lengthy) parse.
+// The caller-supplied `data_size` is clamped to the copied buffer's actual length so an
+// out-of-range value can't read past the copy.
+napi_value napi_file_new_with_data_data_size_async(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* data = new file_new_with_data_data_size_async_data_t();
+    {
+        void* buffer_data = nullptr;
+        size_t buffer_length = 0;
+        napi_get_buffer_info(env, argv[0], &buffer_data, &buffer_length);
+        data->data.assign(static_cast<const char*>(buffer_data), static_cast<const char*>(buffer_data) + buffer_length);
+    }
+    int32_t js_data_size = 0;
+    napi_get_value_int32(env, argv[1], &js_data_size);
+    data->data.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(js_data_size, static_cast<int32_t>(data->data.size())))));
+    napi_value promise;
+    napi_create_promise(env, &data->deferred, &promise);
+    napi_value resource_name;
+    napi_create_string_utf8(env, "file_new_with_data_data_size_async", NAPI_AUTO_LENGTH, &resource_name);
+    napi_create_async_work(env, nullptr, resource_name, file_new_with_data_data_size_async_execute, file_new_with_data_data_size_async_complete, data, &data->work);
+    napi_queue_async_work(env, data->work);
+    return promise;
+}
+
+struct base_get_all_attribute_values_async_data_t {
+    ifcopenshell_express_base_t* self = nullptr;
+    napi_ref self_ref = nullptr;
+    ifcopenshell_attribute_value_variant_list_t result{};
+    std::string error;
+    napi_deferred deferred = nullptr;
+    napi_async_work work = nullptr;
+};
+
+void base_get_all_attribute_values_async_execute(napi_env, void* raw_data) {
+    auto* data = static_cast<base_get_all_attribute_values_async_data_t*>(raw_data);
+    data->result = ifcopenshell_base_get_all_attribute_values(data->self);
+    const char* message = ifcopenshell_last_error_message();
+    if (message != nullptr) {
+        data->error = message;
+    }
+}
+
+void base_get_all_attribute_values_async_complete(napi_env env, napi_status status, void* raw_data) {
+    auto* data = static_cast<base_get_all_attribute_values_async_data_t*>(raw_data);
+    napi_delete_reference(env, data->self_ref);
+    if (status != napi_ok) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));
+    } else if (!data->error.empty()) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));
+        ifcopenshell_attribute_value_variant_list_free(data->result);
+    } else {
+        napi_value js_result;
+        napi_create_array_with_length(env, data->result.count, &js_result);
+        for (int index = 0; index < data->result.count; ++index) {
+            napi_set_element(env, js_result, index, ifcopenshell_attribute_value_variant_to_js(env, data->result.items[index]));
+        }
+        ifcopenshell_attribute_value_variant_list_free(data->result);
+        napi_resolve_deferred(env, data->deferred, js_result);
+    }
+    napi_delete_async_work(env, data->work);
+    delete data;
+}
+
+// Async sibling of `napi_base_get_all_attribute_values` -- the Phase 1 stand-in for
+// Python's fully-recursive `get_info_cpp` bulk serializer named explicitly in
+// `10-architecture.md`'s "Async story". `argv[0]`'s already-unwrapped C-ABI pointer
+// (`data->self`) is used directly by the worker thread rather than copied: the
+// generated `ifcopenshell_express_base_t` struct is only forward-declared here (its
+// full definition, needed to copy-construct one, lives in
+// `ifcopenshell_native_c_api.cpp`, a separate translation unit), so instead a
+// `napi_ref` pins the original JS wrapper object alive (and therefore its finalizer
+// un-run, and therefore `self` un-freed) for the exact duration of the async work --
+// released in the "complete" callback once the worker thread is done dereferencing it.
+napi_value napi_base_get_all_attribute_values_async(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* data = new base_get_all_attribute_values_async_data_t();
+    data->self = unwrap_express_base(env, argv[0]);
+    napi_create_reference(env, argv[0], 1, &data->self_ref);
+    napi_value promise;
+    napi_create_promise(env, &data->deferred, &promise);
+    napi_value resource_name;
+    napi_create_string_utf8(env, "base_get_all_attribute_values_async", NAPI_AUTO_LENGTH, &resource_name);
+    napi_create_async_work(env, nullptr, resource_name, base_get_all_attribute_values_async_execute, base_get_all_attribute_values_async_complete, data, &data->work);
+    napi_queue_async_work(env, data->work);
+    return promise;
+}
+
+struct file_write_async_data_t {
+    ifcopenshell_file_t* self = nullptr;
+    napi_ref self_ref = nullptr;
+    std::string path;
+    std::string error;
+    napi_deferred deferred = nullptr;
+    napi_async_work work = nullptr;
+};
+
+void file_write_async_execute(napi_env, void* raw_data) {
+    auto* data = static_cast<file_write_async_data_t*>(raw_data);
+    ifcopenshell_file_write(data->self, data->path.c_str());
+    const char* message = ifcopenshell_last_error_message();
+    if (message != nullptr) {
+        data->error = message;
+    }
+}
+
+void file_write_async_complete(napi_env env, napi_status status, void* raw_data) {
+    auto* data = static_cast<file_write_async_data_t*>(raw_data);
+    napi_delete_reference(env, data->self_ref);
+    if (status != napi_ok) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));
+    } else if (!data->error.empty()) {
+        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));
+    } else {
+        napi_value js_undefined;
+        napi_get_undefined(env, &js_undefined);
+        napi_resolve_deferred(env, data->deferred, js_undefined);
+    }
+    napi_delete_async_work(env, data->work);
+    delete data;
+}
+
+// Async sibling of `napi_file_write`, per `10-architecture.md`'s "Async story" mandate
+// (file open/parse, the bulk attribute-value serializer, and `write` are the three
+// primitives named as needing one). Same `napi_ref`-pinning technique as
+// `napi_base_get_all_attribute_values_async` above: `data->self` is the original,
+// already-unwrapped `ifcopenshell_file_t*`, kept alive (and therefore the underlying
+// `ifcopenshell::file` it shares ownership of, via its `shared_ptr`) for the exact
+// duration of the worker thread's serialization by a `napi_ref` on `argv[0]`, not by
+// copying the (here-incomplete) C-ABI struct.
+napi_value napi_file_write_async(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* data = new file_write_async_data_t();
+    data->self = unwrap_ifcopenshell_file(env, argv[0]);
+    napi_create_reference(env, argv[0], 1, &data->self_ref);
+    data->path = napi_string_value(env, argv[1]);
+    napi_value promise;
+    napi_create_promise(env, &data->deferred, &promise);
+    napi_value resource_name;
+    napi_create_string_utf8(env, "file_write_async", NAPI_AUTO_LENGTH, &resource_name);
+    napi_create_async_work(env, nullptr, resource_name, file_write_async_execute, file_write_async_complete, data, &data->work);
+    napi_queue_async_work(env, data->work);
+    return promise;
 }
 
 }  // namespace
@@ -4824,6 +5089,11 @@ napi_value Init(napi_env env, napi_value exports) {
     }
     {
         napi_value fn;
+        napi_create_function(env, "file_write", NAPI_AUTO_LENGTH, napi_file_write, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_write", fn);
+    }
+    {
+        napi_value fn;
         napi_create_function(env, "global_id_new", NAPI_AUTO_LENGTH, napi_global_id_new, nullptr, &fn);
         napi_set_named_property(env, exports, "global_id_new", fn);
     }
@@ -4846,6 +5116,26 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value fn;
         napi_create_function(env, "global_id_formatted", NAPI_AUTO_LENGTH, napi_global_id_formatted, nullptr, &fn);
         napi_set_named_property(env, exports, "global_id_formatted", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "file_new_with_path_async", NAPI_AUTO_LENGTH, napi_file_new_with_path_async, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_new_with_path_async", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "file_new_with_data_data_size_async", NAPI_AUTO_LENGTH, napi_file_new_with_data_data_size_async, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_new_with_data_data_size_async", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_get_all_attribute_values_async", NAPI_AUTO_LENGTH, napi_base_get_all_attribute_values_async, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_get_all_attribute_values_async", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "file_write_async", NAPI_AUTO_LENGTH, napi_file_write_async, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_write_async", fn);
     }
     {
         napi_value value;
