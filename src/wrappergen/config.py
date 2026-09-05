@@ -18,6 +18,15 @@ class IgnoreConfig:
     classes: list[str] = field(default_factory=list)
     enums: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
+    # Unlike `classes` (which also removes the class as a *target* -- e.g. as a resolvable
+    # parameter/return type elsewhere), this only suppresses a class's own constructors,
+    # for the case where a class needs to remain a valid handle-adapter target (e.g. an
+    # optional trailing parameter on another class's constructor) but its own constructors
+    # can't be wrapped by the generic "construct and wrap by value" emission path (e.g. a
+    # deleted copy constructor + an implicitly-deleted move constructor -- found by the
+    # wrappergen N-API spike at full-header-set scale, see
+    # planning/ifcopenshell-ts/research/06-wrappergen-spike-results.md).
+    no_constructors: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
