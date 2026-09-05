@@ -10,14 +10,24 @@ from .conventions import (
     is_enum_adapter,
     is_handle_adapter,
     is_sequence_adapter,
+    is_sequence_of_variant_adapter,
     is_variant_adapter,
     normalize_cpp_type,
     normalize_identifier,
     pascal_case,
     sequence_adapter_target,
+    sequence_of_variant_adapter_target,
     variant_adapter_target,
 )
-from .model import CallableModel, ClassModel, EnumModel, ModuleModel, ParameterModel, VariantAdapterModel
+from .model import (
+    CallableModel,
+    ClassModel,
+    EnumModel,
+    ModuleModel,
+    ParameterModel,
+    VariantAdapterModel,
+    VariantCaseModel,
+)
 
 
 def _class_index(model: ModuleModel) -> dict[str, ClassModel]:
@@ -37,6 +47,59 @@ def _variant_model(adapter: str, model: ModuleModel) -> VariantAdapterModel:
     if variant is None:
         raise RuntimeError(f"Unable to resolve variant adapter '{adapter}'")
     return variant
+
+
+def _sequence_of_variant_model(adapter: str, model: ModuleModel) -> VariantAdapterModel:
+    variant = _variant_index(model).get(sequence_of_variant_adapter_target(adapter))
+    if variant is None:
+        raise RuntimeError(f"Unable to resolve sequence-of-variant adapter '{adapter}'")
+    return variant
+
+
+def _variant_type_base(variant_model: VariantAdapterModel) -> str:
+    base = variant_model.c_type_name
+    return base[: -len("_t")] if base.endswith("_t") else base
+
+
+def _variant_list_c_type(variant_model: VariantAdapterModel) -> str:
+    return f"{_variant_type_base(variant_model)}_list_t"
+
+
+def _variant_list_free_name(variant_model: VariantAdapterModel) -> str:
+    return f"{_variant_type_base(variant_model)}_list_free"
+
+
+def _variant_free_contents_name(variant_model: VariantAdapterModel) -> str:
+    return f"{_variant_type_base(variant_model)}_free_contents"
+
+
+def _variant_from_native_name(variant_model: VariantAdapterModel) -> str:
+    """`{cpp_type} -> {c_type}`: the GET/return direction (native shim value in, C-ABI
+    struct out) -- named for its *input*, mirroring `_variant_to_native_name` below."""
+    return f"{_variant_type_base(variant_model)}_from_native"
+
+
+def _variant_to_native_name(variant_model: VariantAdapterModel) -> str:
+    """`{c_type} -> {cpp_type}`: the SET/parameter direction (C-ABI struct in, native
+    shim value out) -- named for its *output*."""
+    return f"{_variant_type_base(variant_model)}_to_native"
+
+
+def _variant_owner_case(variant_model: VariantAdapterModel, model: ModuleModel) -> VariantCaseModel | None:
+    """The (at most one, today) `field_kind == "handle"` case whose target class
+    declares an owner -- e.g. `ENTITY_INSTANCE` -> `express::base`, owned by
+    `ifcopenshell::file`. `_variant_from_native_name`'s emitted function needs
+    an owner parameter of that type so a returned entity-reference handle
+    (however deeply nested inside an AGGREGATE case) is tied to the same owning
+    `file` as every other handle this generator emits -- exactly the
+    `_owner_expression` propagation ordinary handle/sequence returns already do.
+    """
+    for case in variant_model.cases:
+        if case.field_kind == "handle":
+            target = _class_index(model)[case.handle_target]
+            if target.owner_cpp_name is not None:
+                return case
+    return None
 
 
 def _class_c_type(class_model: ClassModel, model: ModuleModel) -> str:
@@ -137,6 +200,20 @@ def _sequence_targets(model: ModuleModel) -> list[ClassModel]:
     return results
 
 
+def _sequence_of_variant_models(model: ModuleModel) -> list[VariantAdapterModel]:
+    variant_models = _variant_index(model)
+    seen: set[str] = set()
+    results: list[VariantAdapterModel] = []
+    for owner in model.classes:
+        for callable_model in owner.callables:
+            if is_sequence_of_variant_adapter(callable_model.return_adapter):
+                target = sequence_of_variant_adapter_target(callable_model.return_adapter)
+                if target not in seen:
+                    seen.add(target)
+                    results.append(variant_models[target])
+    return results
+
+
 def _enum_c_type(adapter: str, model: ModuleModel) -> str:
     enum_model = _enum_index(model).get(enum_adapter_target(adapter))
     if enum_model is None:
@@ -161,6 +238,8 @@ def _return_c_type(adapter: str, model: ModuleModel) -> str:
         return f"{_list_c_type(_class_index(model)[sequence_adapter_target(adapter)], model)}*"
     if is_variant_adapter(adapter):
         return _variant_model(adapter, model).c_type_name
+    if is_sequence_of_variant_adapter(adapter):
+        return _variant_list_c_type(_sequence_of_variant_model(adapter, model))
     raise RuntimeError(f"Unsupported return adapter: {adapter}")
 
 
@@ -363,32 +442,24 @@ def _emit_sequence_return_lines(
 def _emit_variant_parameter_conversion(lines: list[str], parameter: ParameterModel, model: ModuleModel) -> None:
     """Converts an incoming C `<variant>_t` value into the C++ shim type the real call
     expects, storing it in a `{name}_native` local (`_cpp_argument` references that name
-    directly). This is the parameter-direction half of the variant adapter -- the return
-    direction is `_emit_variant_return_lines`, below."""
+    directly), by delegating to the variant model's generated `..._to_native` helper
+    (`_emit_variant_helper_functions`) -- the return direction is
+    `_emit_variant_return_lines`, below."""
     variant_model = _variant_model(parameter.adapter, model)
     native_type = variant_adapter_target(parameter.adapter)
     local_name = f"{parameter.name}_native"
-    lines.append(f"        {native_type} {local_name};")
-    lines.append(
-        f"        {local_name}.{variant_model.kind_field} = static_cast<decltype({local_name}.{variant_model.kind_field})>({parameter.name}.{variant_model.kind_field});"
-    )
-    for case in variant_model.cases:
-        if case.field_kind == "handle":
-            target = _class_index(model)[case.handle_target]
-            deref = (
-                f"*{parameter.name}.{case.field}->value"
-                if target.handle_kind == "shared_ptr"
-                else f"{parameter.name}.{case.field}->value"
-            )
-            lines.append(f"        if ({parameter.name}.{case.field} != nullptr) {{")
-            lines.append(f"            {local_name}.{case.field} = {deref};")
-            lines.append("        }")
-        elif case.field_kind == "string":
-            lines.append(f"        if ({parameter.name}.{case.field} != nullptr) {{")
-            lines.append(f"            {local_name}.{case.field} = {parameter.name}.{case.field};")
-            lines.append("        }")
-        else:
-            lines.append(f"        {local_name}.{case.field} = {parameter.name}.{case.field};")
+    lines.append(f"        {native_type} {local_name} = {_variant_to_native_name(variant_model)}({parameter.name});")
+
+
+def _variant_owner_argument(owner: ClassModel, variant_model: VariantAdapterModel, model: ModuleModel) -> str:
+    """The `, <owner-expression>` suffix `_emit_variant_helper_functions`'ss `..._from_native`
+    helper needs whenever the variant has a handle-kind case whose target declares an
+    owner (see `_variant_owner_case`) -- empty when it doesn't."""
+    owner_case = _variant_owner_case(variant_model, model)
+    if owner_case is None:
+        return ""
+    target = _class_index(model)[owner_case.handle_target]
+    return f", {_owner_expression(owner, target)}"
 
 
 def _emit_variant_return_lines(
@@ -399,35 +470,159 @@ def _emit_variant_return_lines(
     model: ModuleModel,
 ) -> None:
     """The return-direction half of the variant adapter: builds the C `<variant>_t` value
-    from the C++ shim value `call_expression` evaluates to, wrapping the handle case's
-    field through the same owner-propagation logic ordinary handle returns use
-    (`_owner_expression`) so the returned entity-reference handle's lifetime is tied to
-    the same owning `file` as everything else."""
+    from the C++ shim value `call_expression` evaluates to, by delegating to the variant
+    model's generated `..._from_native` helper (`_emit_variant_helper_functions`), which
+    propagates the same owner-expression ordinary handle/sequence returns use
+    (`_owner_expression`) so a returned entity-reference handle's lifetime is tied to the
+    same owning `file` as everything else -- however deeply nested inside an
+    ATTRIBUTE_VALUE_KIND_AGGREGATE case."""
     variant_model = _variant_model(return_adapter, model)
-    c_type = variant_model.c_type_name
+    owner_argument = _variant_owner_argument(owner, variant_model, model)
     lines.append(f"        auto native_result = {call_expression};")
-    lines.append(f"        {c_type} c_result{{}};")
+    lines.append(f"        return {_variant_from_native_name(variant_model)}(native_result{owner_argument});")
+
+
+def _emit_sequence_of_variant_return_lines(
+    lines: list[str],
+    owner: ClassModel,
+    return_adapter: str,
+    call_expression: str,
+    model: ModuleModel,
+) -> None:
+    """The `sequence_of_variant:` return adapter (`get_all_attribute_values`'s bulk
+    fetch, research/06-wrappergen-spike-results.md SS4): eagerly converts every element of
+    the returned `std::vector<...>` via the same per-element `..._from_native` helper the
+    single-value case uses, into a `{count, items}` struct returned by value."""
+    variant_model = _sequence_of_variant_model(return_adapter, model)
+    list_type = _variant_list_c_type(variant_model)
+    owner_argument = _variant_owner_argument(owner, variant_model, model)
+    from_native = _variant_from_native_name(variant_model)
+    lines.append(f"        auto native_result = {call_expression};")
+    lines.append(f"        {list_type} c_result{{}};")
+    lines.append("        c_result.count = static_cast<int>(native_result.size());")
     lines.append(
-        f"        c_result.{variant_model.kind_field} = static_cast<decltype(c_result.{variant_model.kind_field})>(native_result.{variant_model.kind_field});"
+        f"        c_result.items = c_result.count > 0 ? new {variant_model.c_type_name}[static_cast<size_t>(c_result.count)] : nullptr;"
     )
-    lines.append(f"        switch (native_result.{variant_model.kind_field}) {{")
-    for case in variant_model.cases:
-        lines.append(f"        case {case.native_kind_name}:")
-        if case.field_kind == "handle":
-            target = _class_index(model)[case.handle_target]
-            owner_expression = _owner_expression(owner, target) if target.owner_cpp_name is not None else "{}"
-            lines.append(
-                f"            c_result.{case.field} = new {_class_c_type(target, model)}{{ {owner_expression}, native_result.{case.field} }};"
-            )
-        elif case.field_kind == "string":
-            lines.append(f"            c_result.{case.field} = duplicate_string(native_result.{case.field});")
-        else:
-            lines.append(f"            c_result.{case.field} = native_result.{case.field};")
-        lines.append("            break;")
-    lines.append("        default:")
-    lines.append("            break;")
+    lines.append("        for (int index = 0; index < c_result.count; ++index) {")
+    lines.append(
+        f"            c_result.items[index] = {from_native}(native_result[static_cast<size_t>(index)]{owner_argument});"
+    )
     lines.append("        }")
     lines.append("        return c_result;")
+
+
+def _emit_variant_helper_functions(lines: list[str], model: ModuleModel) -> None:
+    """Emits, per variant adapter, a recursive pair of private conversion helpers plus
+    the two extern-"C" cleanup functions declared in the header
+    (`emit_c_api_header`'s `_variant_free_contents_name`/`_variant_list_free_name`):
+
+    - `{variant}_from_native(const {cpp_type}&, [owner])  -> {c_type}` -- native shim
+      value to C-ABI struct (the GET direction).
+    - `{variant}_to_native(const {c_type}&) -> {cpp_type}` -- C-ABI struct to native shim
+      value (the SET/parameter direction).
+    - `{variant}_free_contents({c_type})` -- releases the heap-allocated strings and
+      nested `ATTRIBUTE_VALUE_KIND_AGGREGATE` arrays a `{c_type}` value owns, in either
+      direction. Deliberately never touches a `handle`-kind field: a GET-direction
+      handle's ownership transfers to JS via `napi_create_external`'s finalizer once
+      `emit_napi_extension` wraps it, and a SET-direction handle is always borrowed from
+      the caller -- freeing it here would be a use-after-free/double-free on the live
+      handle the JS side still owns (see `attribute_value_shim.h`'s doc comment).
+    - `{variant}_list_free({list_type})` -- same, for a `sequence_of_variant:` return's
+      `{count, items}` struct.
+
+    Placed (by `emit_c_api_implementation`) after every class C struct is fully defined
+    (the `handle`-kind case needs `->value` field access, not just the header's opaque
+    forward declaration) and before the `extern "C"` block those cleanup functions live
+    in -- called recursively for the "sequence" field_kind case
+    (`ATTRIBUTE_VALUE_KIND_AGGREGATE`), one nesting level at a time, so the same pair of
+    functions handles the whole ~15-way `ifcopenshell::argument_type` dispatch
+    (research/01-python-core-and-lowlevel.md SS5) without one case per aggregate element
+    type.
+    """
+    for variant_model in model.variant_adapters:
+        c_type = variant_model.c_type_name
+        cpp_type = variant_model.cpp_type
+        from_native = _variant_from_native_name(variant_model)
+        to_native = _variant_to_native_name(variant_model)
+        owner_case = _variant_owner_case(variant_model, model)
+        owner_cpp_name = _class_index(model)[owner_case.handle_target].owner_cpp_name if owner_case is not None else None
+        owner_parameter = f", std::shared_ptr<{owner_cpp_name}> owner" if owner_cpp_name is not None else ""
+        owner_argument = ", owner" if owner_cpp_name is not None else ""
+
+        # `{variant}_from_native`: native shim value -> C-ABI struct (GET direction).
+        lines.append(f"{c_type} {from_native}(const {cpp_type}& native{owner_parameter}) {{")
+        lines.append(f"    {c_type} result{{}};")
+        lines.append(
+            f"    result.{variant_model.kind_field} = static_cast<decltype(result.{variant_model.kind_field})>(native.{variant_model.kind_field});"
+        )
+        lines.append(f"    switch (native.{variant_model.kind_field}) {{")
+        for case in variant_model.cases:
+            lines.append(f"    case {case.native_kind_name}:")
+            if case.field_kind == "handle":
+                target = _class_index(model)[case.handle_target]
+                if target.owner_cpp_name is not None:
+                    lines.append(
+                        f"        result.{case.field} = new {_class_c_type(target, model)}{{ owner, native.{case.field} }};"
+                    )
+                else:
+                    lines.append(
+                        f"        result.{case.field} = new {_class_c_type(target, model)}{{ native.{case.field} }};"
+                    )
+            elif case.field_kind == "string":
+                lines.append(f"        result.{case.field} = duplicate_string(native.{case.field});")
+            elif case.field_kind == "sequence":
+                lines.append(f"        result.{case.field}_count = static_cast<int>(native.{case.field}.size());")
+                lines.append(
+                    f"        result.{case.field} = result.{case.field}_count > 0 ? new {c_type}[static_cast<size_t>(result.{case.field}_count)] : nullptr;"
+                )
+                lines.append(f"        for (int index = 0; index < result.{case.field}_count; ++index) {{")
+                lines.append(
+                    f"            result.{case.field}[index] = {from_native}(native.{case.field}[static_cast<size_t>(index)]{owner_argument});"
+                )
+                lines.append("        }")
+            else:
+                lines.append(f"        result.{case.field} = native.{case.field};")
+            lines.append("        break;")
+        lines.append("    default:")
+        lines.append("        break;")
+        lines.append("    }")
+        lines.append("    return result;")
+        lines.append("}")
+        lines.append("")
+
+        # `{variant}_to_native`: C-ABI struct -> native shim value (SET/parameter direction).
+        lines.append(f"{cpp_type} {to_native}(const {c_type}& value) {{")
+        lines.append(f"    {cpp_type} result;")
+        lines.append(
+            f"    result.{variant_model.kind_field} = static_cast<decltype(result.{variant_model.kind_field})>(value.{variant_model.kind_field});"
+        )
+        lines.append(f"    switch (value.{variant_model.kind_field}) {{")
+        for case in variant_model.cases:
+            lines.append(f"    case {case.kind_c_name}:")
+            if case.field_kind == "handle":
+                target = _class_index(model)[case.handle_target]
+                deref = f"*value.{case.field}->value" if target.handle_kind == "shared_ptr" else f"value.{case.field}->value"
+                lines.append(f"        if (value.{case.field} != nullptr) {{")
+                lines.append(f"            result.{case.field} = {deref};")
+                lines.append("        }")
+            elif case.field_kind == "string":
+                lines.append(f"        if (value.{case.field} != nullptr) {{")
+                lines.append(f"            result.{case.field} = value.{case.field};")
+                lines.append("        }")
+            elif case.field_kind == "sequence":
+                lines.append(f"        result.{case.field}.reserve(static_cast<size_t>(value.{case.field}_count));")
+                lines.append(f"        for (int index = 0; index < value.{case.field}_count; ++index) {{")
+                lines.append(f"            result.{case.field}.push_back({to_native}(value.{case.field}[index]));")
+                lines.append("        }")
+            else:
+                lines.append(f"        result.{case.field} = value.{case.field};")
+            lines.append("        break;")
+        lines.append("    default:")
+        lines.append("        break;")
+        lines.append("    }")
+        lines.append("    return result;")
+        lines.append("}")
+        lines.append("")
 
 
 def emit_c_api_header(model: ModuleModel) -> str:
@@ -459,6 +654,7 @@ def emit_c_api_header(model: ModuleModel) -> str:
             lines.append(f"    {value.c_name} = {value.value},")
         lines.append(f"}} {enum_model.c_name};")
         lines.append("")
+    sequence_of_variant_models = _sequence_of_variant_models(model)
     for variant_model in model.variant_adapters:
         lines.append(f"typedef enum {variant_model.kind_enum_c_name} {{")
         for case in variant_model.cases:
@@ -480,11 +676,29 @@ def emit_c_api_header(model: ModuleModel) -> str:
                 field_type = "char*"
             elif case.field_kind == "handle":
                 field_type = f"{_class_c_type(_class_index(model)[case.handle_target], model)}*"
+            elif case.field_kind == "sequence":
+                # A homogeneous nested aggregate (research/01-python-core-and-lowlevel.md SS5's
+                # AGGREGATE_OF_*/AGGREGATE_OF_AGGREGATE_OF_* cases, folded into one generic,
+                # recursive case -- see `attribute_value_shim.h`): a self-referential
+                # heap array (legal in C, same idiom as a linked-list node's `struct X*
+                # next`) paired with an element count. `emit_c_api_implementation`'s
+                # `{variant}_from_native`/`{variant}_to_native`/`{variant}_free_contents`
+                # walk this recursively.
+                lines.append(f"    struct {variant_model.c_type_name}* {case.field};")
+                lines.append(f"    int {case.field}_count;")
+                continue
             else:
                 raise RuntimeError(f"Unsupported variant case field_kind: {case.field_kind}")
             lines.append(f"    {field_type} {case.field};")
         lines.append(f"}} {variant_model.c_type_name};")
         lines.append("")
+        if variant_model in sequence_of_variant_models:
+            list_type = _variant_list_c_type(variant_model)
+            lines.append(f"typedef struct {list_type} {{")
+            lines.append(f"    {variant_model.c_type_name}* items;")
+            lines.append("    int count;")
+            lines.append(f"}} {list_type};")
+            lines.append("")
     lines.extend(
         [
             "const char* ifcopenshell_last_error_message(void);",
@@ -493,6 +707,22 @@ def emit_c_api_header(model: ModuleModel) -> str:
             "",
         ]
     )
+    for variant_model in model.variant_adapters:
+        # Exposed (unlike the private, recursive native<->C conversion helpers
+        # `emit_c_api_implementation` emits) because the N-API extension --
+        # a separate translation unit -- needs to release the heap-allocated
+        # strings/nested arrays a variant value (in either direction: a GET
+        # result once copied into a JS value, or a SET parameter once parsed
+        # out of one) owns. Never touches `handle`-kind fields: a GET-direction
+        # handle's ownership transfers to JS via `napi_create_external`'s
+        # finalizer, and a SET-direction handle is always borrowed from the
+        # caller -- see `attribute_value_shim.h`'s `attribute_value_kind`
+        # doc-comment and `emit_napi_extension`.
+        lines.append(f"void {_variant_free_contents_name(variant_model)}({variant_model.c_type_name} value);")
+        if variant_model in sequence_of_variant_models:
+            lines.append(f"void {_variant_list_free_name(variant_model)}({_variant_list_c_type(variant_model)} list);")
+    if model.variant_adapters:
+        lines.append("")
     for variant in _all_variants(model):
         return_type = _return_c_type(variant.callable.return_adapter, model)
         parameters = ", ".join(
@@ -599,6 +829,12 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append(f"    std::vector<{class_model.cpp_name}> value;")
         lines.append("};")
         lines.append("")
+    if model.variant_adapters:
+        # Private (internal-linkage-by-convention, though not itself wrapped in an
+        # anonymous namespace since `_variant_owner_case`'s handle case needs the class
+        # C structs defined above) native<->C-ABI conversion helpers -- see
+        # `_emit_variant_helper_functions`'s own docstring for the full rationale.
+        _emit_variant_helper_functions(lines, model)
     lines.extend(
         [
             'extern "C" {',
@@ -617,6 +853,43 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             "",
         ]
     )
+    sequence_of_variant_models = _sequence_of_variant_models(model)
+    for variant_model in model.variant_adapters:
+        free_contents = _variant_free_contents_name(variant_model)
+        lines.append(f"void {free_contents}({variant_model.c_type_name} value) {{")
+        lines.append(f"    switch (value.{variant_model.kind_field}) {{")
+        emitted_sequence_case = False
+        for case in variant_model.cases:
+            if case.field_kind not in {"string", "sequence"}:
+                continue
+            lines.append(f"    case {case.kind_c_name}:")
+            if case.field_kind == "string":
+                lines.append(f"        ifcopenshell_string_free(value.{case.field});")
+                lines.append("        break;")
+            elif not emitted_sequence_case:
+                # Only one "sequence" case exists per variant adapter today
+                # (ATTRIBUTE_VALUE_KIND_AGGREGATE) -- guarded rather than assumed, so a
+                # future second one doesn't silently duplicate this loop's free/delete.
+                emitted_sequence_case = True
+                lines.append(f"        for (int index = 0; index < value.{case.field}_count; ++index) {{")
+                lines.append(f"            {free_contents}(value.{case.field}[index]);")
+                lines.append("        }")
+                lines.append(f"        delete[] value.{case.field};")
+                lines.append("        break;")
+        lines.append("    default:")
+        lines.append("        break;")
+        lines.append("    }")
+        lines.append("}")
+        lines.append("")
+        if variant_model in sequence_of_variant_models:
+            list_type = _variant_list_c_type(variant_model)
+            lines.append(f"void {_variant_list_free_name(variant_model)}({list_type} list) {{")
+            lines.append("    for (int index = 0; index < list.count; ++index) {")
+            lines.append(f"        {free_contents}(list.items[index]);")
+            lines.append("    }")
+            lines.append("    delete[] list.items;")
+            lines.append("}")
+            lines.append("")
     for variant in _all_variants(model):
         return_type = _return_c_type(variant.callable.return_adapter, model)
         parameter_list = ", ".join(
@@ -695,6 +968,10 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             _emit_sequence_return_lines(lines, variant.owner, target, variant.callable, call_expression, model)
         elif is_variant_adapter(variant.callable.return_adapter):
             _emit_variant_return_lines(lines, variant.owner, variant.callable.return_adapter, call_expression, model)
+        elif is_sequence_of_variant_adapter(variant.callable.return_adapter):
+            _emit_sequence_of_variant_return_lines(
+                lines, variant.owner, variant.callable.return_adapter, call_expression, model
+            )
         else:
             raise RuntimeError(f"Unsupported return adapter in C API emitter: {variant.callable.return_adapter}")
         lines.append("    } catch (const std::exception& exception) {")
@@ -708,7 +985,9 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append(f"        return static_cast<{return_type}>(0);")
         elif return_type in {"int", "bool"}:
             lines.append("        return 0;")
-        elif is_variant_adapter(variant.callable.return_adapter):
+        elif is_variant_adapter(variant.callable.return_adapter) or is_sequence_of_variant_adapter(
+            variant.callable.return_adapter
+        ):
             lines.append("        return {};")
         else:
             lines.append("        return nullptr;")
@@ -1137,6 +1416,123 @@ def _napi_unwrap_name(class_model: ClassModel) -> str:
     return f"unwrap_{normalize_identifier(class_model.cpp_name)}"
 
 
+def _napi_variant_to_js_name(variant_model: VariantAdapterModel) -> str:
+    return f"{_variant_type_base(variant_model)}_to_js"
+
+
+def _napi_variant_from_js_name(variant_model: VariantAdapterModel) -> str:
+    return f"{_variant_type_base(variant_model)}_from_js"
+
+
+def _emit_napi_variant_helpers(lines: list[str], model: ModuleModel, class_models: dict[str, ClassModel]) -> None:
+    """Recursive JS<->C-ABI-struct conversion helpers, one pair per variant adapter --
+    the N-API-layer counterpart to `_emit_variant_helper_functions` (which handles the
+    C-ABI-struct<->native-shim-value conversion one layer further down). Replaces what
+    used to be inline, per-callable code duplicated at every call site; recursion (the
+    "sequence" field_kind case, i.e. `ATTRIBUTE_VALUE_KIND_AGGREGATE`) is exactly why
+    that inline approach stopped being tenable -- a JS array of arbitrarily-nested JS
+    arrays needs a function that can call itself, not a flat per-case switch.
+    """
+    for variant_model in model.variant_adapters:
+        c_type = variant_model.c_type_name
+        to_js = _napi_variant_to_js_name(variant_model)
+        from_js = _napi_variant_from_js_name(variant_model)
+
+        # GET direction: C-ABI struct -> plain JS value (a JS array for the AGGREGATE
+        # case, matching Python's `get_argument` ergonomics -- a real list, not a
+        # wrapper object the caller has to unpack).
+        lines.append(f"napi_value {to_js}(napi_env env, const {c_type}& value) {{")
+        lines.append("    napi_value js_result;")
+        lines.append(f"    switch (value.{variant_model.kind_field}) {{")
+        for case in variant_model.cases:
+            if case.kind_name == "NULL":
+                # Deliberately falls through to `default:` below (`napi_get_null`) -- a
+                # JS `null`, matching Python's `None`, is exactly what an unset/blank
+                # attribute value should read back as (see the historical note this
+                # replaces, `06-wrappergen-spike-results.md`).
+                continue
+            lines.append(f"    case {case.kind_c_name}:")
+            if case.field_kind == "string":
+                lines.append(f"        napi_create_string_utf8(env, value.{case.field}, NAPI_AUTO_LENGTH, &js_result);")
+            elif case.field_kind == "handle":
+                target = class_models[case.handle_target]
+                lines.append(f"        js_result = {_napi_wrap_name(target)}(env, value.{case.field});")
+            elif case.field_kind == "double":
+                lines.append(f"        napi_create_double(env, value.{case.field}, &js_result);")
+            elif case.field_kind == "sequence":
+                lines.append(f"        napi_create_array_with_length(env, value.{case.field}_count, &js_result);")
+                lines.append(f"        for (int index = 0; index < value.{case.field}_count; ++index) {{")
+                lines.append(f"            napi_set_element(env, js_result, index, {to_js}(env, value.{case.field}[index]));")
+                lines.append("        }")
+            elif case.kind_name == "BOOL":
+                lines.append(f"        napi_get_boolean(env, value.{case.field} != 0, &js_result);")
+            else:
+                lines.append(f"        napi_create_int64(env, value.{case.field}, &js_result);")
+            lines.append("        break;")
+        lines.append("    default:")
+        lines.append("        napi_get_null(env, &js_result);")
+        lines.append("        break;")
+        lines.append("    }")
+        lines.append("    return js_result;")
+        lines.append("}")
+        lines.append("")
+
+        # SET/parameter direction: a `{kind, ...}` JS object -> C-ABI struct. String
+        # fields are heap-duplicated (not borrowed from a temporary) so the *same*
+        # `{variant}_free_contents` (emit_c_api_implementation) safely releases them
+        # regardless of which direction produced the value -- see that function's
+        # doc comment for why a `handle`-kind field is never freed here either
+        # (borrowed from the caller, who still owns and will keep using it).
+        lines.append(f"{c_type} {from_js}(napi_env env, napi_value value) {{")
+        lines.append(f"    {c_type} result{{}};")
+        lines.append("    napi_value kind_prop;")
+        lines.append('    napi_get_named_property(env, value, "kind", &kind_prop);')
+        lines.append("    int32_t kind_int = 0;")
+        lines.append("    napi_get_value_int32(env, kind_prop, &kind_int);")
+        lines.append(
+            f"    result.{variant_model.kind_field} = static_cast<decltype(result.{variant_model.kind_field})>(kind_int);"
+        )
+        lines.append("    switch (kind_int) {")
+        for case in variant_model.cases:
+            prop_name = normalize_identifier(case.field)
+            lines.append(f"    case {case.kind_c_name}: {{")
+            lines.append("        napi_value prop;")
+            lines.append(f'        napi_get_named_property(env, value, "{prop_name}", &prop);')
+            if case.field_kind == "string":
+                lines.append(f"        result.{case.field} = napi_duplicate_js_string(env, prop);")
+            elif case.field_kind == "handle":
+                target = class_models[case.handle_target]
+                lines.append(f"        result.{case.field} = {_napi_unwrap_name(target)}(env, prop);")
+            elif case.field_kind == "double":
+                lines.append(f"        double element_value = 0;")
+                lines.append("        napi_get_value_double(env, prop, &element_value);")
+                lines.append(f"        result.{case.field} = element_value;")
+            elif case.field_kind == "sequence":
+                lines.append("        uint32_t length = 0;")
+                lines.append("        napi_get_array_length(env, prop, &length);")
+                lines.append(f"        result.{case.field}_count = static_cast<int>(length);")
+                lines.append(
+                    f"        result.{case.field} = length > 0 ? new {c_type}[length] : nullptr;"
+                )
+                lines.append("        for (uint32_t index = 0; index < length; ++index) {")
+                lines.append("            napi_value element;")
+                lines.append("            napi_get_element(env, prop, index, &element);")
+                lines.append(f"            result.{case.field}[index] = {from_js}(env, element);")
+                lines.append("        }")
+            else:
+                lines.append("        int64_t element_value = 0;")
+                lines.append("        napi_get_value_int64(env, prop, &element_value);")
+                lines.append(f"        result.{case.field} = element_value;")
+            lines.append("        break;")
+            lines.append("    }")
+        lines.append("    default:")
+        lines.append("        break;")
+        lines.append("    }")
+        lines.append("    return result;")
+        lines.append("}")
+        lines.append("")
+
+
 def emit_napi_extension(model: ModuleModel) -> str:
     """N-API C++ glue -- structurally parallel to `emit_python_extension`: the same
     per-class/per-callable walk over the same `ModuleModel`/`_all_variants(model)`,
@@ -1172,6 +1568,13 @@ def emit_napi_extension(model: ModuleModel) -> str:
         "    return result;",
         "}",
         "",
+        "char* napi_duplicate_js_string(napi_env env, napi_value value) {",
+        "    std::string owned = napi_string_value(env, value);",
+        "    auto* buffer = new char[owned.size() + 1];",
+        "    std::memcpy(buffer, owned.c_str(), owned.size() + 1);",
+        "    return buffer;",
+        "}",
+        "",
     ]
     for class_model in model.classes:
         lines.extend(
@@ -1199,6 +1602,8 @@ def emit_napi_extension(model: ModuleModel) -> str:
                 "",
             ]
         )
+    if model.variant_adapters:
+        _emit_napi_variant_helpers(lines, model, class_models)
     for variant in _all_variants(model):
         lines.append(f"napi_value napi_{variant.api_name}(napi_env env, napi_callback_info info) {{")
         argument_count = len(variant.parameters) + (1 if variant.callable.kind in {"method", "free_function"} else 0)
@@ -1207,6 +1612,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
         lines.append("    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);")
         argument_index = 0
         call_arguments: list[str] = []
+        variant_parameters_to_free: list[tuple[str, VariantAdapterModel]] = []
         if variant.callable.kind in {"method", "free_function"}:
             lines.append(
                 f"    auto* handle = {_napi_unwrap_name(class_models[variant.owner.cpp_name])}(env, argv[{argument_index}]);"
@@ -1241,56 +1647,28 @@ def emit_napi_extension(model: ModuleModel) -> str:
                 call_arguments.append(js_name)
             elif is_variant_adapter(parameter.adapter):
                 variant_model = _variant_model(parameter.adapter, model)
-                lines.append(f"    {variant_model.c_type_name} {js_name}{{}};")
-                lines.append(f"    napi_value {js_name}_kind_prop;")
-                lines.append(f'    napi_get_named_property(env, argv[{argument_index}], "kind", &{js_name}_kind_prop);')
-                lines.append(f"    int32_t {js_name}_kind = 0;")
-                lines.append(f"    napi_get_value_int32(env, {js_name}_kind_prop, &{js_name}_kind);")
                 lines.append(
-                    f"    {js_name}.{variant_model.kind_field} = static_cast<decltype({js_name}.{variant_model.kind_field})>({js_name}_kind);"
+                    f"    {variant_model.c_type_name} {js_name} = {_napi_variant_from_js_name(variant_model)}(env, argv[{argument_index}]);"
                 )
-                # Owns the backing storage for any string-typed case below -- `.c_str()`
-                # on a *temporary* `std::string` (e.g. inline in the assignment) dangles
-                # the instant that temporary is destroyed at the end of the full
-                # expression, before the native call downstream ever reads it. Found by
-                # this spike via a real (silent, no crash -- the attribute just read back
-                # as unset) data-corruption bug, not a compile error -- see
-                # `06-wrappergen-spike-results.md`. Declared once per variant parameter
-                # (not per case) since at most one string-typed case is populated per call.
-                lines.append(f"    std::string {js_name}_string_storage;")
-                for case in variant_model.cases:
-                    prop_name = normalize_identifier(case.field)
-                    lines.append(f"    if ({js_name}_kind == {case.kind_c_name}) {{")
-                    lines.append(f"        napi_value {js_name}_prop;")
-                    lines.append(
-                        f'        napi_get_named_property(env, argv[{argument_index}], "{prop_name}", &{js_name}_prop);'
-                    )
-                    if case.field_kind == "string":
-                        lines.append(f"        {js_name}_string_storage = napi_string_value(env, {js_name}_prop);")
-                        lines.append(
-                            f"        {js_name}.{case.field} = const_cast<char*>({js_name}_string_storage.c_str());"
-                        )
-                    elif case.field_kind == "handle":
-                        target = class_models[case.handle_target]
-                        lines.append(
-                            f"        {js_name}.{case.field} = {_napi_unwrap_name(target)}(env, {js_name}_prop);"
-                        )
-                    elif case.field_kind == "double":
-                        lines.append(f"        double {js_name}_value = 0;")
-                        lines.append(f"        napi_get_value_double(env, {js_name}_prop, &{js_name}_value);")
-                        lines.append(f"        {js_name}.{case.field} = {js_name}_value;")
-                    else:
-                        lines.append(f"        int64_t {js_name}_value = 0;")
-                        lines.append(f"        napi_get_value_int64(env, {js_name}_prop, &{js_name}_value);")
-                        lines.append(f"        {js_name}.{case.field} = {js_name}_value;")
-                    lines.append("    }")
                 call_arguments.append(js_name)
+                variant_parameters_to_free.append((js_name, variant_model))
             else:
                 raise RuntimeError(f"Unsupported parameter adapter in N-API extension emitter: {parameter.adapter}")
             argument_index += 1
         native_call = f"{model.c_prefix}_{variant.api_name}({', '.join(call_arguments)})"
+        # Freed right after `native_call` runs, in every branch below, regardless of
+        # outcome: the C API function received these C-ABI structs *by value*, so by
+        # the time it has returned it has already deep-copied anything it needed
+        # (`_variant_to_native_name`'s helper) -- the heap strings/nested arrays this
+        # N-API function allocated while parsing `argv` (`{variant}_from_js`) are safe
+        # to release immediately, whether or not the call itself threw.
+        free_variant_parameter_lines = [
+            f"    {_variant_free_contents_name(variant_model)}({js_name});"
+            for js_name, variant_model in variant_parameters_to_free
+        ]
         if variant.callable.return_adapter == "string":
             lines.append(f"    char* result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (result == nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1300,6 +1678,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    return js_result;")
         elif variant.callable.return_adapter == "integer":
             lines.append(f"    int result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1308,6 +1687,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    return js_result;")
         elif variant.callable.return_adapter == "bool":
             lines.append(f"    bool result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1316,6 +1696,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    return js_result;")
         elif variant.callable.return_adapter == "void":
             lines.append(f"    {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1324,6 +1705,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    return js_undefined;")
         elif is_enum_adapter(variant.callable.return_adapter):
             lines.append(f"    int result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1333,6 +1715,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
         elif is_handle_adapter(variant.callable.return_adapter):
             target = class_models[handle_adapter_target(variant.callable.return_adapter)]
             lines.append(f"    auto* result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (result == nullptr && ifcopenshell_last_error_message() != nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1341,6 +1724,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             target = class_models[sequence_adapter_target(variant.callable.return_adapter)]
             list_prefix = f"{model.c_prefix}_{_class_c_identifier(target, model)}_list"
             lines.append(f"    auto* result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (result == nullptr) {")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
@@ -1355,42 +1739,33 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    return js_result;")
         elif is_variant_adapter(variant.callable.return_adapter):
             variant_model = _variant_model(variant.callable.return_adapter, model)
+            free_contents = _variant_free_contents_name(variant_model)
             lines.append(f"    {variant_model.c_type_name} result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
             lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append(f"        {free_contents}(result);")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append(f"    napi_value js_result = {_napi_variant_to_js_name(variant_model)}(env, result);")
+            lines.append(f"    {free_contents}(result);")
+            lines.append("    return js_result;")
+        elif is_sequence_of_variant_adapter(variant.callable.return_adapter):
+            variant_model = _sequence_of_variant_model(variant.callable.return_adapter, model)
+            list_type = _variant_list_c_type(variant_model)
+            list_free = _variant_list_free_name(variant_model)
+            to_js = _napi_variant_to_js_name(variant_model)
+            lines.append(f"    {list_type} result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append(f"        {list_free}(result);")
             lines.append('        return throw_last_error(env, "Native call failed");')
             lines.append("    }")
             lines.append("    napi_value js_result;")
-            lines.append(f"    switch (result.{variant_model.kind_field}) {{")
-            for case in variant_model.cases:
-                if case.kind_name == "NULL":
-                    # Deliberately falls through to `default:` below (`napi_get_null`) --
-                    # a JS `null`, matching Python's `None`, is exactly what an unset/blank
-                    # attribute value should read back as. Found by this spike: without
-                    # this, NULL fell into the generic "else" branch further down and
-                    # produced a JS *number* `0` instead -- a real, silent (no crash, no
-                    # exception -- just the wrong JS type) correctness bug in the emitter
-                    # itself, only caught by actually running the round-trip, not by
-                    # anything compiling cleanly. See `06-wrappergen-spike-results.md`.
-                    continue
-                lines.append(f"    case {case.kind_c_name}:")
-                if case.field_kind == "string":
-                    lines.append(
-                        f"        napi_create_string_utf8(env, result.{case.field}, NAPI_AUTO_LENGTH, &js_result);"
-                    )
-                elif case.field_kind == "handle":
-                    target = class_models[case.handle_target]
-                    lines.append(f"        js_result = {_napi_wrap_name(target)}(env, result.{case.field});")
-                elif case.field_kind == "double":
-                    lines.append(f"        napi_create_double(env, result.{case.field}, &js_result);")
-                elif case.kind_name == "BOOL":
-                    lines.append(f"        napi_get_boolean(env, result.{case.field} != 0, &js_result);")
-                else:
-                    lines.append(f"        napi_create_int64(env, result.{case.field}, &js_result);")
-                lines.append("        break;")
-            lines.append("    default:")
-            lines.append("        napi_get_null(env, &js_result);")
-            lines.append("        break;")
+            lines.append("    napi_create_array_with_length(env, result.count, &js_result);")
+            lines.append("    for (int index = 0; index < result.count; ++index) {")
+            lines.append(f"        napi_set_element(env, js_result, index, {to_js}(env, result.items[index]));")
             lines.append("    }")
+            lines.append(f"    {list_free}(result);")
             lines.append("    return js_result;")
         else:
             raise RuntimeError(
@@ -1476,22 +1851,65 @@ def _ts_type_for_return(adapter: str, model: ModuleModel) -> str:
     return "unknown"
 
 
+def _ts_native_argument(parameter: ParameterModel) -> str:
+    """Mirrors `_python_native_argument`: a handle-typed parameter's *facade* value is
+    a class instance (`{ _handle, ... }`), not the raw native external the underlying
+    N-API function actually expects -- must be unwrapped via `._handle` before the
+    call, exactly like the Python facade already does. Found missing by actually
+    running a generated facade through `vitest` (not by compiling it -- TypeScript
+    has no way to catch "passed the wrong shape of object to an untyped `native.*`
+    call" on its own): every facade method taking another class as a parameter
+    (e.g. `file.create_with_declaration_instance_id(declaration, ...)`) was passing
+    the whole wrapper object through, and the N-API layer's `napi_get_value_external`
+    fails non-fatally on a non-external value, producing a null handle and "Null
+    handle parameter received" at the C API boundary -- a real, disclosed
+    generator bug this PR fixes, not a pre-existing, deliberately-scoped-out gap.
+    """
+    if is_handle_adapter(parameter.adapter):
+        return f"{parameter.name}._handle"
+    return parameter.name
+
+
 def emit_typescript_facade(model: ModuleModel) -> str:
     """TypeScript facade -- structurally parallel to `emit_python_facade`: the same
     per-`ClassModel`/`CallableModel` walk, replacing Python's `__slots__` class
     generation with a TS class-with-a-private-handle-field, emitting `.d.ts`-friendly
     signatures directly rather than Python type hints.
+
+    Imports the raw native module from a sibling `./native_loader` rather than a
+    literal relative path to the compiled `.node` file itself: a real npm package has
+    at least two different layouts the compiled addon can live under relative to this
+    file (a source tree used directly by a test runner vs. a `tsc`-compiled `dist/`
+    tree, which may not even preserve this file's directory depth) -- exactly the
+    problem Phase 0's hand-written `native.ts` already solved with an absolute,
+    package-root-relative `require()` rather than a relative import. `./native_loader`
+    is a fixed, small integration contract: whoever places this generated file into a
+    real package provides one small hand-written sibling module exporting `native`
+    (the loaded addon) however is correct for that package's own layout -- this
+    generated file itself stays honestly reusable across different consumers instead
+    of baking in one specific (and, per the spike, untested-in-a-real-package)
+    assumption.
     """
     lines = [
         "// AUTO-GENERATED by wrappergen's `emit_typescript_facade` -- do not edit by hand.",
-        f'import * as native from "./{Path(model.extension_source_name).stem}.node";',
+        'import { native } from "./native_loader";',
         "",
     ]
     for variant_model in model.variant_adapters:
         lines.append(f"export type {pascal_case(variant_model.c_type_name)} = {{")
         lines.append(f"    kind: number;")
+        seen_fields: set[str] = set()
         for case in variant_model.cases:
-            lines.append(f"    {normalize_identifier(case.field)}?: unknown;")
+            if case.field in seen_fields:
+                continue
+            seen_fields.add(case.field)
+            # A "sequence" field_kind case (ATTRIBUTE_VALUE_KIND_AGGREGATE) is a JS
+            # array of the same recursive shape, potentially nested -- the exact
+            # element type isn't expressible without a self-referential alias, so
+            # `unknown[]` (still distinguishing "array" from every scalar field
+            # below) is as precise as this generated type gets without one.
+            field_type = f"{pascal_case(variant_model.c_type_name)}[]" if case.field_kind == "sequence" else "unknown"
+            lines.append(f"    {normalize_identifier(case.field)}?: {field_type};")
         lines.append("};")
         lines.append("")
     for class_model in model.classes:
@@ -1507,7 +1925,7 @@ def emit_typescript_facade(model: ModuleModel) -> str:
                 f"{parameter.name}: {_ts_type_for_parameter(parameter, model)}"
                 for parameter in callable_model.parameters
             )
-            call_arguments = ", ".join(parameter.name for parameter in callable_model.parameters)
+            call_arguments = ", ".join(_ts_native_argument(parameter) for parameter in callable_model.parameters)
             if callable_model.kind == "constructor":
                 lines.append(f"    static {callable_model.py_name}({parameters}): {class_model.py_name} {{")
                 lines.append(

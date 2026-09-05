@@ -115,6 +115,29 @@ def sequence_adapter_target(adapter: str) -> str:
     return adapter.split(":", 1)[1]
 
 
+def sequence_of_variant_adapter_name(cpp_type: str) -> str:
+    """A `std::vector<...>`-of-variant return (e.g.
+    `get_all_attribute_values() -> std::vector<attribute_value_variant>`,
+    Phase 1's disclosed, narrower stand-in for Python's fully-recursive
+    `get_info_cpp` -- research/06-wrappergen-spike-results.md SS4). Distinct from
+    the plain `sequence:` adapter (which targets an ordinary `ClassModel`,
+    walked via the per-class list `_size`/`_get`/`_free` triplet): a
+    sequence-of-variant is returned eagerly, by value, as a
+    `{variant}_list_t{count, items}` struct built directly from the
+    variant-conversion helpers `emit_c_api_implementation` already emits for
+    the single-value case -- see `_variant_list_c_type`.
+    """
+    return f"sequence_of_variant:{normalize_cpp_type(cpp_type)}"
+
+
+def is_sequence_of_variant_adapter(adapter: str) -> bool:
+    return adapter.startswith("sequence_of_variant:")
+
+
+def sequence_of_variant_adapter_target(adapter: str) -> str:
+    return adapter.split(":", 1)[1]
+
+
 def cpp_type_lists_match(actual_types: list[str], expected_types: list[str]) -> bool:
     if len(actual_types) != len(expected_types):
         return False
