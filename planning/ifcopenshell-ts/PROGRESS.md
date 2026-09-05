@@ -14,10 +14,9 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ Phase 1's `wrappergen` validation spike landed (squash-merged to `v0.9.0` as `a8b2a7517`) —
-**PASS verdict**: extend `wrappergen` for the real primitive binding, don't hand-write
-`node-addon-api` glue. Next chunk (the actual `file`/`entity_instance` primitives + schema
-introspection) not yet dispatched.
+🔄 Phase 1's real primitive binding surface dispatched, working in `ts/phase-1-primitive-binding`
+off `v0.9.0` (`a8b2a7517`). Also: a small docs-only tracker-sync PR (#4) is in flight, unrelated to
+this work.
 
 ## Operational note: worktree isolation workaround
 
@@ -52,7 +51,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
 | `wrappergen` validation spike (generated vs. hand-written decision) | ✅ | [#3](https://github.com/mikitski/IfcOpenShell/pull/3) | Landed `a8b2a7517` — **PASS**: extend wrappergen. 5 bugs found+fixed, incl. a confirmed use-after-free (new "borrowed" handle-kind). See `research/06-wrappergen-spike-results.md`. |
-| `file`/`entity_instance` primitives + schema introspection | 🔲 | — | unblocked, not yet dispatched |
+| `file`/`entity_instance` primitives + schema introspection | 🔄 | — | dispatched, `ts/phase-1-primitive-binding` |
 | Async primitive variants (`napi_create_async_work`) | 🔲 | — | — |
 | Native memory accounting (`napi_adjust_external_memory`) | 🔲 | — | — |
 | ASAN/UBSan CI + fuzz testing of parse primitives | 🔲 | — | — |
