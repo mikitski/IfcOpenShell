@@ -1,13 +1,13 @@
 name: ci-ifcopenshell-ts
 
 on:
-  push:
-    paths:
-      - 'src/ifcopenshell-ts/**'
-      - 'src/ifcparse/**'
-      - 'src/plugin/**'
-      - 'cmake/**'
-      - '.github/workflows/ci-ifcopenshell-ts.yml'
+  # pull_request alone is sufficient: this project's workflow requires every
+  # branch to have an open PR before it's built (agents always open a PR), so
+  # a push-triggered run here would just duplicate the pull_request-triggered
+  # run for the same commit. Dropped push: entirely rather than scoping it to
+  # v0.9.0 - nothing in this project's process currently needs a post-merge
+  # build independent of PR review; add it back scoped to v0.9.0 if that ever
+  # changes.
   pull_request:
 
 concurrency:
@@ -109,9 +109,28 @@ jobs:
           echo "CMAKE_PREFIX_PATH=/usr/local" >> "$GITHUB_ENV"
           echo "CMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
 
+      # vcpkg's native GitHub Actions Cache binary source ("x-gha"): lets a
+      # manually-invoked `vcpkg install` below fetch prebuilt Boost/Eigen
+      # packages from the GHA cache instead of compiling Boost from source
+      # every run (the single slowest leg observed in Phase 0's CI bring-up,
+      # 30+ minutes alone). ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN aren't
+      # exposed as plain job env vars; exporting them via actions/github-script
+      # is the mechanism vcpkg's own binary-caching docs and lukka/run-vcpkg
+      # (whose x-gha wiring this mirrors, since this workflow calls vcpkg.exe
+      # directly instead of using that action) both use.
+      - name: Export GitHub Actions cache environment variables (Windows)
+        if: matrix.os == 'windows'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Install build dependencies (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           # apt/brew install boost's full header tree regardless of which
           # libraries were requested; vcpkg installs only exactly what's
@@ -127,13 +146,45 @@ jobs:
         with:
           key: ifcopenshell-ts-${{ matrix.os }}-${{ matrix.arch }}
 
+      # Cache the *installed* C++ core prefix itself (not just object files
+      # via ccache), keyed on everything that can change its contents: the
+      # source that gets compiled into it, the CMake glue that configures it,
+      # matrix os/arch (the install tree is architecture/ABI-specific), and
+      # this workflow file (which is where the exact cmake flags below live -
+      # changing BUILD_IFCGEOM/SCHEMA_VERSIONS/etc here changes the install
+      # output without touching src/ifcparse, so it must invalidate the cache
+      # too). On a hit, the "Configure and install" steps below are skipped
+      # entirely - this, not ccache, is what actually removes the C++ build
+      # from the critical path for the (large) majority of PRs that only
+      # touch TS code. Dependency-install steps above still run unconditionally
+      # even on a hit: IfcOpenShellConfig.cmake's find_dependency(Boost)/
+      # find_dependency(Eigen3) run again when the native addon below does
+      # find_package(IfcOpenShell CONFIG REQUIRED), so Boost/Eigen must still
+      # be discoverable in the environment regardless of whether the core
+      # itself was rebuilt.
+      # Split restore/save (rather than the combined actions/cache@v4) so the
+      # save can be gated on a successful build below: the combined action's
+      # post-job save hook runs regardless of whether a later step failed,
+      # which would otherwise let a broken/partial build (e.g. cmake install
+      # dying mid-way) poison the cache with corrupt content that every
+      # subsequent run restores until someone manually busts the key.
+      - name: Restore cached IfcOpenShell C++ core
+        id: cache-core
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: >-
+            ifcopenshell-ts-core-${{ matrix.os }}-${{ matrix.arch }}-${{
+            hashFiles('src/ifcparse/**', 'src/plugin/**', 'cmake/**', '.github/workflows/ci-ifcopenshell-ts.yml') }}
+
       # Build and install just enough of the C++ core for the addon to link
       # against: BUILD_IFCGEOM=OFF skips OpenCASCADE/CGAL entirely, since the
       # Phase 0 smoke test only needs ifcparse (open a file, read its schema).
       # A single schema version keeps this fast - Phase 0 has no schema-
       # specific porting work yet.
       - name: Configure and install IfcOpenShell core (Unix)
-        if: matrix.os != 'windows'
+        id: core-unix
+        if: matrix.os != 'windows' && steps.cache-core.outputs.cache-hit != 'true'
         run: |
           cmake -S cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -154,7 +205,8 @@ jobs:
           cmake --build build --target install --parallel
 
       - name: Configure and install IfcOpenShell core (Windows)
-        if: matrix.os == 'windows'
+        id: core-windows
+        if: matrix.os == 'windows' && steps.cache-core.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           cmake -S cmake -B build -G "Visual Studio 17 2022" -A ${{ matrix.vsArch }} `
@@ -184,6 +236,18 @@ jobs:
             Write-Output "::endgroup::"
             exit $LASTEXITCODE
           }
+
+      # Only save on a genuinely successful build of this leg's core - see
+      # the restore step's comment above for why the save is split out and
+      # gated like this instead of using the combined actions/cache@v4.
+      - name: Save IfcOpenShell C++ core cache
+        if: >-
+          steps.cache-core.outputs.cache-hit != 'true' &&
+          (steps.core-unix.outcome == 'success' || steps.core-windows.outcome == 'success')
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: ${{ steps.cache-core.outputs.cache-primary-key }}
 
       - name: npm ci
         working-directory: src/ifcopenshell-ts
