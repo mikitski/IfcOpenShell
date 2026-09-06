@@ -52,11 +52,22 @@ IFC_PARSE_API std::string to_utf8(const std::wstring& str);
 /// Uses windows.h string conversion functions
 IFC_PARSE_API std::wstring from_utf8(const std::string& value);
 #else
+// Deliberately no IFC_PARSE_API on these two: on MSVC, that macro expands to
+// __declspec(dllimport) for any translation unit outside ifcparse.dll itself
+// (ifc_parse_api.h) -- combined with `inline`, MSVC treats the function as an
+// imported external symbol instead of emitting a local inline body, so any
+// out-of-DLL caller (e.g. a native addon consuming this header directly, not
+// just other ifcparse .cpp files) fails to link with LNK2019/"unresolved
+// external symbol", even though the whole point of an inline identity
+// function is that it needs no external definition at all. Not an issue on
+// non-MSVC (IFC_PARSE_API is just a visibility attribute there, with no
+// import/export distinction to conflict with `inline`) or in the #if branch
+// above (those two are real, non-inline, DLL-exported functions).
 /// Identity operation
-IFC_PARSE_API inline std::string to_utf8(const std::string& value) { return value; }
+inline std::string to_utf8(const std::string& value) { return value; }
 
 /// Identity operation
-IFC_PARSE_API inline std::string from_utf8(const std::string& value) { return value; }
+inline std::string from_utf8(const std::string& value) { return value; }
 #endif
 
 } // namespace path
