@@ -131,6 +131,29 @@ def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
             "express::entity": "ifcopenshell::file",
             "express::select": "ifcopenshell::file",
         },
+        # Native memory accounting for V8's GC (planning/ifcopenshell-ts/10-architecture.md's
+        # "Native object lifetime" section, `20-roadmap.md`'s "Native memory accounting" Phase
+        # 1 task) -- a per-class hint, in bytes, of how much off-heap memory each class's JS
+        # wrapper represents, reported via `napi_adjust_external_memory` (`emit.py`'s
+        # `_native_memory_size_hint`/wrap+finalizer emission). Only `ifcopenshell::file` is
+        # overridden here: it owns an entire parsed IFC model (every entity, attribute value,
+        # and string in the file), whose real size is unknowable from this generator's side --
+        # it depends entirely on the specific file opened, from empty to hundreds of MB, and
+        # nothing in the C++ API exposes a byte-accurate "how much memory does this model use"
+        # query for the generator to call. 1 MiB is a deliberately coarse, documented
+        # order-of-magnitude stand-in (real-world parsed models commonly land in the single-
+        # to double-digit-MB range): the goal is giving V8's GC *some* signal that a `file`
+        # handle is meaningfully heavier than an ordinary small wrapper, not billing it
+        # precisely -- V8's own docs describe this API as a GC-pressure hint, not a precise
+        # accounting requirement. Every other class either keeps `WrapperConfig`'s generic
+        # 64-byte default (small metadata/handle wrapper objects -- e.g. `entity_instance`
+        # itself only stores a pointer/index into data actually owned by its `file`, per
+        # `class_owner_types` above) or is `"borrowed"` handle_kind (schema-registry-owned
+        # singletons; `emit.py` accounts only for their tiny wrapper struct, never the
+        # singleton's own memory -- see `_native_memory_size_hint`'s doc comment).
+        class_native_size_hints={
+            "ifcopenshell::file": 1024 * 1024,
+        },
         type_adapters={
             "std::string": "string",
             "int": "integer",

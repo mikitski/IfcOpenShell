@@ -159,6 +159,8 @@ struct ifcopenshell_spf_header_t {
 
 struct ifcopenshell_file_t {
     std::shared_ptr<ifcopenshell::file> value;
+    bool disposed = false;
+    int async_refcount = 0;
 };
 
 struct ifcopenshell_global_id_t {
@@ -2675,6 +2677,9 @@ bool ifcopenshell_file_initialize(ifcopenshell_file_t* handle, const char* path)
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         return handle->value->initialize(std::string(path ? path : ""));
     } catch (const std::exception& exception) {
         set_last_error(exception);
@@ -2687,6 +2692,9 @@ bool ifcopenshell_file_initialize_with_filetype(ifcopenshell_file_t* handle, con
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         return handle->value->initialize(std::string(path ? path : ""), static_cast<ifcopenshell::filetype>(filetype));
     } catch (const std::exception& exception) {
@@ -2701,6 +2709,9 @@ bool ifcopenshell_file_initialize_with_filetype_readonly(ifcopenshell_file_t* ha
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         return handle->value->initialize(std::string(path ? path : ""), static_cast<ifcopenshell::filetype>(filetype), readonly);
     } catch (const std::exception& exception) {
         set_last_error(exception);
@@ -2713,6 +2724,9 @@ void ifcopenshell_file_bypass_type(ifcopenshell_file_t* handle, const char* type
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         handle->value->bypass_type(std::string(type_name ? type_name : ""));
         return;
@@ -2728,6 +2742,9 @@ ifcopenshell_file_open_status_t* ifcopenshell_file_good(ifcopenshell_file_t* han
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         auto result = handle->value->good();
         return new ifcopenshell_file_open_status_t{ std::move(result) };
     } catch (const std::exception& exception) {
@@ -2741,6 +2758,9 @@ ifcopenshell_express_base_list_t* ifcopenshell_file_instances_by_type_with_decla
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (declaration == nullptr) {
             throw std::runtime_error("Null handle parameter received for declaration");
@@ -2759,6 +2779,9 @@ ifcopenshell_express_base_list_t* ifcopenshell_file_instances_by_type_excl_subty
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         if (declaration == nullptr) {
             throw std::runtime_error("Null handle parameter received for declaration");
         }
@@ -2776,6 +2799,9 @@ ifcopenshell_express_base_list_t* ifcopenshell_file_instances_by_type_with_type_
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         auto result = handle->value->instances_by_type(std::string(type_name ? type_name : ""));
         return new ifcopenshell_express_base_list_t{ handle->value, std::move(result) };
     } catch (const std::exception& exception) {
@@ -2789,6 +2815,9 @@ ifcopenshell_express_base_list_t* ifcopenshell_file_instances_by_type_excl_subty
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         auto result = handle->value->instances_by_type_excl_subtypes(std::string(type_name ? type_name : ""));
         return new ifcopenshell_express_base_list_t{ handle->value, std::move(result) };
@@ -2804,6 +2833,9 @@ ifcopenshell_express_base_list_t* ifcopenshell_file_instances_by_reference(ifcop
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         auto result = handle->value->instances_by_reference(reference_id);
         return new ifcopenshell_express_base_list_t{ handle->value, std::move(result) };
     } catch (const std::exception& exception) {
@@ -2817,6 +2849,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_instance_by_id(ifcopenshell_file_
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         auto result = handle->value->instance_by_id(instance_id);
         return new ifcopenshell_express_base_t{ handle->value, std::move(result) };
@@ -2832,6 +2867,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_instance_by_guid(ifcopenshell_fil
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         auto result = handle->value->instance_by_guid(std::string(global_id ? global_id : ""));
         return new ifcopenshell_express_base_t{ handle->value, std::move(result) };
     } catch (const std::exception& exception) {
@@ -2845,6 +2883,9 @@ ifcopenshell_express_entity_list_t* ifcopenshell_file_get_inverse(ifcopenshell_f
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (declaration == nullptr) {
             throw std::runtime_error("Null handle parameter received for declaration");
@@ -2863,6 +2904,9 @@ int ifcopenshell_file_get_total_inverses(ifcopenshell_file_t* handle, int instan
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         return handle->value->get_total_inverses(instance_id);
     } catch (const std::exception& exception) {
         set_last_error(exception);
@@ -2875,6 +2919,9 @@ int ifcopenshell_file_fresh_id(ifcopenshell_file_t* handle) {
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         return handle->value->fresh_id();
     } catch (const std::exception& exception) {
@@ -2889,6 +2936,9 @@ int ifcopenshell_file_get_max_id(ifcopenshell_file_t* handle) {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         return handle->value->get_max_id();
     } catch (const std::exception& exception) {
         set_last_error(exception);
@@ -2901,6 +2951,9 @@ ifcopenshell_declaration_t* ifcopenshell_file_ifcroot_type(ifcopenshell_file_t* 
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         auto* result_ptr = handle->value->ifcroot_type();
         return result_ptr == nullptr ? nullptr : new ifcopenshell_declaration_t{ const_cast<ifcopenshell::declaration*>(result_ptr) };
@@ -2916,6 +2969,9 @@ void ifcopenshell_file_recalculate_id_counter(ifcopenshell_file_t* handle) {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         handle->value->recalculate_id_counter();
         return;
     } catch (const std::exception& exception) {
@@ -2929,6 +2985,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_add_entity(ifcopenshell_file_t* h
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for entity");
@@ -2947,6 +3006,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_add_entity_with_instance_id(ifcop
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         if (entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for entity");
         }
@@ -2963,6 +3025,9 @@ void ifcopenshell_file_remove_entity(ifcopenshell_file_t* handle, ifcopenshell_e
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for entity");
@@ -2981,6 +3046,9 @@ ifcopenshell_spf_header_t* ifcopenshell_file_header(ifcopenshell_file_t* handle)
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         auto result = handle->value->header();
         return new ifcopenshell_spf_header_t{ std::move(result) };
     } catch (const std::exception& exception) {
@@ -2994,6 +3062,9 @@ ifcopenshell_schema_definition_t* ifcopenshell_file_schema(ifcopenshell_file_t* 
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         auto* result_ptr = handle->value->schema();
         return result_ptr == nullptr ? nullptr : new ifcopenshell_schema_definition_t{ const_cast<ifcopenshell::schema_definition*>(result_ptr) };
@@ -3009,6 +3080,9 @@ void ifcopenshell_file_build_inverses_overload_1(ifcopenshell_file_t* handle) {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         handle->value->build_inverses();
         return;
     } catch (const std::exception& exception) {
@@ -3022,6 +3096,9 @@ void ifcopenshell_file_register_inverse(ifcopenshell_file_t* handle, int referen
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (from_entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for from_entity");
@@ -3039,6 +3116,9 @@ void ifcopenshell_file_unregister_inverse(ifcopenshell_file_t* handle, int refer
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (from_entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for from_entity");
@@ -3060,6 +3140,9 @@ void ifcopenshell_file_add_type_ref(ifcopenshell_file_t* handle, ifcopenshell_ex
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         if (new_entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for new_entity");
         }
@@ -3076,6 +3159,9 @@ void ifcopenshell_file_remove_type_ref(ifcopenshell_file_t* handle, ifcopenshell
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (new_entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for new_entity");
@@ -3094,6 +3180,9 @@ void ifcopenshell_file_process_deletion_inverse(ifcopenshell_file_t* handle, ifc
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         if (entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for entity");
         }
@@ -3110,6 +3199,9 @@ void ifcopenshell_file_build_inverses_with_entity(ifcopenshell_file_t* handle, i
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (entity == nullptr) {
             throw std::runtime_error("Null handle parameter received for entity");
@@ -3128,6 +3220,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_create_with_declaration_instance_
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         if (declaration == nullptr) {
             throw std::runtime_error("Null handle parameter received for declaration");
         }
@@ -3144,6 +3239,9 @@ ifcopenshell_express_base_t* ifcopenshell_file_create_with_declaration_instance_
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         if (declaration == nullptr) {
             throw std::runtime_error("Null handle parameter received for declaration");
@@ -3162,6 +3260,9 @@ void ifcopenshell_file_batch(ifcopenshell_file_t* handle) {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         handle->value->batch();
         return;
     } catch (const std::exception& exception) {
@@ -3175,6 +3276,9 @@ void ifcopenshell_file_unbatch(ifcopenshell_file_t* handle) {
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         handle->value->unbatch();
         return;
@@ -3190,6 +3294,9 @@ void ifcopenshell_file_reset_identity_cache(ifcopenshell_file_t* handle) {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
         }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
         handle->value->reset_identity_cache();
         return;
     } catch (const std::exception& exception) {
@@ -3203,6 +3310,9 @@ void ifcopenshell_file_write(ifcopenshell_file_t* handle, const char* path) {
     try {
         if (handle == nullptr) {
             throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
         }
         ifcopenshell::wrappergen::write_file(*handle->value, std::string(path ? path : ""));
         return;
@@ -3660,6 +3770,46 @@ void ifcopenshell_spf_header_free(ifcopenshell_spf_header_t* handle) {
 
 void ifcopenshell_file_free(ifcopenshell_file_t* handle) {
     delete handle;
+}
+
+void ifcopenshell_file_dispose(ifcopenshell_file_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
+        if (handle->async_refcount > 0) {
+            throw std::runtime_error("file cannot be disposed while async work on it is in progress");
+        }
+        handle->disposed = true;
+        handle->value.reset();
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+    }
+}
+
+bool ifcopenshell_file_is_disposed(const ifcopenshell_file_t* handle) {
+    return handle != nullptr && handle->disposed;
+}
+
+void ifcopenshell_file_async_begin(ifcopenshell_file_t* handle) {
+    // Main-thread-only mutation of `async_refcount` -- see the struct field's
+    // doc comment above. Deliberately does not itself check/throw on `disposed`:
+    // the async work's own execute callback calls the exact same guarded sync
+    // C-ABI function this class's ordinary methods do, so an already-disposed
+    // handle is still reported as an error, just via that existing path.
+    if (handle != nullptr) {
+        ++handle->async_refcount;
+    }
+}
+
+void ifcopenshell_file_async_end(ifcopenshell_file_t* handle) {
+    if (handle != nullptr && handle->async_refcount > 0) {
+        --handle->async_refcount;
+    }
 }
 
 void ifcopenshell_global_id_free(ifcopenshell_global_id_t* handle) {

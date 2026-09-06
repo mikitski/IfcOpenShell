@@ -1023,6 +1023,14 @@ export class file {
         native.file_write(this._handle, path);
     }
 
+    dispose(): void {
+        native.file_dispose(this._handle);
+    }
+
+    [Symbol.dispose](): void {
+        this.dispose();
+    }
+
     static open_path_async(path: string): Promise<file> {
         const result = native.file_new_with_path_async(path) as Promise<unknown>;
         return result.then((handle) => new file(handle));
