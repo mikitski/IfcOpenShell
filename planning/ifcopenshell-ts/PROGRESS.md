@@ -14,15 +14,22 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ Phase 1's real primitive binding surface landed (squash-merged to `v0.9.0` as `bf11a824e`).
-The implementation agent's session died mid-flight to an unrelated OAuth token revocation right
-after opening the PR (transcript unrecoverable) — I completed the review and all CI-fix iteration
-myself directly from the diff. Found and fixed 4 real issues along the way: Black formatting, a
-diagnostic-pipeline path bug, an MSVC-vs-clang ambiguous-overload compile error (tribool
-conversion), and an `IFC_PARSE_API`/dllimport linkage bug (LNK2019 on Windows only, silent on
-Unix). Phase 1 is now complete except async variants, native memory accounting, and ASAN/fuzz CI
-(3 remaining chunks) — Phase 2 is unblocked, with a confirmed identity-registry requirement from
-the fresh-wrapper-per-access finding. Next chunk not yet dispatched.
+✅ Phase 1's native memory accounting landed (squash-merged to `v0.9.0` as `abeb57ee7`), on top of
+the previously-landed async primitive variants (`80f784c22`). `napi_adjust_external_memory` on
+every native allocation (per-class byte hints; `"borrowed"`-handle classes correctly bill only
+their tiny wrapper struct, never the singleton pointee's memory — see
+`research/06-wrappergen-spike-results.md` §3.5), plus `file.dispose()`/`[Symbol.dispose]` for
+deterministic early release. The agent found and fixed a real bug via self-review, not by the
+initial design: a `shared_ptr` data race between `dispose()` (main thread) and an in-flight async
+op's worker-thread dereference of that exact same `shared_ptr` instance — closed with a small
+main-thread-only `async_refcount` guard. One CI-iteration fix by the orchestrator: 5 Black
+formatting violations in `emit.py` (fixed manually — no working local Black 26.x install in this
+sandbox; verified against the CI-reported annotation line ranges). All 6 build-and-test legs +
+both lint jobs green, including Windows arm64/x64 (no MSVC divergence this round). Phase 1
+remaining: ASAN/UBSan CI + fuzz testing (last chunk) — Phase 2 (core TS layer) can also start in
+parallel per standing instructions. Also in flight, dispatched in parallel per user request: a
+CI-caching fix (`ci/cache-cpp-core`) to address CI turnaround time, unrelated to Phase 1's feature
+work — still running as of this update.
 
 ## Operational note: worktree isolation workaround
 
@@ -58,8 +65,8 @@ binding could be built, since it decided generated-vs-hand-written.
 |---|---|---|---|
 | `wrappergen` validation spike (generated vs. hand-written decision) | ✅ | [#3](https://github.com/mikitski/IfcOpenShell/pull/3) | Landed `a8b2a7517` — **PASS**: extend wrappergen. 5 bugs found+fixed, incl. a confirmed use-after-free (new "borrowed" handle-kind). See `research/06-wrappergen-spike-results.md`. |
 | `file`/`entity_instance` primitives + schema introspection | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Landed `bf11a824e`. Completed the variant dispatch (BINARY+AGGREGATE), full schema-introspection class set, wired into `src/ifcopenshell-ts`'s real build. **Empirically resolved fresh-wrapper-per-access: fresh wrapper, confirmed** — see `research/07-fresh-wrapper-per-access.md`. 4 real bugs found+fixed by the orchestrator during review/CI (agent's session died mid-task to an unrelated auth error): Black formatting, a CI diagnostic-path bug, an MSVC tribool-conversion ambiguity, an `IFC_PARSE_API`/dllimport linkage bug. |
-| Async primitive variants (`napi_create_async_work`) | 🔲 | — | — |
-| Native memory accounting (`napi_adjust_external_memory`) | 🔲 | — | — |
+| Async primitive variants (`napi_create_async_work`) | ✅ | [#7](https://github.com/mikitski/IfcOpenShell/pull/7) | Landed `80f784c22`. Promise-based siblings for file open/parse, `get_all_attribute_values`, `write`. 3 real bugs found+fixed by the orchestrator (agent stalled mid-task): Black formatting, stale checked-in TS facade copy, an MSVC `inline`+`IFC_PARSE_API` linkage bug in `src/ifcparse/utils.h` (user-confirmed before touching core C++). |
+| Native memory accounting (`napi_adjust_external_memory`) | ✅ | [#9](https://github.com/mikitski/IfcOpenShell/pull/9) | Landed `abeb57ee7`. Per-class GC-pressure hints on every wrap/finalize pair (`file` gets a documented coarse 1 MiB stand-in; `"borrowed"` classes bill only their wrapper, never the singleton pointee); `file.dispose()`/`[Symbol.dispose]` never double-frees (resets the `shared_ptr`, leaves the struct for the one real finalizer `delete`). Real `shared_ptr` race (dispose vs. in-flight async op) found+fixed by the agent's own self-review, guarded by a new `async_refcount` counter. 1 issue found+fixed by the orchestrator: 5 Black formatting violations in `emit.py`. |
 | ASAN/UBSan CI + fuzz testing of parse primitives | 🔲 | — | — |
 
 ## Phase 2 — Core TS layer
