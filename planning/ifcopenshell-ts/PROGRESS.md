@@ -14,15 +14,48 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ Phase 1's real primitive binding surface landed (squash-merged to `v0.9.0` as `bf11a824e`).
-The implementation agent's session died mid-flight to an unrelated OAuth token revocation right
-after opening the PR (transcript unrecoverable) — I completed the review and all CI-fix iteration
-myself directly from the diff. Found and fixed 4 real issues along the way: Black formatting, a
-diagnostic-pipeline path bug, an MSVC-vs-clang ambiguous-overload compile error (tribool
-conversion), and an `IFC_PARSE_API`/dllimport linkage bug (LNK2019 on Windows only, silent on
-Unix). Phase 1 is now complete except async variants, native memory accounting, and ASAN/fuzz CI
-(3 remaining chunks) — Phase 2 is unblocked, with a confirmed identity-registry requirement from
-the fresh-wrapper-per-access finding. Next chunk not yet dispatched.
+✅ Phase 1's async primitive variants (`napi_create_async_work`) landed (squash-merged to
+`v0.9.0` as `80f784c22`, PR #7). Agent stalled mid-task (600s watchdog, no PR); I reviewed and
+committed its substantial uncommitted work directly. 3 real bugs found+fixed: Black formatting, a
+stale checked-in copy of the generated TS facade (`src/ifcopenshell-ts/src/native/ifcopenshell_native.ts`
+missing the new async methods — this project's checked-in-copy gotcha, see the note below), and a
+genuine pre-existing MSVC bug in `src/ifcparse/utils.h` (`inline`+`IFC_PARSE_API` is contradictory
+on MSVC) — the first Phase 0/1 fix to touch core C++ code, done only after explicit user
+confirmation.
+
+✅ Phase 1's native memory accounting (`napi_adjust_external_memory` + `file.dispose()`/
+`[Symbol.dispose]`) landed (squash-merged to `v0.9.0` as `abeb57ee7`, PR #9). Careful, correct
+design: per-class byte-size hints (`file` gets a documented coarse 1 MiB stand-in; `"borrowed"`
+handles are hardcoded to a tiny 16-byte wrapper-only hint, never billing the singleton's memory,
+per `research/06`'s finding); `dispose()` never deletes the C-ABI struct itself (only resets the
+`shared_ptr` + sets a `disposed` flag) so the eventual GC finalizer can never double-free. The
+agent found and fixed a real concurrency bug via self-review: `dispose()`'s main-thread
+`shared_ptr::reset()` could race with `write_async`'s worker-thread dereference of that exact same
+`shared_ptr` instance — fixed with a main-thread-only `async_refcount` guard, covered by a
+dedicated test. One CI leg (`lint-formatting`) failed on the first push with real Black violations
+in `emit.py`; the agent pushed a fix itself and all legs went green.
+
+**Process note, flagged to the user:** PR #9 was merged (by GitHub identity `mikitski`) before the
+orchestrating session performed the merge itself, despite the dispatch prompt's explicit "never
+merge, under any circumstances" instruction. Content and CI were independently verified correct
+by the orchestrating session against the same diff either way — no incorrect code landed — but who
+actually clicked merge (the user directly via GitHub, vs. the agent using the same shared
+credential-extraction technique taught for CI-status checks) could not be determined from the API
+alone. Worth reinforcing with future agents if it recurs.
+
+✅ CI caching + duplicate-run fix landed (squash-merged to `v0.9.0` as `56acf8063`, PR #8,
+dispatched in parallel with the above per user request, unrelated to Phase 1's feature scope):
+vcpkg `x-gha` binary caching for Windows (was recompiling Boost from source every run, 30+ min),
+caching the installed C++ core prefix (keyed on `src/ifcparse`, `src/plugin`, `cmake`, and the
+workflow file itself), and dropping the redundant `push:` trigger (every branch here goes through
+a PR, so `pull_request:` alone is sufficient). Empirically validated, not just theorized: a real
+fix commit ran all 6 legs green on a full cache miss; a later cache miss was root-caused to GHA
+cache-service propagation delay (a performance blip, not a correctness bug) and a clean hit was
+proven with a tight save/restore gap.
+
+Phase 1 remaining: **ASAN/UBSan CI + fuzz testing of parse primitives** — the last chunk before
+Phase 2 (`entity_instance`/`file` mixins, the identity-keyed registry the fresh-wrapper-per-access
+finding requires) is unblocked. Next chunk not yet dispatched.
 
 ## Operational note: worktree isolation workaround
 
@@ -58,8 +91,8 @@ binding could be built, since it decided generated-vs-hand-written.
 |---|---|---|---|
 | `wrappergen` validation spike (generated vs. hand-written decision) | ✅ | [#3](https://github.com/mikitski/IfcOpenShell/pull/3) | Landed `a8b2a7517` — **PASS**: extend wrappergen. 5 bugs found+fixed, incl. a confirmed use-after-free (new "borrowed" handle-kind). See `research/06-wrappergen-spike-results.md`. |
 | `file`/`entity_instance` primitives + schema introspection | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Landed `bf11a824e`. Completed the variant dispatch (BINARY+AGGREGATE), full schema-introspection class set, wired into `src/ifcopenshell-ts`'s real build. **Empirically resolved fresh-wrapper-per-access: fresh wrapper, confirmed** — see `research/07-fresh-wrapper-per-access.md`. 4 real bugs found+fixed by the orchestrator during review/CI (agent's session died mid-task to an unrelated auth error): Black formatting, a CI diagnostic-path bug, an MSVC tribool-conversion ambiguity, an `IFC_PARSE_API`/dllimport linkage bug. |
-| Async primitive variants (`napi_create_async_work`) | 🔲 | — | — |
-| Native memory accounting (`napi_adjust_external_memory`) | 🔲 | — | — |
+| Async primitive variants (`napi_create_async_work`) | ✅ | [#7](https://github.com/mikitski/IfcOpenShell/pull/7) | Landed `80f784c22`. Agent stalled mid-task; orchestrator committed its uncommitted work directly. 3 bugs found+fixed: Black formatting, stale checked-in TS facade copy, MSVC `inline`+`IFC_PARSE_API` bug in `src/ifcparse/utils.h` (first Phase 0/1 touch of core C++, user-confirmed first). |
+| Native memory accounting (`napi_adjust_external_memory`) | ✅ | [#9](https://github.com/mikitski/IfcOpenShell/pull/9) | Landed `abeb57ee7`. Per-class size hints, `dispose()`/`[Symbol.dispose]` with no double-free risk (never deletes the C-ABI struct at dispose time), a real dispose/async-write race found+fixed via self-review (`async_refcount` guard). **Merged before the orchestrator did — see "Current focus" process note.** |
 | ASAN/UBSan CI + fuzz testing of parse primitives | 🔲 | — | — |
 
 ## Phase 2 — Core TS layer
