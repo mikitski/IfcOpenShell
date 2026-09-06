@@ -276,3 +276,67 @@ under the project's actual build system and every target compiler (MSVC in parti
 exact code area's history of clang/MSVC divergences per the prior two Phase 1 PRs).
 
 **Depends on / blocked by:** None.
+
+### Native memory accounting: disclosed approximations and scope cuts
+
+**What:** The memory-accounting PR (`napi_adjust_external_memory` on every native allocation, plus
+`file.dispose()`/`[Symbol.dispose]`, per `10-architecture.md`'s "Native object lifetime" section)
+intentionally narrows scope in a few documented ways:
+
+1. **`ifcopenshell::file`'s 1 MiB external-memory size hint (`napi_binding.py`'s
+   `class_native_size_hints`) is a deliberately coarse, fixed approximation, not derived from any
+   particular opened file's real size.** A parsed IFC model can range from empty to hundreds of MB;
+   nothing in the C++ API exposes a byte-accurate "how much memory does this model use" query for
+   the generator to call at wrap time. V8's own docs describe `napi_adjust_external_memory` as a
+   GC-pressure hint, not a precise-accounting requirement, so this is treated as good enough —
+   flagged here in case a future chunk wants a closer approximation (e.g. entity count × a
+   per-entity estimate).
+2. **`dispose()`'s external-memory decrement can run before the underlying native memory is
+   actually freed, when other handles still hold a share of it.** `express::base`/`typed_entity_instance`
+   handles derived from a `file` hold their own `std::shared_ptr<file>` copy (`class_owner_types`) to
+   keep the file alive independent of the `file` wrapper's own lifetime. `file.dispose()` only resets
+   *that* wrapper's own shared_ptr and decrements *that* wrapper's 1 MiB hint immediately (the whole
+   point of "deterministic early release") — if live entity handles from the same file still hold
+   their own reference, the real parsed-model memory isn't actually freed until those are gone too,
+   even though V8's counter already went down. This is a known, disclosed imprecision of the hint,
+   not a memory-safety bug (the C++ object itself is correctly kept alive by the remaining
+   references) — same "hint, not precise accounting" rationale as point 1.
+3. **A real concurrency bug found by self-review during this PR, not by the initial implementation,
+   and fixed before shipping:** `dispose()`'s `handle->value.reset()` runs on the JS main thread,
+   while an in-flight async op on the same `file` (currently only `write_async`, per the async PR)
+   dereferences that exact same `shared_ptr` instance from a libuv worker thread inside its
+   `_execute` callback — concurrent read+write of one non-thread-safe `shared_ptr` instance is a
+   real data race (distinct from the *different-instances-same-object* case `shared_ptr` **is** safe
+   for). Fixed with a small `async_refcount` counter on the C-ABI wrapper struct, incremented on the
+   main thread immediately before an async op referencing a disposable handle is queued and
+   decremented on the main thread once its worker-thread portion has fully returned; `dispose()`
+   refuses (throws a catchable error) while the count is nonzero. Both increments/decrements are
+   main-thread-only by construction (JS's single-threaded event loop), so `async_refcount` itself has
+   no race despite guarding against one. Covered by
+   `src/ifcopenshell-ts/test/native/memory.test.ts`'s "dispose() refuses to run while an async op ...
+   is in flight" test.
+4. **ASAN/UBSan CI and fuzz testing remain out of this PR's scope**, per `20-roadmap.md`'s Phase 1
+   exit criterion explicitly naming them as a separate, later chunk — not narrowed further by this
+   PR, just not newly in scope either.
+
+**Why:** All four are real, understood, and match the scope-discipline precedent set by the prior
+three Phase 1 PRs. None blocks this PR's own correctness — all are documented, deliberate choices
+(or, for #3, a bug found and fixed within this same PR, not shipped and deferred).
+
+**Context:** Verified locally (this sandbox has no `cmake`/full C++ toolchain for the addon's real
+CMake target, same constraint as the prior two Phase 1 PRs): the full C++ core (`ifcparse`, `plugin`,
+the shims, the generated C API) was compiled and linked into a real loadable `.node` addon via manual
+`clang++` invocations (bypassing the missing `cmake`), rebuilt clean-room from scratch as a final
+check, and exercised end-to-end under the locally available Node 20.12.2 — the full existing Phase 1
+primitive-layer test suite (9 tests) plus 6 new tests in `test/native/memory.test.ts` covering:
+`dispose()` releasing a `file` early and a second `dispose()`/any other method call throwing cleanly
+afterward instead of crashing; `[Symbol.dispose]` delegating to `dispose()`; the async/dispose race
+guard (point 3 above); and two `--expose-gc`/`global.gc()`-forced GC-pressure tests (200
+created-and-dropped `file` handles observing external memory return to baseline rather than staying
+pinned near 200 MiB, and 10 rounds of 50 handles each with half explicitly disposed and half left for
+the finalizer) neither crashing nor corrupting memory. The real CMake-driven, CI-built addon (all 6
+OS×arch legs) still needs to confirm this compiles/links/runs identically under the project's actual
+build system and every target compiler (MSVC in particular, given this code area's history of
+clang/MSVC divergences per the prior two Phase 1 PRs).
+
+**Depends on / blocked by:** None.

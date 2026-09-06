@@ -388,6 +388,10 @@ void ifcopenshell_enumeration_reference_free(ifcopenshell_enumeration_reference_
 void ifcopenshell_attribute_value_free(ifcopenshell_attribute_value_t* handle);
 void ifcopenshell_spf_header_free(ifcopenshell_spf_header_t* handle);
 void ifcopenshell_file_free(ifcopenshell_file_t* handle);
+void ifcopenshell_file_dispose(ifcopenshell_file_t* handle);
+bool ifcopenshell_file_is_disposed(const ifcopenshell_file_t* handle);
+void ifcopenshell_file_async_begin(ifcopenshell_file_t* handle);
+void ifcopenshell_file_async_end(ifcopenshell_file_t* handle);
 void ifcopenshell_global_id_free(ifcopenshell_global_id_t* handle);
 
 #ifdef __cplusplus

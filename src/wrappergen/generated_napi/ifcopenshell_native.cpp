@@ -31,7 +31,8 @@ char* napi_duplicate_js_string(napi_env env, napi_value value) {
     return buffer;
 }
 
-void ifcopenshell_exception_finalize(napi_env, void* data, void*) {
+void ifcopenshell_exception_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_exception_free(static_cast<ifcopenshell_exception_t*>(data));
 }
 
@@ -41,6 +42,7 @@ napi_value wrap_ifcopenshell_exception(napi_env env, ifcopenshell_exception_t* h
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_exception_finalize, nullptr, &result);
     return result;
@@ -52,7 +54,8 @@ ifcopenshell_exception_t* unwrap_ifcopenshell_exception(napi_env env, napi_value
     return static_cast<ifcopenshell_exception_t*>(data);
 }
 
-void ifcopenshell_attribute_out_of_range_exception_finalize(napi_env, void* data, void*) {
+void ifcopenshell_attribute_out_of_range_exception_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_attribute_out_of_range_exception_free(static_cast<ifcopenshell_attribute_out_of_range_exception_t*>(data));
 }
 
@@ -62,6 +65,7 @@ napi_value wrap_ifcopenshell_attribute_out_of_range_exception(napi_env env, ifco
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_attribute_out_of_range_exception_finalize, nullptr, &result);
     return result;
@@ -73,7 +77,8 @@ ifcopenshell_attribute_out_of_range_exception_t* unwrap_ifcopenshell_attribute_o
     return static_cast<ifcopenshell_attribute_out_of_range_exception_t*>(data);
 }
 
-void ifcopenshell_invalid_token_exception_finalize(napi_env, void* data, void*) {
+void ifcopenshell_invalid_token_exception_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_invalid_token_exception_free(static_cast<ifcopenshell_invalid_token_exception_t*>(data));
 }
 
@@ -83,6 +88,7 @@ napi_value wrap_ifcopenshell_invalid_token_exception(napi_env env, ifcopenshell_
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_invalid_token_exception_finalize, nullptr, &result);
     return result;
@@ -94,7 +100,8 @@ ifcopenshell_invalid_token_exception_t* unwrap_ifcopenshell_invalid_token_except
     return static_cast<ifcopenshell_invalid_token_exception_t*>(data);
 }
 
-void ifcopenshell_parameter_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_parameter_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_parameter_type_free(static_cast<ifcopenshell_parameter_type_t*>(data));
 }
 
@@ -104,6 +111,7 @@ napi_value wrap_ifcopenshell_parameter_type(napi_env env, ifcopenshell_parameter
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_parameter_type_finalize, nullptr, &result);
     return result;
@@ -115,7 +123,8 @@ ifcopenshell_parameter_type_t* unwrap_ifcopenshell_parameter_type(napi_env env, 
     return static_cast<ifcopenshell_parameter_type_t*>(data);
 }
 
-void ifcopenshell_named_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_named_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_named_type_free(static_cast<ifcopenshell_named_type_t*>(data));
 }
 
@@ -125,6 +134,7 @@ napi_value wrap_ifcopenshell_named_type(napi_env env, ifcopenshell_named_type_t*
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_named_type_finalize, nullptr, &result);
     return result;
@@ -136,7 +146,8 @@ ifcopenshell_named_type_t* unwrap_ifcopenshell_named_type(napi_env env, napi_val
     return static_cast<ifcopenshell_named_type_t*>(data);
 }
 
-void ifcopenshell_simple_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_simple_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_simple_type_free(static_cast<ifcopenshell_simple_type_t*>(data));
 }
 
@@ -146,6 +157,7 @@ napi_value wrap_ifcopenshell_simple_type(napi_env env, ifcopenshell_simple_type_
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_simple_type_finalize, nullptr, &result);
     return result;
@@ -157,7 +169,8 @@ ifcopenshell_simple_type_t* unwrap_ifcopenshell_simple_type(napi_env env, napi_v
     return static_cast<ifcopenshell_simple_type_t*>(data);
 }
 
-void ifcopenshell_aggregation_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_aggregation_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_aggregation_type_free(static_cast<ifcopenshell_aggregation_type_t*>(data));
 }
 
@@ -167,6 +180,7 @@ napi_value wrap_ifcopenshell_aggregation_type(napi_env env, ifcopenshell_aggrega
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_aggregation_type_finalize, nullptr, &result);
     return result;
@@ -178,7 +192,8 @@ ifcopenshell_aggregation_type_t* unwrap_ifcopenshell_aggregation_type(napi_env e
     return static_cast<ifcopenshell_aggregation_type_t*>(data);
 }
 
-void ifcopenshell_declaration_finalize(napi_env, void* data, void*) {
+void ifcopenshell_declaration_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_declaration_free(static_cast<ifcopenshell_declaration_t*>(data));
 }
 
@@ -188,6 +203,7 @@ napi_value wrap_ifcopenshell_declaration(napi_env env, ifcopenshell_declaration_
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_declaration_finalize, nullptr, &result);
     return result;
@@ -199,7 +215,8 @@ ifcopenshell_declaration_t* unwrap_ifcopenshell_declaration(napi_env env, napi_v
     return static_cast<ifcopenshell_declaration_t*>(data);
 }
 
-void ifcopenshell_type_declaration_finalize(napi_env, void* data, void*) {
+void ifcopenshell_type_declaration_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_type_declaration_free(static_cast<ifcopenshell_type_declaration_t*>(data));
 }
 
@@ -209,6 +226,7 @@ napi_value wrap_ifcopenshell_type_declaration(napi_env env, ifcopenshell_type_de
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_type_declaration_finalize, nullptr, &result);
     return result;
@@ -220,7 +238,8 @@ ifcopenshell_type_declaration_t* unwrap_ifcopenshell_type_declaration(napi_env e
     return static_cast<ifcopenshell_type_declaration_t*>(data);
 }
 
-void ifcopenshell_select_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_select_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_select_type_free(static_cast<ifcopenshell_select_type_t*>(data));
 }
 
@@ -230,6 +249,7 @@ napi_value wrap_ifcopenshell_select_type(napi_env env, ifcopenshell_select_type_
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_select_type_finalize, nullptr, &result);
     return result;
@@ -241,7 +261,8 @@ ifcopenshell_select_type_t* unwrap_ifcopenshell_select_type(napi_env env, napi_v
     return static_cast<ifcopenshell_select_type_t*>(data);
 }
 
-void ifcopenshell_enumeration_type_finalize(napi_env, void* data, void*) {
+void ifcopenshell_enumeration_type_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_enumeration_type_free(static_cast<ifcopenshell_enumeration_type_t*>(data));
 }
 
@@ -251,6 +272,7 @@ napi_value wrap_ifcopenshell_enumeration_type(napi_env env, ifcopenshell_enumera
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_enumeration_type_finalize, nullptr, &result);
     return result;
@@ -262,7 +284,8 @@ ifcopenshell_enumeration_type_t* unwrap_ifcopenshell_enumeration_type(napi_env e
     return static_cast<ifcopenshell_enumeration_type_t*>(data);
 }
 
-void ifcopenshell_attribute_finalize(napi_env, void* data, void*) {
+void ifcopenshell_attribute_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_attribute_free(static_cast<ifcopenshell_attribute_t*>(data));
 }
 
@@ -272,6 +295,7 @@ napi_value wrap_ifcopenshell_attribute(napi_env env, ifcopenshell_attribute_t* h
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_attribute_finalize, nullptr, &result);
     return result;
@@ -283,7 +307,8 @@ ifcopenshell_attribute_t* unwrap_ifcopenshell_attribute(napi_env env, napi_value
     return static_cast<ifcopenshell_attribute_t*>(data);
 }
 
-void ifcopenshell_inverse_attribute_finalize(napi_env, void* data, void*) {
+void ifcopenshell_inverse_attribute_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_inverse_attribute_free(static_cast<ifcopenshell_inverse_attribute_t*>(data));
 }
 
@@ -293,6 +318,7 @@ napi_value wrap_ifcopenshell_inverse_attribute(napi_env env, ifcopenshell_invers
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_inverse_attribute_finalize, nullptr, &result);
     return result;
@@ -304,7 +330,8 @@ ifcopenshell_inverse_attribute_t* unwrap_ifcopenshell_inverse_attribute(napi_env
     return static_cast<ifcopenshell_inverse_attribute_t*>(data);
 }
 
-void ifcopenshell_entity_finalize(napi_env, void* data, void*) {
+void ifcopenshell_entity_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_entity_free(static_cast<ifcopenshell_entity_t*>(data));
 }
 
@@ -314,6 +341,7 @@ napi_value wrap_ifcopenshell_entity(napi_env env, ifcopenshell_entity_t* handle)
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_entity_finalize, nullptr, &result);
     return result;
@@ -325,7 +353,8 @@ ifcopenshell_entity_t* unwrap_ifcopenshell_entity(napi_env env, napi_value value
     return static_cast<ifcopenshell_entity_t*>(data);
 }
 
-void ifcopenshell_schema_definition_finalize(napi_env, void* data, void*) {
+void ifcopenshell_schema_definition_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(16), nullptr);
     ifcopenshell_schema_definition_free(static_cast<ifcopenshell_schema_definition_t*>(data));
 }
 
@@ -335,6 +364,7 @@ napi_value wrap_ifcopenshell_schema_definition(napi_env env, ifcopenshell_schema
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(16), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_schema_definition_finalize, nullptr, &result);
     return result;
@@ -346,7 +376,8 @@ ifcopenshell_schema_definition_t* unwrap_ifcopenshell_schema_definition(napi_env
     return static_cast<ifcopenshell_schema_definition_t*>(data);
 }
 
-void ifcopenshell_schema_registry_finalize(napi_env, void* data, void*) {
+void ifcopenshell_schema_registry_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_schema_registry_free(static_cast<ifcopenshell_schema_registry_t*>(data));
 }
 
@@ -356,6 +387,7 @@ napi_value wrap_ifcopenshell_schema_registry(napi_env env, ifcopenshell_schema_r
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_schema_registry_finalize, nullptr, &result);
     return result;
@@ -367,7 +399,8 @@ ifcopenshell_schema_registry_t* unwrap_ifcopenshell_schema_registry(napi_env env
     return static_cast<ifcopenshell_schema_registry_t*>(data);
 }
 
-void express_base_finalize(napi_env, void* data, void*) {
+void express_base_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_express_base_free(static_cast<ifcopenshell_express_base_t*>(data));
 }
 
@@ -377,6 +410,7 @@ napi_value wrap_express_base(napi_env env, ifcopenshell_express_base_t* handle) 
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, express_base_finalize, nullptr, &result);
     return result;
@@ -388,7 +422,8 @@ ifcopenshell_express_base_t* unwrap_express_base(napi_env env, napi_value value)
     return static_cast<ifcopenshell_express_base_t*>(data);
 }
 
-void express_entity_finalize(napi_env, void* data, void*) {
+void express_entity_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_express_entity_free(static_cast<ifcopenshell_express_entity_t*>(data));
 }
 
@@ -398,6 +433,7 @@ napi_value wrap_express_entity(napi_env env, ifcopenshell_express_entity_t* hand
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, express_entity_finalize, nullptr, &result);
     return result;
@@ -409,7 +445,8 @@ ifcopenshell_express_entity_t* unwrap_express_entity(napi_env env, napi_value va
     return static_cast<ifcopenshell_express_entity_t*>(data);
 }
 
-void express_select_finalize(napi_env, void* data, void*) {
+void express_select_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_express_select_free(static_cast<ifcopenshell_express_select_t*>(data));
 }
 
@@ -419,6 +456,7 @@ napi_value wrap_express_select(napi_env env, ifcopenshell_express_select_t* hand
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, express_select_finalize, nullptr, &result);
     return result;
@@ -430,7 +468,8 @@ ifcopenshell_express_select_t* unwrap_express_select(napi_env env, napi_value va
     return static_cast<ifcopenshell_express_select_t*>(data);
 }
 
-void ifcopenshell_logger_finalize(napi_env, void* data, void*) {
+void ifcopenshell_logger_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_logger_free(static_cast<ifcopenshell_logger_t*>(data));
 }
 
@@ -440,6 +479,7 @@ napi_value wrap_ifcopenshell_logger(napi_env env, ifcopenshell_logger_t* handle)
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_logger_finalize, nullptr, &result);
     return result;
@@ -451,7 +491,8 @@ ifcopenshell_logger_t* unwrap_ifcopenshell_logger(napi_env env, napi_value value
     return static_cast<ifcopenshell_logger_t*>(data);
 }
 
-void ifcopenshell_full_buffer_impl_finalize(napi_env, void* data, void*) {
+void ifcopenshell_full_buffer_impl_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_full_buffer_impl_free(static_cast<ifcopenshell_full_buffer_impl_t*>(data));
 }
 
@@ -461,6 +502,7 @@ napi_value wrap_ifcopenshell_full_buffer_impl(napi_env env, ifcopenshell_full_bu
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_full_buffer_impl_finalize, nullptr, &result);
     return result;
@@ -472,7 +514,8 @@ ifcopenshell_full_buffer_impl_t* unwrap_ifcopenshell_full_buffer_impl(napi_env e
     return static_cast<ifcopenshell_full_buffer_impl_t*>(data);
 }
 
-void ifcopenshell_paged_file_impl_finalize(napi_env, void* data, void*) {
+void ifcopenshell_paged_file_impl_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_paged_file_impl_free(static_cast<ifcopenshell_paged_file_impl_t*>(data));
 }
 
@@ -482,6 +525,7 @@ napi_value wrap_ifcopenshell_paged_file_impl(napi_env env, ifcopenshell_paged_fi
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_paged_file_impl_finalize, nullptr, &result);
     return result;
@@ -493,7 +537,8 @@ ifcopenshell_paged_file_impl_t* unwrap_ifcopenshell_paged_file_impl(napi_env env
     return static_cast<ifcopenshell_paged_file_impl_t*>(data);
 }
 
-void ifcopenshell_pushed_sequential_impl_finalize(napi_env, void* data, void*) {
+void ifcopenshell_pushed_sequential_impl_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_pushed_sequential_impl_free(static_cast<ifcopenshell_pushed_sequential_impl_t*>(data));
 }
 
@@ -503,6 +548,7 @@ napi_value wrap_ifcopenshell_pushed_sequential_impl(napi_env env, ifcopenshell_p
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_pushed_sequential_impl_finalize, nullptr, &result);
     return result;
@@ -514,7 +560,8 @@ ifcopenshell_pushed_sequential_impl_t* unwrap_ifcopenshell_pushed_sequential_imp
     return static_cast<ifcopenshell_pushed_sequential_impl_t*>(data);
 }
 
-void ifcopenshell_character_encoder_finalize(napi_env, void* data, void*) {
+void ifcopenshell_character_encoder_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_character_encoder_free(static_cast<ifcopenshell_character_encoder_t*>(data));
 }
 
@@ -524,6 +571,7 @@ napi_value wrap_ifcopenshell_character_encoder(napi_env env, ifcopenshell_charac
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_character_encoder_finalize, nullptr, &result);
     return result;
@@ -535,7 +583,8 @@ ifcopenshell_character_encoder_t* unwrap_ifcopenshell_character_encoder(napi_env
     return static_cast<ifcopenshell_character_encoder_t*>(data);
 }
 
-void ifcopenshell_file_open_status_finalize(napi_env, void* data, void*) {
+void ifcopenshell_file_open_status_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_file_open_status_free(static_cast<ifcopenshell_file_open_status_t*>(data));
 }
 
@@ -545,6 +594,7 @@ napi_value wrap_ifcopenshell_file_open_status(napi_env env, ifcopenshell_file_op
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_file_open_status_finalize, nullptr, &result);
     return result;
@@ -556,7 +606,8 @@ ifcopenshell_file_open_status_t* unwrap_ifcopenshell_file_open_status(napi_env e
     return static_cast<ifcopenshell_file_open_status_t*>(data);
 }
 
-void ifcopenshell_token_finalize(napi_env, void* data, void*) {
+void ifcopenshell_token_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_token_free(static_cast<ifcopenshell_token_t*>(data));
 }
 
@@ -566,6 +617,7 @@ napi_value wrap_ifcopenshell_token(napi_env env, ifcopenshell_token_t* handle) {
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_token_finalize, nullptr, &result);
     return result;
@@ -577,7 +629,8 @@ ifcopenshell_token_t* unwrap_ifcopenshell_token(napi_env env, napi_value value) 
     return static_cast<ifcopenshell_token_t*>(data);
 }
 
-void ifcopenshell_enumeration_reference_finalize(napi_env, void* data, void*) {
+void ifcopenshell_enumeration_reference_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_enumeration_reference_free(static_cast<ifcopenshell_enumeration_reference_t*>(data));
 }
 
@@ -587,6 +640,7 @@ napi_value wrap_ifcopenshell_enumeration_reference(napi_env env, ifcopenshell_en
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_enumeration_reference_finalize, nullptr, &result);
     return result;
@@ -598,7 +652,8 @@ ifcopenshell_enumeration_reference_t* unwrap_ifcopenshell_enumeration_reference(
     return static_cast<ifcopenshell_enumeration_reference_t*>(data);
 }
 
-void ifcopenshell_attribute_value_finalize(napi_env, void* data, void*) {
+void ifcopenshell_attribute_value_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_attribute_value_free(static_cast<ifcopenshell_attribute_value_t*>(data));
 }
 
@@ -608,6 +663,7 @@ napi_value wrap_ifcopenshell_attribute_value(napi_env env, ifcopenshell_attribut
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_attribute_value_finalize, nullptr, &result);
     return result;
@@ -619,7 +675,8 @@ ifcopenshell_attribute_value_t* unwrap_ifcopenshell_attribute_value(napi_env env
     return static_cast<ifcopenshell_attribute_value_t*>(data);
 }
 
-void ifcopenshell_spf_header_finalize(napi_env, void* data, void*) {
+void ifcopenshell_spf_header_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_spf_header_free(static_cast<ifcopenshell_spf_header_t*>(data));
 }
 
@@ -629,6 +686,7 @@ napi_value wrap_ifcopenshell_spf_header(napi_env env, ifcopenshell_spf_header_t*
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_spf_header_finalize, nullptr, &result);
     return result;
@@ -640,8 +698,12 @@ ifcopenshell_spf_header_t* unwrap_ifcopenshell_spf_header(napi_env env, napi_val
     return static_cast<ifcopenshell_spf_header_t*>(data);
 }
 
-void ifcopenshell_file_finalize(napi_env, void* data, void*) {
-    ifcopenshell_file_free(static_cast<ifcopenshell_file_t*>(data));
+void ifcopenshell_file_finalize(napi_env env, void* data, void*) {
+    auto* handle = static_cast<ifcopenshell_file_t*>(data);
+    if (!ifcopenshell_file_is_disposed(handle)) {
+        napi_adjust_external_memory(env, -static_cast<int64_t>(1048576), nullptr);
+    }
+    ifcopenshell_file_free(handle);
 }
 
 napi_value wrap_ifcopenshell_file(napi_env env, ifcopenshell_file_t* handle) {
@@ -650,6 +712,7 @@ napi_value wrap_ifcopenshell_file(napi_env env, ifcopenshell_file_t* handle) {
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(1048576), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_file_finalize, nullptr, &result);
     return result;
@@ -661,7 +724,23 @@ ifcopenshell_file_t* unwrap_ifcopenshell_file(napi_env env, napi_value value) {
     return static_cast<ifcopenshell_file_t*>(data);
 }
 
-void ifcopenshell_global_id_finalize(napi_env, void* data, void*) {
+napi_value napi_file_dispose(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_ifcopenshell_file(env, argv[0]);
+    ifcopenshell_file_dispose(handle);
+    if (ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_adjust_external_memory(env, -static_cast<int64_t>(1048576), nullptr);
+    napi_value js_undefined;
+    napi_get_undefined(env, &js_undefined);
+    return js_undefined;
+}
+
+void ifcopenshell_global_id_finalize(napi_env env, void* data, void*) {
+    napi_adjust_external_memory(env, -static_cast<int64_t>(64), nullptr);
     ifcopenshell_global_id_free(static_cast<ifcopenshell_global_id_t*>(data));
 }
 
@@ -671,6 +750,7 @@ napi_value wrap_ifcopenshell_global_id(napi_env env, ifcopenshell_global_id_t* h
         napi_get_null(env, &null_value);
         return null_value;
     }
+    napi_adjust_external_memory(env, static_cast<int64_t>(64), nullptr);
     napi_value result;
     napi_create_external(env, handle, ifcopenshell_global_id_finalize, nullptr, &result);
     return result;
@@ -3875,13 +3955,6 @@ void file_new_with_path_async_complete(napi_env env, napi_status status, void* r
     delete data;
 }
 
-// Async sibling of `napi_file_new_with_path`: the file path is copied into an owned
-// `std::string` here on the main thread, then the parse itself
-// (`ifcopenshell_file_new_with_path` -- the exact same, already-emitted synchronous
-// C-ABI function, pure C++ with no V8/N-API calls inside it) runs on a libuv worker
-// thread via `napi_create_async_work`, so a large file's parse no longer blocks the
-// event loop for every other concurrent request (planning/ifcopenshell-ts/
-// 10-architecture.md's "Async story").
 napi_value napi_file_new_with_path_async(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1];
@@ -3927,16 +4000,6 @@ void file_new_with_data_data_size_async_complete(napi_env env, napi_status statu
     delete data;
 }
 
-// Async sibling of `napi_file_new_with_data_data_size`. The input `Buffer`'s bytes are
-// copied into an owned `std::vector<char>` on the main thread (not just its raw pointer
-// captured across the async boundary): the underlying C++ constructor
-// (`ifcopenshell::file(void* data, int data_size, ...)`, parse.cpp) already copies the
-// bytes it needs into its own internal storage before returning, so this isn't required
-// for *that* call's own correctness -- it's required because nothing may assume a
-// JS-managed `Buffer` allocation survives untouched while a GC pass can run
-// concurrently on the main thread during the worker thread's (possibly lengthy) parse.
-// The caller-supplied `data_size` is clamped to the copied buffer's actual length so an
-// out-of-range value can't read past the copy.
 napi_value napi_file_new_with_data_data_size_async(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2];
@@ -3946,11 +4009,14 @@ napi_value napi_file_new_with_data_data_size_async(napi_env env, napi_callback_i
         void* buffer_data = nullptr;
         size_t buffer_length = 0;
         napi_get_buffer_info(env, argv[0], &buffer_data, &buffer_length);
-        data->data.assign(static_cast<const char*>(buffer_data), static_cast<const char*>(buffer_data) + buffer_length);
+        data->data.assign(
+            static_cast<const char*>(buffer_data),
+            static_cast<const char*>(buffer_data) + buffer_length);
     }
     int32_t js_data_size = 0;
     napi_get_value_int32(env, argv[1], &js_data_size);
-    data->data.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(js_data_size, static_cast<int32_t>(data->data.size())))));
+    data->data.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(
+        js_data_size, static_cast<int32_t>(data->data.size())))));
     napi_value promise;
     napi_create_promise(env, &data->deferred, &promise);
     napi_value resource_name;
@@ -3999,16 +4065,6 @@ void base_get_all_attribute_values_async_complete(napi_env env, napi_status stat
     delete data;
 }
 
-// Async sibling of `napi_base_get_all_attribute_values` -- the Phase 1 stand-in for
-// Python's fully-recursive `get_info_cpp` bulk serializer named explicitly in
-// `10-architecture.md`'s "Async story". `argv[0]`'s already-unwrapped C-ABI pointer
-// (`data->self`) is used directly by the worker thread rather than copied: the
-// generated `ifcopenshell_express_base_t` struct is only forward-declared here (its
-// full definition, needed to copy-construct one, lives in
-// `ifcopenshell_native_c_api.cpp`, a separate translation unit), so instead a
-// `napi_ref` pins the original JS wrapper object alive (and therefore its finalizer
-// un-run, and therefore `self` un-freed) for the exact duration of the async work --
-// released in the "complete" callback once the worker thread is done dereferencing it.
 napi_value napi_base_get_all_attribute_values_async(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1];
@@ -4046,6 +4102,7 @@ void file_write_async_execute(napi_env, void* raw_data) {
 void file_write_async_complete(napi_env env, napi_status status, void* raw_data) {
     auto* data = static_cast<file_write_async_data_t*>(raw_data);
     napi_delete_reference(env, data->self_ref);
+    ifcopenshell_file_async_end(data->self);
     if (status != napi_ok) {
         napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));
     } else if (!data->error.empty()) {
@@ -4059,14 +4116,6 @@ void file_write_async_complete(napi_env env, napi_status status, void* raw_data)
     delete data;
 }
 
-// Async sibling of `napi_file_write`, per `10-architecture.md`'s "Async story" mandate
-// (file open/parse, the bulk attribute-value serializer, and `write` are the three
-// primitives named as needing one). Same `napi_ref`-pinning technique as
-// `napi_base_get_all_attribute_values_async` above: `data->self` is the original,
-// already-unwrapped `ifcopenshell_file_t*`, kept alive (and therefore the underlying
-// `ifcopenshell::file` it shares ownership of, via its `shared_ptr`) for the exact
-// duration of the worker thread's serialization by a `napi_ref` on `argv[0]`, not by
-// copying the (here-incomplete) C-ABI struct.
 napi_value napi_file_write_async(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2];
@@ -4074,6 +4123,7 @@ napi_value napi_file_write_async(napi_env env, napi_callback_info info) {
     auto* data = new file_write_async_data_t();
     data->self = unwrap_ifcopenshell_file(env, argv[0]);
     napi_create_reference(env, argv[0], 1, &data->self_ref);
+    ifcopenshell_file_async_begin(data->self);
     data->path = napi_string_value(env, argv[1]);
     napi_value promise;
     napi_create_promise(env, &data->deferred, &promise);
@@ -5136,6 +5186,11 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value fn;
         napi_create_function(env, "file_write_async", NAPI_AUTO_LENGTH, napi_file_write_async, nullptr, &fn);
         napi_set_named_property(env, exports, "file_write_async", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "file_dispose", NAPI_AUTO_LENGTH, napi_file_dispose, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_dispose", fn);
     }
     {
         napi_value value;

@@ -59,6 +59,10 @@ class ClassModel:
     owner_cpp_name: str | None = None
     owner_py_name: str | None = None
     callables: list[CallableModel] = field(default_factory=list)
+    # `WrapperConfig.class_native_size_hints`/`default_class_native_size_hint`, resolved
+    # per-class at model-build time -- see that config field's doc comment and `emit.py`'s
+    # `_native_memory_size_hint` for how a `"borrowed"` handle_kind overrides this.
+    native_size_hint: int = 64
 
 
 @dataclass(slots=True)

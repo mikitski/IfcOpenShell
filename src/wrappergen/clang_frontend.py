@@ -330,6 +330,10 @@ def _handle_kind(cpp_name: str, config: WrapperConfig) -> str:
     return config.class_handle_kinds.get(cpp_name, config.default_class_handle_kind)
 
 
+def _native_size_hint(cpp_name: str, config: WrapperConfig) -> int:
+    return config.class_native_size_hints.get(cpp_name, config.default_class_native_size_hint)
+
+
 def _exact_pointee_class_key(clang_type, class_models_by_cpp: dict[str, ClassModel]) -> str | None:
     """Resolves a pointer/reference clang `Type` to its pointee's exact, fully-qualified
     class name via the cursor graph (`Type.get_pointee().get_declaration()`), bypassing
@@ -682,6 +686,7 @@ def build_module_model(config: WrapperConfig) -> ModuleModel:
             handle_kind=_handle_kind(cpp_name, config),
             owner_cpp_name=owner_cpp_name,
             owner_py_name=owner_py_name,
+            native_size_hint=_native_size_hint(cpp_name, config),
         )
 
     for normalized_cpp_name, cursor in class_cursors.items():

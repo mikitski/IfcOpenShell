@@ -763,6 +763,21 @@ def emit_c_api_header(model: ModuleModel) -> str:
         lines.append(
             f"void {model.c_prefix}_{_class_c_identifier(class_model, model)}_free({_class_c_type(class_model, model)}* handle);"
         )
+        if _is_disposable(class_model):
+            # Deterministic early release (planning/ifcopenshell-ts/10-architecture.md's
+            # "Native object lifetime" section) -- see `emit_c_api_implementation` for the
+            # full rationale on why this is a separate pair of functions rather than
+            # reusing `_free` directly.
+            lines.append(f"void {_dispose_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);")
+            lines.append(
+                f"bool {_is_disposed_c_name(class_model, model)}(const {_class_c_type(class_model, model)}* handle);"
+            )
+            # Async/dispose race guard -- see `emit_c_api_implementation`'s
+            # `async_refcount` struct-field doc comment for the full rationale.
+            lines.append(
+                f"void {_async_begin_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);"
+            )
+            lines.append(f"void {_async_end_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);")
     lines.extend(
         [
             "",
@@ -818,6 +833,28 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append(f"    std::shared_ptr<{class_model.owner_cpp_name}> owner;")
         if class_model.handle_kind == "shared_ptr":
             lines.append(f"    std::shared_ptr<{class_model.cpp_name}> value;")
+            if _is_disposable(class_model):
+                # Set by `_dispose_c_name` below, once, and never unset -- lets both a
+                # repeat `dispose()` call and every ordinary method call raise a clear
+                # error instead of dereferencing a reset `value` (see the disposed-guard
+                # emitted into the main per-variant loop below) or double-decrementing
+                # the N-API layer's `napi_adjust_external_memory` accounting (see
+                # `emit_napi_extension`'s finalizer, which checks
+                # `_is_disposed_c_name` before adjusting).
+                lines.append("    bool disposed = false;")
+                # Count of in-flight `napi_create_async_work` calls currently using
+                # `value` from a worker thread (`_async_begin_c_name`/`_async_end_c_name`
+                # below, incremented/decremented only from the main thread -- see those
+                # functions' doc comment for why this is safe without a mutex). Without
+                # this, `dispose()`'s `value.reset()` (main thread) could run
+                # concurrently with an in-flight async op's worker-thread dereference of
+                # the exact same `shared_ptr` instance (e.g. `handle->value->write(...)`
+                # inside `ifcopenshell_file_write`'s `_execute` callback) -- a real data
+                # race on a single, non-thread-safe `shared_ptr` instance (concurrent
+                # access to *different* `shared_ptr`s to the same object is fine;
+                # concurrent read+write of the *same* `shared_ptr` instance is not).
+                # `_dispose_c_name` refuses to dispose while this is nonzero.
+                lines.append("    int async_refcount = 0;")
         elif class_model.handle_kind == "borrowed":
             # A raw, non-owning pointer -- see `_emit_handle_return_lines`. `_free`'s
             # generic `delete handle;` only destroys this wrapper struct; a raw pointer
@@ -922,6 +959,16 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append("        if (handle == nullptr) {")
             lines.append('            throw std::runtime_error("Null handle received");')
             lines.append("        }")
+            if _is_disposable(variant.owner):
+                # `dispose()` (`_dispose_c_name` below) resets `handle->value`
+                # deterministically ahead of GC -- without this guard, any call reaching
+                # this point afterward would dereference a null `shared_ptr` (see
+                # `_call_expression`'s `*handle->value`/`handle->value->...` forms).
+                lines.append("        if (handle->disposed) {")
+                lines.append(
+                    f'            throw std::runtime_error("{variant.owner.py_name} has already been disposed");'
+                )
+                lines.append("        }")
         for parameter in variant.parameters:
             if is_handle_adapter(parameter.adapter):
                 lines.append(f"        if ({parameter.name} == nullptr) {{")
@@ -1078,6 +1125,74 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
         lines.append("    delete handle;")
         lines.append("}")
         lines.append("")
+        if _is_disposable(class_model):
+            # Deterministic early release (planning/ifcopenshell-ts/10-architecture.md's
+            # "Native object lifetime" section) -- deliberately NOT "call `_free` now,
+            # mark the JS wrapper's data pointer as already-freed": N-API gives no way to
+            # cancel a `napi_create_external`'s already-scheduled finalizer callback, and
+            # that finalizer will still eventually run `..._free` (`delete handle`) on
+            # whatever pointer it was given -- freeing the wrapper struct here as well
+            # would make that a real double-free (undefined behavior, not just an
+            # accounting error) with no way to prevent it. Instead: reset the owned
+            # `shared_ptr` (releasing the native resource now, exactly like `_free`'s
+            # `delete handle` eventually would) and set `disposed`, but leave the small
+            # C-ABI wrapper struct itself alive for the finalizer to `delete` exactly
+            # once, later, as normal -- deleting a struct whose `shared_ptr` member is
+            # already null is safe (`shared_ptr::~shared_ptr()` on a null/empty control
+            # block is a no-op), so that eventual `_free` call is never itself a problem.
+            # The disposed-guard emitted into every other method/free_function call above
+            # (`if (handle->disposed) { throw ... }`) is what makes it safe to leave the
+            # struct reachable afterward: nothing can dereference the reset `value`
+            # through it again.
+            lines.append(f"void {_dispose_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle) {{")
+            lines.append("    ifcopenshell_last_error_clear();")
+            lines.append("    try {")
+            lines.append("        if (handle == nullptr) {")
+            lines.append('            throw std::runtime_error("Null handle received");')
+            lines.append("        }")
+            lines.append("        if (handle->disposed) {")
+            lines.append(f'            throw std::runtime_error("{class_model.py_name} has already been disposed");')
+            lines.append("        }")
+            lines.append("        if (handle->async_refcount > 0) {")
+            lines.append(
+                f'            throw std::runtime_error("{class_model.py_name} cannot be disposed while '
+                'async work on it is in progress");'
+            )
+            lines.append("        }")
+            lines.append("        handle->disposed = true;")
+            lines.append("        handle->value.reset();")
+            lines.append("    } catch (const std::exception& exception) {")
+            lines.append("        set_last_error(exception);")
+            lines.append("    }")
+            lines.append("}")
+            lines.append("")
+            lines.append(
+                f"bool {_is_disposed_c_name(class_model, model)}(const {_class_c_type(class_model, model)}* handle) {{"
+            )
+            lines.append("    return handle != nullptr && handle->disposed;")
+            lines.append("}")
+            lines.append("")
+            lines.append(
+                f"void {_async_begin_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle) {{"
+            )
+            lines.append("    // Main-thread-only mutation of `async_refcount` -- see the struct field's")
+            lines.append("    // doc comment above. Deliberately does not itself check/throw on `disposed`:")
+            lines.append("    // the async work's own execute callback calls the exact same guarded sync")
+            lines.append("    // C-ABI function this class's ordinary methods do, so an already-disposed")
+            lines.append("    // handle is still reported as an error, just via that existing path.")
+            lines.append("    if (handle != nullptr) {")
+            lines.append("        ++handle->async_refcount;")
+            lines.append("    }")
+            lines.append("}")
+            lines.append("")
+            lines.append(
+                f"void {_async_end_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle) {{"
+            )
+            lines.append("    if (handle != nullptr && handle->async_refcount > 0) {")
+            lines.append("        --handle->async_refcount;")
+            lines.append("    }")
+            lines.append("}")
+            lines.append("")
     lines.extend(["}", ""])
     return "\n".join(lines)
 
@@ -1433,6 +1548,76 @@ def _napi_unwrap_name(class_model: ClassModel) -> str:
     return f"unwrap_{normalize_identifier(class_model.cpp_name)}"
 
 
+# `napi_adjust_external_memory`'s minimum-viable wrapper-struct estimate for a
+# `"borrowed"` handle_kind class (research/06-wrappergen-spike-results.md SS3.5): its
+# C-ABI struct stores nothing but a raw, non-owning pointer (`_class_c_type`'s emitted
+# `{cpp_name}* value;` member) -- one pointer field plus small heap-allocator bookkeeping
+# overhead. Deliberately NOT configurable per-class (unlike `ClassModel.native_size_hint`):
+# every "borrowed" class has the identical wrapper shape, and -- this is the important
+# part -- must NEVER be billed for the singleton/registry-owned pointee's own memory, so
+# this constant intentionally ignores whatever `native_size_hint` a class was assigned
+# (see `_native_memory_size_hint` below).
+_BORROWED_WRAPPER_NATIVE_SIZE_HINT = 16
+
+
+def _native_memory_size_hint(class_model: ClassModel) -> int:
+    """How many bytes this class's `napi_create_external`-wrapped handle should report to
+    V8 via `napi_adjust_external_memory` (planning/ifcopenshell-ts/10-architecture.md's
+    "Native object lifetime" section) -- a coarse GC-pressure hint, not a precise
+    accounting requirement (V8's own docs describe the API that way).
+
+    `"borrowed"` handle_kind is special-cased here, deliberately overriding
+    `ClassModel.native_size_hint` rather than reading it: a borrowed wrapper's pointee
+    (research/06-wrappergen-spike-results.md SS3.5 -- a process-wide schema-registry
+    singleton, e.g. `declaration`/`schema_definition`) is explicitly NOT owned by this
+    handle and must never be freed, copied, or "returned" as memory on its behalf --
+    attributing the singleton's real size to every fresh wrapper minted around it (per
+    research/07's "fresh wrapper per access" finding, there can be many, for the very
+    same singleton) would make V8 think memory is being freed every time a borrowed
+    wrapper is GC'd, when in fact nothing was. Every other handle_kind (`"value"`,
+    `"shared_ptr"`) genuinely owns the memory its wrapper's `_free` releases, so those use
+    the per-class hint resolved onto `ClassModel.native_size_hint` at model-build time
+    (`WrapperConfig.class_native_size_hints`/`default_class_native_size_hint`).
+    """
+    if class_model.handle_kind == "borrowed":
+        return _BORROWED_WRAPPER_NATIVE_SIZE_HINT
+    return class_model.native_size_hint
+
+
+def _is_disposable(class_model: ClassModel) -> bool:
+    """Whether this class gets a `dispose()`/`Symbol.dispose` primitive
+    (planning/ifcopenshell-ts/10-architecture.md's "Native object lifetime" section:
+    "`IfcFile` gets an explicit `dispose()`/`Symbol.dispose` method for deterministic
+    early release"). Tied to `"shared_ptr"` handle_kind -- today, only `ifcopenshell::file`
+    -- rather than hand-listing `file` by name: a `"shared_ptr"` class is exactly the
+    generator's existing concept for "an independently, refcount-owned heap resource
+    reached through this handle" (`"value"` classes are owned outright by their wrapper
+    struct with no sharing; `"borrowed"` classes never own their pointee at all), which is
+    the correct and only shape early, deterministic release makes sense for.
+    """
+    return class_model.handle_kind == "shared_ptr"
+
+
+def _dispose_c_name(class_model: ClassModel, model: ModuleModel) -> str:
+    return f"{model.c_prefix}_{_class_c_identifier(class_model, model)}_dispose"
+
+
+def _is_disposed_c_name(class_model: ClassModel, model: ModuleModel) -> str:
+    return f"{model.c_prefix}_{_class_c_identifier(class_model, model)}_is_disposed"
+
+
+def _async_begin_c_name(class_model: ClassModel, model: ModuleModel) -> str:
+    return f"{model.c_prefix}_{_class_c_identifier(class_model, model)}_async_begin"
+
+
+def _async_end_c_name(class_model: ClassModel, model: ModuleModel) -> str:
+    return f"{model.c_prefix}_{_class_c_identifier(class_model, model)}_async_end"
+
+
+def _dispose_api_name(class_model: ClassModel, model: ModuleModel) -> str:
+    return f"{_class_c_identifier(class_model, model)}_dispose"
+
+
 def _napi_variant_to_js_name(variant_model: VariantAdapterModel) -> str:
     return f"{_variant_type_base(variant_model)}_to_js"
 
@@ -1715,6 +1900,12 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
             # function only touches the *result* it already copied out, never `self`
             # again, so releasing before resolving/rejecting is safe.
             lines.append("    napi_delete_reference(env, data->self_ref);")
+            if _is_disposable(variant.owner):
+                # Matching `_async_begin_c_name` call below -- the worker thread has
+                # now fully returned (this callback only runs after `_execute`
+                # completes), so `dispose()` is safe to allow again once every
+                # in-flight async op referencing this handle has reached this point.
+                lines.append(f"    {_async_end_c_name(variant.owner, model)}(data->self);")
         lines.append("    if (status != napi_ok) {")
         lines.append(
             '        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));'
@@ -1762,6 +1953,14 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
         if has_self:
             lines.append(f"    data->self = {_napi_unwrap_name(variant.owner)}(env, argv[{argument_index}]);")
             lines.append(f"    napi_create_reference(env, argv[{argument_index}], 1, &data->self_ref);")
+            if _is_disposable(variant.owner):
+                # Marks this handle as having in-flight async work referencing it,
+                # from the main thread, before the worker thread ever starts (see
+                # `_async_begin_c_name`'s doc comment in `emit_c_api_implementation`
+                # for the data race this closes) -- `_dispose_c_name` refuses to run
+                # while this is nonzero, so `dispose()` and this async op's worker
+                # thread can never touch `data->self->value` at the same time.
+                lines.append(f"    {_async_begin_c_name(variant.owner, model)}(data->self);")
             argument_index += 1
         index = 0
         while index < len(parameters):
@@ -1860,11 +2059,33 @@ def emit_napi_extension(model: ModuleModel) -> str:
         "",
     ]
     for class_model in model.classes:
+        size_hint = _native_memory_size_hint(class_model)
+        finalizer_lines = [f"void {_napi_finalizer_name(class_model)}(napi_env env, void* data, void*) {{"]
+        if _is_disposable(class_model):
+            # `dispose()` (`napi_{_dispose_api_name}` below) already performed this exact
+            # `-size_hint` adjustment (deterministically, ahead of GC) if it ran -- doing
+            # so again here would double-decrement V8's external-memory accounting.
+            # `_is_disposed_c_name` is a plain getter on the still-alive C-ABI wrapper
+            # struct (see `emit_c_api_implementation`'s `_dispose_c_name` doc comment for
+            # why that struct is never freed twice), safe to call before `_free` below.
+            finalizer_lines.append(f"    auto* handle = static_cast<{_class_c_type(class_model, model)}*>(data);")
+            finalizer_lines.append(f"    if (!{_is_disposed_c_name(class_model, model)}(handle)) {{")
+            finalizer_lines.append(
+                f"        napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);"
+            )
+            finalizer_lines.append("    }")
+            finalizer_lines.append(f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(handle);")
+        else:
+            finalizer_lines.append(
+                f"    napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);"
+            )
+            finalizer_lines.append(
+                f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(static_cast<{_class_c_type(class_model, model)}*>(data));"
+            )
+        finalizer_lines.append("}")
+        lines.extend(finalizer_lines)
         lines.extend(
             [
-                f"void {_napi_finalizer_name(class_model)}(napi_env, void* data, void*) {{",
-                f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(static_cast<{_class_c_type(class_model, model)}*>(data));",
-                "}",
                 "",
                 f"napi_value {_napi_wrap_name(class_model)}(napi_env env, {_class_c_type(class_model, model)}* handle) {{",
                 "    if (handle == nullptr) {",
@@ -1872,6 +2093,12 @@ def emit_napi_extension(model: ModuleModel) -> str:
                 "        napi_get_null(env, &null_value);",
                 "        return null_value;",
                 "    }",
+                # Reported before `napi_create_external` (whose finalizer is the sole,
+                # matching negative adjustment -- see above, and `dispose()`'s own
+                # adjustment below) so V8 accounts for this handle's off-heap memory for
+                # its entire JS-visible lifetime (planning/ifcopenshell-ts/
+                # 10-architecture.md's "Native object lifetime" section).
+                f"    napi_adjust_external_memory(env, static_cast<int64_t>({size_hint}), nullptr);",
                 "    napi_value result;",
                 f"    napi_create_external(env, handle, {_napi_finalizer_name(class_model)}, nullptr, &result);",
                 "    return result;",
@@ -1885,6 +2112,34 @@ def emit_napi_extension(model: ModuleModel) -> str:
                 "",
             ]
         )
+        if _is_disposable(class_model):
+            # Deterministic early release (planning/ifcopenshell-ts/10-architecture.md's
+            # "Native object lifetime" section) -- delegates the actual release + guard
+            # bookkeeping to `_dispose_c_name` (`emit_c_api_implementation`); only ever
+            # decrements the external-memory accounting `wrap_*` added if that call
+            # actually disposed something (a call on an already-disposed handle throws
+            # via the usual `ifcopenshell_last_error_message` contract instead of
+            # reaching the adjustment, so this can never run twice for the same handle --
+            # matching the finalizer's own `_is_disposed_c_name` check above).
+            lines.extend(
+                [
+                    f"napi_value napi_{_dispose_api_name(class_model, model)}(napi_env env, napi_callback_info info) {{",
+                    "    size_t argc = 1;",
+                    "    napi_value argv[1];",
+                    "    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);",
+                    f"    auto* handle = {_napi_unwrap_name(class_model)}(env, argv[0]);",
+                    f"    {_dispose_c_name(class_model, model)}(handle);",
+                    "    if (ifcopenshell_last_error_message() != nullptr) {",
+                    '        return throw_last_error(env, "Native call failed");',
+                    "    }",
+                    f"    napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);",
+                    "    napi_value js_undefined;",
+                    "    napi_get_undefined(env, &js_undefined);",
+                    "    return js_undefined;",
+                    "}",
+                    "",
+                ]
+            )
     if model.variant_adapters:
         _emit_napi_variant_helpers(lines, model, class_models)
     for variant in _all_variants(model):
@@ -2076,6 +2331,18 @@ def emit_napi_extension(model: ModuleModel) -> str:
             f"napi_{async_variant.async_api_name}, nullptr, &fn);"
         )
         lines.append(f'        napi_set_named_property(env, exports, "{async_variant.async_api_name}", fn);')
+        lines.append("    }")
+    for class_model in model.classes:
+        if not _is_disposable(class_model):
+            continue
+        dispose_api_name = _dispose_api_name(class_model, model)
+        lines.append("    {")
+        lines.append("        napi_value fn;")
+        lines.append(
+            f'        napi_create_function(env, "{dispose_api_name}", NAPI_AUTO_LENGTH, '
+            f"napi_{dispose_api_name}, nullptr, &fn);"
+        )
+        lines.append(f'        napi_set_named_property(env, exports, "{dispose_api_name}", fn);')
         lines.append("    }")
     for enum_model in model.enums:
         for value in enum_model.values:
@@ -2297,6 +2564,26 @@ def emit_typescript_facade(model: ModuleModel) -> str:
                 else:
                     lines.append(f"        return {native_call};")
                 lines.append("    }")
+            lines.append("")
+        if _is_disposable(class_model):
+            # Deterministic early release (planning/ifcopenshell-ts/10-architecture.md's
+            # "Native object lifetime" section: "`IfcFile` gets an explicit
+            # `dispose()`/`Symbol.dispose` method"). `[Symbol.dispose]` enables this
+            # class in a TS `using` declaration wherever the consuming package's
+            # tsconfig `lib` includes the ES2022-and-later disposal APIs (`Symbol.dispose`
+            # is a plain runtime symbol otherwise -- no special support needed from this
+            # generator beyond referencing it -- but referencing it without that `lib`
+            # entry is a compile error for whoever consumes this generated file, so a
+            # consumer targeting an older `lib` is expected to add it, same as any other
+            # newer-than-`target` API surface).
+            dispose_api_name = _dispose_api_name(class_model, model)
+            lines.append("    dispose(): void {")
+            lines.append(f"        native.{dispose_api_name}(this._handle);")
+            lines.append("    }")
+            lines.append("")
+            lines.append("    [Symbol.dispose](): void {")
+            lines.append("        this.dispose();")
+            lines.append("    }")
             lines.append("")
         _emit_async_facade_members(lines, model, class_model)
         lines.append("}")
