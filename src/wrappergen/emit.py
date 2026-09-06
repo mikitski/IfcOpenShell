@@ -1666,7 +1666,9 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
             variant_model = _sequence_of_variant_model(return_adapter, model)
             lines.append(f"    {_variant_list_c_type(variant_model)} result{{}};")
         else:
-            raise RuntimeError(f"Unsupported async return adapter '{return_adapter}' for '{async_variant.sync_api_name}'")
+            raise RuntimeError(
+                f"Unsupported async return adapter '{return_adapter}' for '{async_variant.sync_api_name}'"
+            )
         lines.append("    std::string error;")
         lines.append("    napi_deferred deferred = nullptr;")
         lines.append("    napi_async_work work = nullptr;")
@@ -1703,7 +1705,9 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
         lines.append("")
 
         # --- complete callback (main thread: resolves/rejects the JS promise) ---
-        lines.append(f"void {async_variant.async_api_name}_complete(napi_env env, napi_status status, void* raw_data) {{")
+        lines.append(
+            f"void {async_variant.async_api_name}_complete(napi_env env, napi_status status, void* raw_data) {{"
+        )
         lines.append(f"    auto* data = static_cast<{struct_name}*>(raw_data);")
         if has_self:
             # Releases the pin taken in `napi_{async_api_name}` below now that the
@@ -1712,11 +1716,14 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
             # again, so releasing before resolving/rejecting is safe.
             lines.append("    napi_delete_reference(env, data->self_ref);")
         lines.append("    if (status != napi_ok) {")
-        lines.append('        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));')
+        lines.append(
+            '        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));'
+        )
         lines.append("    } else if (!data->error.empty()) {")
         lines.append("        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));")
         if is_sequence_of_variant_adapter(return_adapter):
-            lines.append(f"        {_variant_list_free_name(_sequence_of_variant_model(return_adapter, model))}(data->result);")
+            variant_list_free = _variant_list_free_name(_sequence_of_variant_model(return_adapter, model))
+            lines.append(f"        {variant_list_free}(data->result);")
         lines.append("    } else {")
         if return_adapter == "void":
             lines.append("        napi_value js_undefined;")
@@ -1724,14 +1731,17 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
             lines.append("        napi_resolve_deferred(env, data->deferred, js_undefined);")
         elif is_handle_adapter(return_adapter):
             target = class_models[handle_adapter_target(return_adapter)]
-            lines.append(f"        napi_resolve_deferred(env, data->deferred, {_napi_wrap_name(target)}(env, data->result));")
+            wrap = _napi_wrap_name(target)
+            lines.append(f"        napi_resolve_deferred(env, data->deferred, {wrap}(env, data->result));")
         elif is_sequence_of_variant_adapter(return_adapter):
             variant_model = _sequence_of_variant_model(return_adapter, model)
             to_js = _napi_variant_to_js_name(variant_model)
             lines.append("        napi_value js_result;")
             lines.append("        napi_create_array_with_length(env, data->result.count, &js_result);")
             lines.append("        for (int index = 0; index < data->result.count; ++index) {")
-            lines.append(f"            napi_set_element(env, js_result, index, {to_js}(env, data->result.items[index]));")
+            lines.append(
+                f"            napi_set_element(env, js_result, index, {to_js}(env, data->result.items[index]));"
+            )
             lines.append("        }")
             lines.append(f"        {_variant_list_free_name(variant_model)}(data->result);")
             lines.append("        napi_resolve_deferred(env, data->deferred, js_result);")
@@ -1765,16 +1775,19 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
                 lines.append("    {")
                 lines.append("        void* buffer_data = nullptr;")
                 lines.append("        size_t buffer_length = 0;")
-                lines.append(f"        napi_get_buffer_info(env, argv[{argument_index}], &buffer_data, &buffer_length);")
                 lines.append(
-                    f"        data->{parameter.name}.assign(static_cast<const char*>(buffer_data), static_cast<const char*>(buffer_data) + buffer_length);"
+                    f"        napi_get_buffer_info(env, argv[{argument_index}], &buffer_data, &buffer_length);"
                 )
+                lines.append(f"        data->{parameter.name}.assign(")
+                lines.append("            static_cast<const char*>(buffer_data),")
+                lines.append("            static_cast<const char*>(buffer_data) + buffer_length);")
                 lines.append("    }")
                 argument_index += 1
                 lines.append(f"    int32_t js_{length_parameter.name} = 0;")
                 lines.append(f"    napi_get_value_int32(env, argv[{argument_index}], &js_{length_parameter.name});")
+                lines.append(f"    data->{parameter.name}.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(")
                 lines.append(
-                    f"    data->{parameter.name}.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(js_{length_parameter.name}, static_cast<int32_t>(data->{parameter.name}.size())))));"
+                    f"        js_{length_parameter.name}, static_cast<int32_t>(data->{parameter.name}.size())))));"
                 )
                 argument_index += 1
                 index += 2
@@ -1787,7 +1800,9 @@ def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_model
         lines.append("    napi_value promise;")
         lines.append("    napi_create_promise(env, &data->deferred, &promise);")
         lines.append("    napi_value resource_name;")
-        lines.append(f'    napi_create_string_utf8(env, "{async_variant.async_api_name}", NAPI_AUTO_LENGTH, &resource_name);')
+        lines.append(
+            f'    napi_create_string_utf8(env, "{async_variant.async_api_name}", NAPI_AUTO_LENGTH, &resource_name);'
+        )
         lines.append(
             f"    napi_create_async_work(env, nullptr, resource_name, {async_variant.async_api_name}_execute, "
             f"{async_variant.async_api_name}_complete, data, &data->work);"
