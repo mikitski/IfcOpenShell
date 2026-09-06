@@ -768,9 +768,7 @@ def emit_c_api_header(model: ModuleModel) -> str:
             # "Native object lifetime" section) -- see `emit_c_api_implementation` for the
             # full rationale on why this is a separate pair of functions rather than
             # reusing `_free` directly.
-            lines.append(
-                f"void {_dispose_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);"
-            )
+            lines.append(f"void {_dispose_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);")
             lines.append(
                 f"bool {_is_disposed_c_name(class_model, model)}(const {_class_c_type(class_model, model)}* handle);"
             )
@@ -779,9 +777,7 @@ def emit_c_api_header(model: ModuleModel) -> str:
             lines.append(
                 f"void {_async_begin_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);"
             )
-            lines.append(
-                f"void {_async_end_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);"
-            )
+            lines.append(f"void {_async_end_c_name(class_model, model)}({_class_c_type(class_model, model)}* handle);")
     lines.extend(
         [
             "",
@@ -1155,9 +1151,7 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append('            throw std::runtime_error("Null handle received");')
             lines.append("        }")
             lines.append("        if (handle->disposed) {")
-            lines.append(
-                f'            throw std::runtime_error("{class_model.py_name} has already been disposed");'
-            )
+            lines.append(f'            throw std::runtime_error("{class_model.py_name} has already been disposed");')
             lines.append("        }")
             lines.append("        if (handle->async_refcount > 0) {")
             lines.append(
@@ -2076,11 +2070,15 @@ def emit_napi_extension(model: ModuleModel) -> str:
             # why that struct is never freed twice), safe to call before `_free` below.
             finalizer_lines.append(f"    auto* handle = static_cast<{_class_c_type(class_model, model)}*>(data);")
             finalizer_lines.append(f"    if (!{_is_disposed_c_name(class_model, model)}(handle)) {{")
-            finalizer_lines.append(f"        napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);")
+            finalizer_lines.append(
+                f"        napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);"
+            )
             finalizer_lines.append("    }")
             finalizer_lines.append(f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(handle);")
         else:
-            finalizer_lines.append(f"    napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);")
+            finalizer_lines.append(
+                f"    napi_adjust_external_memory(env, -static_cast<int64_t>({size_hint}), nullptr);"
+            )
             finalizer_lines.append(
                 f"    {model.c_prefix}_{_class_c_identifier(class_model, model)}_free(static_cast<{_class_c_type(class_model, model)}*>(data));"
             )
