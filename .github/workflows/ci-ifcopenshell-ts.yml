@@ -177,6 +177,23 @@ jobs:
             ifcopenshell-ts-core-${{ matrix.os }}-${{ matrix.arch }}-${{
             hashFiles('src/ifcparse/**', 'src/plugin/**', 'cmake/**', '.github/workflows/ci-ifcopenshell-ts.yml') }}
 
+      # TEMPORARY (Phase 0 bring-up aid, same rationale/removal plan as the
+      # "Post diagnostic log tail" step below): this sandbox can only reach
+      # api.github.com, not raw Action log blob storage, so there is no way
+      # to see actions/cache/restore's own "Cache not found for input keys"
+      # log line from here to debug an unexpected miss. Surface the
+      # computed key/outputs directly instead. Remove once cache-hit
+      # behavior is confirmed working across two runs.
+      - name: Debug cache-core outputs
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "cache-hit=${{ steps.cache-core.outputs.cache-hit }}"
+            echo "cache-primary-key=${{ steps.cache-core.outputs.cache-primary-key }}"
+            echo "cache-matched-key=${{ steps.cache-core.outputs.cache-matched-key }}"
+          } > cache-debug.log
+
       # Build and install just enough of the C++ core for the addon to link
       # against: BUILD_IFCGEOM=OFF skips OpenCASCADE/CGAL entirely, since the
       # Phase 0 smoke test only needs ifcparse (open a file, read its schema).
@@ -316,7 +333,7 @@ jobs:
       # exist as a PR comment instead - api.github.com only. Remove once the
       # matrix is green.
       - name: Post diagnostic log tail as PR comment on failure
-        if: failure() && github.event.pull_request.number
+        if: always() && github.event.pull_request.number
         uses: actions/github-script@v7
         with:
           script: |
@@ -327,6 +344,7 @@ jobs:
               'build-native.log',
               'src/ifcopenshell-ts/build-native.log',
               '/tmp/build-native.log',
+              'cache-debug.log',
             ];
             let body = `### CI diagnostic: ${{ matrix.os }} ${{ matrix.arch }} (${context.sha.slice(0, 8)})\n`;
             let any = false;
