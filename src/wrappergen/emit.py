@@ -20,6 +20,7 @@ from .conventions import (
     variant_adapter_target,
 )
 from .model import (
+    AsyncVariantModel,
     CallableModel,
     ClassModel,
     EnumModel,
@@ -184,6 +185,16 @@ def _all_variants(model: ModuleModel) -> list[CallableVariant]:
 
 def _full_variant(owner: ClassModel, callable_model: CallableModel) -> CallableVariant:
     return _expand_variants(owner, callable_model)[-1]
+
+
+def _variant_by_api_name(model: ModuleModel, api_name: str) -> CallableVariant:
+    """Resolves an `AsyncVariantModel.sync_api_name` back to the full, already-emitted
+    sync `CallableVariant` (owner class, parameters, return adapter) it names -- the
+    async emission below reuses that signature rather than duplicating it."""
+    for variant in _all_variants(model):
+        if variant.api_name == api_name:
+            return variant
+    raise RuntimeError(f"No callable variant named '{api_name}' to build an async sibling for")
 
 
 def _sequence_targets(model: ModuleModel) -> list[ClassModel]:
@@ -1539,6 +1550,269 @@ def _emit_napi_variant_helpers(lines: list[str], model: ModuleModel, class_model
         lines.append("")
 
 
+def _async_data_struct_name(async_variant: AsyncVariantModel) -> str:
+    return f"{async_variant.async_api_name}_data_t"
+
+
+def _emit_napi_async_extension(lines: list[str], model: ModuleModel, class_models: dict[str, ClassModel]) -> None:
+    """Promise-returning async siblings for the specific primitives
+    `10-architecture.md`'s "Async story" section names as correctness-sensitive on the
+    confirmed Node-only server deployment target (file open/parse, the bulk
+    `get_all_attribute_values` serializer, and `write`): a synchronous N-API call blocks
+    the *entire* event loop, not one thread, so a large or malicious file parsed
+    synchronously stalls every concurrent request on the server, not just the one that
+    triggered it.
+
+    Deliberately not a generic "any callable can get an async twin" mechanism -- only
+    `model.async_variants` (a short, explicit, hand-picked list assembled in
+    `napi_binding.py`, one entry per primitive the architecture doc actually names) gets
+    one. Each async "execute" callback runs on a libuv worker thread and calls the
+    *exact same* already-emitted synchronous C-ABI function the sync N-API wrapper calls
+    (e.g. `ifcopenshell_file_new_with_path`) -- there is no separate "async C-ABI" layer,
+    since every C-ABI function `emit_c_api_implementation` emits is already pure,
+    thread-safe C++ with no V8/N-API calls inside it, exactly the precondition
+    `napi_create_async_work`'s "execute" callback requires. Only the "complete" callback
+    (which runs back on the main thread) touches `napi_value`/`env`.
+
+    A handle-typed *self* argument (a `method`/`free_function` callable's owning
+    instance) is used directly -- the raw C-ABI wrapper pointer obtained via the
+    ordinary `unwrap_*` helper on the main thread is stored and later dereferenced from
+    the worker thread -- rather than copied: the generated C-ABI wrapper structs
+    (`ifcopenshell_file_t`, `ifcopenshell_express_base_t`, ...) are only forward-declared
+    in the emitted header (`emit_c_api_header`); their full definition (and therefore
+    their size, needed to copy-construct one) lives only in `emit_c_api_implementation`'s
+    output, a separate translation unit this file never sees -- `new {c_type}(*handle)`
+    does not compile here. Instead, a `napi_ref` is taken on the original JS wrapper
+    value (`argv[0]`) before the work is queued, pinning it alive (and therefore its
+    finalizer un-run, and therefore the C-ABI struct it owns un-freed) for the exact
+    duration of the async work; the reference is deleted once the "complete" callback
+    is done with the raw pointer, letting ordinary GC reclaim it exactly as if this call
+    had never touched it. A `buffer`-adapter parameter is, by contrast, copied into an
+    owned `std::vector<char>` on the main thread rather than similarly pinning the
+    original `Buffer` object: `ifcopenshell::file`'s buffer constructor doesn't need the
+    original bytes to survive past its own (synchronous, main-thread-side) call in the
+    sync path either, so there is no existing pointer whose backing object this code
+    could pin the same way -- a copy is the natural owned-data shape here instead.
+
+    Only handles the specific parameter/return adapter shapes this hand-picked list
+    actually uses today (parameters: `string`, `integer`, and a `buffer` immediately
+    followed by its `integer` length parameter; returns: `void`, a `handle`, and
+    `sequence_of_variant`) -- raises rather than silently mis-emitting if a future
+    addition to `model.async_variants` needs a shape not yet handled here (e.g. a
+    `handle`- or `variant`-typed *parameter*, not just a self argument). Extending this
+    function to cover that shape is real, disclosed follow-up work, not something this
+    loop already secretly supports.
+    """
+    if not model.async_variants:
+        return
+    lines.append("napi_value make_async_error(napi_env env, const std::string& message) {")
+    lines.append("    napi_value error_message;")
+    lines.append("    napi_create_string_utf8(env, message.c_str(), NAPI_AUTO_LENGTH, &error_message);")
+    lines.append("    napi_value error;")
+    lines.append("    napi_create_error(env, nullptr, error_message, &error);")
+    lines.append("    return error;")
+    lines.append("}")
+    lines.append("")
+    for async_variant in model.async_variants:
+        variant = _variant_by_api_name(model, async_variant.sync_api_name)
+        parameters = variant.parameters
+        struct_name = _async_data_struct_name(async_variant)
+        has_self = variant.callable.kind in {"method", "free_function"}
+        owner_c_type = _class_c_type(variant.owner, model)
+        return_adapter = variant.callable.return_adapter
+
+        def _validate_parameters() -> None:
+            index = 0
+            while index < len(parameters):
+                parameter = parameters[index]
+                if parameter.adapter == "buffer":
+                    if index + 1 >= len(parameters) or parameters[index + 1].adapter != "integer":
+                        raise RuntimeError(
+                            f"Async buffer parameter '{parameter.name}' of '{async_variant.sync_api_name}' "
+                            "must be followed by an integer length parameter"
+                        )
+                    index += 2
+                elif parameter.adapter in {"string", "integer"}:
+                    index += 1
+                else:
+                    raise RuntimeError(
+                        f"Unsupported async parameter adapter '{parameter.adapter}' for '{async_variant.sync_api_name}'"
+                    )
+
+        _validate_parameters()
+
+        # --- async work data struct ---
+        lines.append(f"struct {struct_name} {{")
+        if has_self:
+            lines.append(f"    {owner_c_type}* self = nullptr;")
+            lines.append("    napi_ref self_ref = nullptr;")
+        index = 0
+        while index < len(parameters):
+            parameter = parameters[index]
+            if parameter.adapter == "buffer":
+                lines.append(f"    std::vector<char> {parameter.name};")
+                index += 2
+            else:
+                cpp_type = "std::string" if parameter.adapter == "string" else "int"
+                default = "" if parameter.adapter == "string" else " = 0"
+                lines.append(f"    {cpp_type} {parameter.name}{default};")
+                index += 1
+        if return_adapter == "void":
+            pass
+        elif is_handle_adapter(return_adapter):
+            target = class_models[handle_adapter_target(return_adapter)]
+            lines.append(f"    {_class_c_type(target, model)}* result = nullptr;")
+        elif is_sequence_of_variant_adapter(return_adapter):
+            variant_model = _sequence_of_variant_model(return_adapter, model)
+            lines.append(f"    {_variant_list_c_type(variant_model)} result{{}};")
+        else:
+            raise RuntimeError(
+                f"Unsupported async return adapter '{return_adapter}' for '{async_variant.sync_api_name}'"
+            )
+        lines.append("    std::string error;")
+        lines.append("    napi_deferred deferred = nullptr;")
+        lines.append("    napi_async_work work = nullptr;")
+        lines.append("};")
+        lines.append("")
+
+        # --- execute callback (worker thread: no napi_value/env access) ---
+        lines.append(f"void {async_variant.async_api_name}_execute(napi_env, void* raw_data) {{")
+        lines.append(f"    auto* data = static_cast<{struct_name}*>(raw_data);")
+        call_arguments = ["data->self"] if has_self else []
+        index = 0
+        while index < len(parameters):
+            parameter = parameters[index]
+            if parameter.adapter == "string":
+                call_arguments.append(f"data->{parameter.name}.c_str()")
+                index += 1
+            elif parameter.adapter == "buffer":
+                call_arguments.append(f"data->{parameter.name}.data()")
+                call_arguments.append(f"static_cast<int>(data->{parameter.name}.size())")
+                index += 2
+            else:
+                call_arguments.append(f"data->{parameter.name}")
+                index += 1
+        native_call = f"{model.c_prefix}_{async_variant.sync_api_name}({', '.join(call_arguments)})"
+        if return_adapter == "void":
+            lines.append(f"    {native_call};")
+        else:
+            lines.append(f"    data->result = {native_call};")
+        lines.append("    const char* message = ifcopenshell_last_error_message();")
+        lines.append("    if (message != nullptr) {")
+        lines.append("        data->error = message;")
+        lines.append("    }")
+        lines.append("}")
+        lines.append("")
+
+        # --- complete callback (main thread: resolves/rejects the JS promise) ---
+        lines.append(
+            f"void {async_variant.async_api_name}_complete(napi_env env, napi_status status, void* raw_data) {{"
+        )
+        lines.append(f"    auto* data = static_cast<{struct_name}*>(raw_data);")
+        if has_self:
+            # Releases the pin taken in `napi_{async_api_name}` below now that the
+            # worker thread is done dereferencing `data->self` -- from here on this
+            # function only touches the *result* it already copied out, never `self`
+            # again, so releasing before resolving/rejecting is safe.
+            lines.append("    napi_delete_reference(env, data->self_ref);")
+        lines.append("    if (status != napi_ok) {")
+        lines.append(
+            '        napi_reject_deferred(env, data->deferred, make_async_error(env, "Async work did not complete"));'
+        )
+        lines.append("    } else if (!data->error.empty()) {")
+        lines.append("        napi_reject_deferred(env, data->deferred, make_async_error(env, data->error));")
+        if is_sequence_of_variant_adapter(return_adapter):
+            variant_list_free = _variant_list_free_name(_sequence_of_variant_model(return_adapter, model))
+            lines.append(f"        {variant_list_free}(data->result);")
+        lines.append("    } else {")
+        if return_adapter == "void":
+            lines.append("        napi_value js_undefined;")
+            lines.append("        napi_get_undefined(env, &js_undefined);")
+            lines.append("        napi_resolve_deferred(env, data->deferred, js_undefined);")
+        elif is_handle_adapter(return_adapter):
+            target = class_models[handle_adapter_target(return_adapter)]
+            wrap = _napi_wrap_name(target)
+            lines.append(f"        napi_resolve_deferred(env, data->deferred, {wrap}(env, data->result));")
+        elif is_sequence_of_variant_adapter(return_adapter):
+            variant_model = _sequence_of_variant_model(return_adapter, model)
+            to_js = _napi_variant_to_js_name(variant_model)
+            lines.append("        napi_value js_result;")
+            lines.append("        napi_create_array_with_length(env, data->result.count, &js_result);")
+            lines.append("        for (int index = 0; index < data->result.count; ++index) {")
+            lines.append(
+                f"            napi_set_element(env, js_result, index, {to_js}(env, data->result.items[index]));"
+            )
+            lines.append("        }")
+            lines.append(f"        {_variant_list_free_name(variant_model)}(data->result);")
+            lines.append("        napi_resolve_deferred(env, data->deferred, js_result);")
+        lines.append("    }")
+        lines.append("    napi_delete_async_work(env, data->work);")
+        lines.append("    delete data;")
+        lines.append("}")
+        lines.append("")
+
+        # --- exported napi_value function: parses argv, queues the work, returns a Promise ---
+        lines.append(f"napi_value napi_{async_variant.async_api_name}(napi_env env, napi_callback_info info) {{")
+        argument_count = len(parameters) + (1 if has_self else 0)
+        lines.append(f"    size_t argc = {max(argument_count, 1)};")
+        lines.append(f"    napi_value argv[{max(argument_count, 1)}];")
+        lines.append("    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);")
+        lines.append(f"    auto* data = new {struct_name}();")
+        argument_index = 0
+        if has_self:
+            lines.append(f"    data->self = {_napi_unwrap_name(variant.owner)}(env, argv[{argument_index}]);")
+            lines.append(f"    napi_create_reference(env, argv[{argument_index}], 1, &data->self_ref);")
+            argument_index += 1
+        index = 0
+        while index < len(parameters):
+            parameter = parameters[index]
+            if parameter.adapter == "string":
+                lines.append(f"    data->{parameter.name} = napi_string_value(env, argv[{argument_index}]);")
+                argument_index += 1
+                index += 1
+            elif parameter.adapter == "buffer":
+                length_parameter = parameters[index + 1]
+                lines.append("    {")
+                lines.append("        void* buffer_data = nullptr;")
+                lines.append("        size_t buffer_length = 0;")
+                lines.append(
+                    f"        napi_get_buffer_info(env, argv[{argument_index}], &buffer_data, &buffer_length);"
+                )
+                lines.append(f"        data->{parameter.name}.assign(")
+                lines.append("            static_cast<const char*>(buffer_data),")
+                lines.append("            static_cast<const char*>(buffer_data) + buffer_length);")
+                lines.append("    }")
+                argument_index += 1
+                lines.append(f"    int32_t js_{length_parameter.name} = 0;")
+                lines.append(f"    napi_get_value_int32(env, argv[{argument_index}], &js_{length_parameter.name});")
+                lines.append(f"    data->{parameter.name}.resize(static_cast<size_t>(std::max(0, std::min<int32_t>(")
+                lines.append(
+                    f"        js_{length_parameter.name}, static_cast<int32_t>(data->{parameter.name}.size())))));"
+                )
+                argument_index += 1
+                index += 2
+            else:
+                lines.append(f"    int32_t js_{parameter.name} = 0;")
+                lines.append(f"    napi_get_value_int32(env, argv[{argument_index}], &js_{parameter.name});")
+                lines.append(f"    data->{parameter.name} = js_{parameter.name};")
+                argument_index += 1
+                index += 1
+        lines.append("    napi_value promise;")
+        lines.append("    napi_create_promise(env, &data->deferred, &promise);")
+        lines.append("    napi_value resource_name;")
+        lines.append(
+            f'    napi_create_string_utf8(env, "{async_variant.async_api_name}", NAPI_AUTO_LENGTH, &resource_name);'
+        )
+        lines.append(
+            f"    napi_create_async_work(env, nullptr, resource_name, {async_variant.async_api_name}_execute, "
+            f"{async_variant.async_api_name}_complete, data, &data->work);"
+        )
+        lines.append("    napi_queue_async_work(env, data->work);")
+        lines.append("    return promise;")
+        lines.append("}")
+        lines.append("")
+
+
 def emit_napi_extension(model: ModuleModel) -> str:
     """N-API C++ glue -- structurally parallel to `emit_python_extension`: the same
     per-class/per-callable walk over the same `ModuleModel`/`_all_variants(model)`,
@@ -1555,8 +1829,11 @@ def emit_napi_extension(model: ModuleModel) -> str:
         "",
         f'#include "{model.api_header_name}"',
         "",
+        "#include <algorithm>",
+        "#include <cstdint>",
         "#include <cstring>",
         "#include <string>",
+        "#include <vector>",
         "",
         "namespace {",
         "",
@@ -1779,6 +2056,7 @@ def emit_napi_extension(model: ModuleModel) -> str:
             )
         lines.append("}")
         lines.append("")
+    _emit_napi_async_extension(lines, model, class_models)
     lines.append("}  // namespace")
     lines.append("")
     lines.append("napi_value Init(napi_env env, napi_value exports) {")
@@ -1789,6 +2067,15 @@ def emit_napi_extension(model: ModuleModel) -> str:
             f'        napi_create_function(env, "{variant.api_name}", NAPI_AUTO_LENGTH, napi_{variant.api_name}, nullptr, &fn);'
         )
         lines.append(f'        napi_set_named_property(env, exports, "{variant.api_name}", fn);')
+        lines.append("    }")
+    for async_variant in model.async_variants:
+        lines.append("    {")
+        lines.append("        napi_value fn;")
+        lines.append(
+            f'        napi_create_function(env, "{async_variant.async_api_name}", NAPI_AUTO_LENGTH, '
+            f"napi_{async_variant.async_api_name}, nullptr, &fn);"
+        )
+        lines.append(f'        napi_set_named_property(env, exports, "{async_variant.async_api_name}", fn);')
         lines.append("    }")
     for enum_model in model.enums:
         for value in enum_model.values:
@@ -1876,6 +2163,58 @@ def _ts_native_argument(parameter: ParameterModel) -> str:
     return parameter.name
 
 
+def _emit_async_facade_members(lines: list[str], model: ModuleModel, class_model: ClassModel) -> None:
+    """TS facade counterpart to `_emit_napi_async_extension`: one `Promise`-returning
+    method per `model.async_variants` entry whose `ts_owner_py_name` names this class.
+
+    File open's async siblings are exposed as *static* factory methods (constructors
+    can't return a `Promise`, so this can't be a real `static` overload of the existing
+    `file.with_path`/`file.with_data_data_size` names the way the C++ side overloads a
+    single constructor -- distinct names avoid the false impression these are just
+    another arity of the same call), named distinctly from the sync facade's own
+    constructor-derived names precisely so a caller can see at the call site which one
+    they're getting. `get_all_attribute_values_async`/`write_async` are ordinary instance
+    methods, mirroring their sync siblings' names with an `_async` suffix.
+    """
+    for async_variant in model.async_variants:
+        if async_variant.ts_owner_py_name != class_model.py_name:
+            continue
+        variant = _variant_by_api_name(model, async_variant.sync_api_name)
+        parameters = ", ".join(
+            f"{parameter.name}: {_ts_type_for_parameter(parameter, model)}" for parameter in variant.parameters
+        )
+        call_arguments = ", ".join(_ts_native_argument(parameter) for parameter in variant.parameters)
+        return_adapter = variant.callable.return_adapter
+        if async_variant.ts_is_static:
+            target = _class_index(model)[handle_adapter_target(return_adapter)]
+            lines.append(f"    static {async_variant.ts_method_name}({parameters}): Promise<{target.py_name}> {{")
+            # Two statements, not one chained expression: a single-line
+            # `native.{async_api_name}(...).then(...)` call comfortably exceeds this
+            # package's 120-char line width (biome.json) once the async function name
+            # and parameter list are long enough (e.g. `file_new_with_data_data_size_async`).
+            lines.append(
+                f"        const result = native.{async_variant.async_api_name}({call_arguments}) as Promise<unknown>;"
+            )
+            lines.append(f"        return result.then((handle) => new {target.py_name}(handle));")
+            lines.append("    }")
+        else:
+            separator = ", " if call_arguments else ""
+            native_call = f"native.{async_variant.async_api_name}(this._handle{separator}{call_arguments})"
+            if return_adapter == "void":
+                lines.append(f"    {async_variant.ts_method_name}({parameters}): Promise<void> {{")
+                lines.append(f"        return {native_call} as Promise<void>;")
+                lines.append("    }")
+            elif is_sequence_of_variant_adapter(return_adapter):
+                lines.append(f"    {async_variant.ts_method_name}({parameters}): Promise<unknown> {{")
+                lines.append(f"        return {native_call} as Promise<unknown>;")
+                lines.append("    }")
+            else:
+                raise RuntimeError(
+                    f"Unsupported async TS return shape '{return_adapter}' for '{async_variant.sync_api_name}'"
+                )
+        lines.append("")
+
+
 def emit_typescript_facade(model: ModuleModel) -> str:
     """TypeScript facade -- structurally parallel to `emit_python_facade`: the same
     per-`ClassModel`/`CallableModel` walk, replacing Python's `__slots__` class
@@ -1959,6 +2298,7 @@ def emit_typescript_facade(model: ModuleModel) -> str:
                     lines.append(f"        return {native_call};")
                 lines.append("    }")
             lines.append("")
+        _emit_async_facade_members(lines, model, class_model)
         lines.append("}")
         lines.append("")
     return "\n".join(lines)

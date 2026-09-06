@@ -4,6 +4,9 @@
 // callable from TS with correct types; create an IfcWall, set/get every attribute-type
 // category once, read it back via schema introspection.
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
 	type declaration as Declaration,
@@ -176,5 +179,68 @@ describe("Phase 1 primitive layer", () => {
 		const entity = wallDeclaration.as_entity();
 		expect(entity).not.toBeNull();
 		expect(entity.attribute_count()).toBeGreaterThan(0);
+	});
+});
+
+// Async primitives (planning/ifcopenshell-ts/10-architecture.md's "Async story"):
+// `napi_create_async_work`-based siblings of file open/parse, the bulk
+// `get_all_attribute_values` serializer, and `write`, alongside their sync
+// counterparts above. Each test below also has a synchronous equivalent already
+// covered in the "Phase 1 primitive layer" suite -- these specifically exercise the
+// Promise-returning path and confirm it observes the same data.
+describe("Phase 1 async primitive layer", () => {
+	function tempIfcPath(): string {
+		return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ifcopenshell-ts-")), "model.ifc");
+	}
+
+	test("write() + open_path_async() round-trip a file written synchronously", async () => {
+		const file = openBlankIfc4File();
+		const targetPath = tempIfcPath();
+		file.write(targetPath);
+		expect(fs.existsSync(targetPath)).toBe(true);
+
+		const reopened = await File.open_path_async(targetPath);
+		expect(reopened.schema().name()).toBe("IFC4");
+	});
+
+	test("write_async() serializes a file asynchronously", async () => {
+		const file = openBlankIfc4File();
+		const targetPath = tempIfcPath();
+		await file.write_async(targetPath);
+		expect(fs.existsSync(targetPath)).toBe(true);
+
+		// `native.file_new_with_path` (the minimal-arity, raw native function -- see
+		// `openBlankIfc4File`'s own comment on why the sync facade has no class-level
+		// convenience method for this arity) confirms the written file is well-formed
+		// and re-openable synchronously, independent of the async open path exercised
+		// by the test above.
+		const reopened = new File(native.file_new_with_path(targetPath));
+		expect(reopened.schema().name()).toBe("IFC4");
+	});
+
+	test("open_path_async() rejects (does not throw synchronously, does not hang) on a nonexistent path", async () => {
+		await expect(File.open_path_async(path.join(os.tmpdir(), "does-not-exist-ifcopenshell-ts.ifc"))).rejects.toThrow();
+	});
+
+	test("open_buffer_async() opens a file from an in-memory buffer written synchronously", async () => {
+		const file = openBlankIfc4File();
+		const targetPath = tempIfcPath();
+		file.write(targetPath);
+		const buffer = fs.readFileSync(targetPath);
+
+		const reopened = await File.open_buffer_async(buffer, buffer.length);
+		expect(reopened.schema().name()).toBe("IFC4");
+	});
+
+	test("get_all_attribute_values_async() observes the same data as the sync call", async () => {
+		const file = openBlankIfc4File();
+		const schema = file.schema();
+		const wallDeclaration = schema.declaration_by_name_with_name("IfcWall");
+		const wall = file.create_with_declaration_instance_id(wallDeclaration, -1);
+		wall.set_attribute_value(0, { kind: native.STRING, string_value: "3xhrZ$4XvA0v3iZQ8gGvOa" });
+
+		const syncValues = wall.get_all_attribute_values() as unknown[];
+		const asyncValues = (await wall.get_all_attribute_values_async()) as unknown[];
+		expect(asyncValues).toEqual(syncValues);
 	});
 });

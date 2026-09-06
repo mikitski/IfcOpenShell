@@ -60,6 +60,7 @@ add_library(${PROJECT_NAME} SHARED
     "${GENERATED_NAPI_DIR}/ifcopenshell_native_c_api.cpp"
     "${GENERATED_NAPI_DIR}/ifcopenshell_native.cpp"
     "${SHIM_DIR}/attribute_value_shim.cpp"
+    "${SHIM_DIR}/file_shim.cpp"
     ${CMAKE_JS_SRC}
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "" SUFFIX ".node")

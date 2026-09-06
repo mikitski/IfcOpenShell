@@ -110,6 +110,36 @@ class VariantAdapterModel:
 
 
 @dataclass(slots=True)
+class AsyncVariantModel:
+    """Marks one already-emitted, ordinary *synchronous* N-API entry point (identified
+    by the `CallableVariant.api_name` it was emitted under, e.g. ``"file_new_with_path"``)
+    as also needing a Promise-based async sibling
+    (planning/ifcopenshell-ts/10-architecture.md's "Async story": a synchronous N-API call
+    blocks Node's *entire* event loop, not one thread, so the primitives that can be slow
+    on a large/untrusted file -- file open/parse, the bulk attribute-value serializer, and
+    `write` -- need a `napi_create_async_work`-based variant alongside the sync one).
+
+    Deliberately a short, hand-picked, explicit list assembled by `napi_binding.py`
+    (`ModuleModel.async_variants`) rather than a generic "every callable gets an async
+    twin" mechanism -- only the specific operations the architecture doc names as
+    correctness-sensitive get one; everything else stays sync-only, matching how
+    `napi_spike.py`/`napi_binding.py` already hand-picks which primitives get bound at
+    all rather than exposing the full discovered surface uncurated.
+
+    `sync_api_name` is resolved back to its full `CallableVariant` (owner class,
+    parameters, return adapter) via `_variant_by_api_name` at emission time -- this model
+    only needs to say *which* existing sync entry point to wrap and what to additionally
+    call it/attach it as on the TS facade, not re-describe its signature.
+    """
+
+    sync_api_name: str
+    async_api_name: str
+    ts_owner_py_name: str
+    ts_method_name: str
+    ts_is_static: bool
+
+
+@dataclass(slots=True)
 class ModuleModel:
     module_name: str
     c_prefix: str
@@ -121,3 +151,4 @@ class ModuleModel:
     classes: list[ClassModel]
     enums: list[EnumModel]
     variant_adapters: list[VariantAdapterModel] = field(default_factory=list)
+    async_variants: list[AsyncVariantModel] = field(default_factory=list)

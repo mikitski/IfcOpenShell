@@ -509,6 +509,10 @@ export class entity_instance {
         return native.base_get_all_attribute_values(this._handle);
     }
 
+    get_all_attribute_values_async(): Promise<unknown> {
+        return native.base_get_all_attribute_values_async(this._handle) as Promise<unknown>;
+    }
+
 }
 
 export class typed_entity_instance {
@@ -1008,6 +1012,24 @@ export class file {
 
     reset_identity_cache(): void {
         native.file_reset_identity_cache(this._handle);
+    }
+
+    write(path: string): void {
+        native.file_write(this._handle, path);
+    }
+
+    static open_path_async(path: string): Promise<file> {
+        const result = native.file_new_with_path_async(path) as Promise<unknown>;
+        return result.then((handle) => new file(handle));
+    }
+
+    static open_buffer_async(data: Buffer, data_size: number): Promise<file> {
+        const result = native.file_new_with_data_data_size_async(data, data_size) as Promise<unknown>;
+        return result.then((handle) => new file(handle));
+    }
+
+    write_async(path: string): Promise<void> {
+        return native.file_write_async(this._handle, path) as Promise<void>;
     }
 
 }
