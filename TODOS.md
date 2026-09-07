@@ -176,22 +176,35 @@ schema-introspection class set, generated via `src/wrappergen/napi_binding.py`) 
 a smaller-but-complete slice rather than force every listed primitive in at lower quality. Specific,
 disclosed gaps:
 
-1. **Static-method discovery is entirely missing from `wrappergen`.** `clang_frontend.py`'s
-   `_discover_methods` skips every `is_static_method()` cursor unconditionally (mirrors how
-   constructors are discovered, but static factory-style methods get no equivalent path at all).
-   Concretely blocks: `ifcopenshell::file::traverse`/`traverse_breadth_first` (both static, listed
-   in `20-roadmap.md` Phase 1's required primitive list) and `ifcopenshell::logger::root()`. Fix
-   shape: a new `kind="static_method"` `CallableModel`, emitted like `"free_function"` but with no
-   leading `handle` self-argument at the C-API/N-API layer.
+1. **Static-method discovery is entirely missing from `wrappergen`, still true as a *generator*
+   limitation** -- `clang_frontend.py`'s `_discover_methods` still skips every `is_static_method()`
+   cursor unconditionally; a real `kind="static_method"` `CallableModel` (emitted like
+   `"free_function"` but with no leading `handle` self-argument) is still not implemented. **However,
+   the two concrete blockers this bullet named are resolved**, via the free-function injection
+   technique (not the generator fix above): the Phase 2 `IfcFile`/`EntityInstance` PR added
+   `ifcopenshell::wrappergen::traverse`/`traverse_breadth_first` thin pass-throughs in
+   `attribute_value_shim.h`/`.cpp`, injected in `napi_binding.py`'s
+   `_inject_entity_instance_primitives` exactly like `get_all_attribute_values` already was --
+   `IfcFile.traverse()`/`.getInverse()` (`file.ts`) now use the real native implementation, not a
+   pure-TS attribute-walk reimplementation. `ifcopenshell::logger::root()` is still unaddressed (no
+   concrete Phase 2 need for it yet).
 2. **Several `file`-level primitives only exist as SWIG `%extend` glue, not real C++ methods, and
-   are not yet shimmed:** `file_pointer()` (identity key, needed by Phase 2's `file_mixin.post_init`
-   registry per `research/07-fresh-wrapper-per-access.md`), `to_string()`/`from_string()` (whole-file
-   SPF serialization), `entity_names()`, `schema_identifier()`, `storage_mode()`. Same pattern as the
+   are not yet shimmed:** ~~`file_pointer()`~~ **(resolved by the Phase 2 `IfcFile`/`EntityInstance`
+   PR -- `file_shim.h`/`.cpp`'s `file_pointer()`, returned as a decimal string rather than a native
+   integer since wrappergen's generic `"integer"` adapter marshals through a plain 32-bit C `int`
+   end-to-end, which would silently truncate a real 64-bit pointer value; used by `file.ts`'s
+   `IfcFile` registry, matching Python's `file_mixin.post_init`/`registry` pattern)**,
+   `to_string()`/`from_string()` (whole-file SPF serialization -- Phase 2 sidesteps `from_string` by
+   using the existing buffer-based `file` constructor instead, see `template.ts`),
+   `entity_names()` (Phase 2's `IfcFile[Symbol.iterator]` sidesteps this via a schema-driven
+   per-declaration `instances_by_type_excl_subtypes` scan instead, see `file.ts`'s own doc comment),
+   `schema_identifier()` (Phase 2 found `schema_definition.name()` already returns this exact string
+   for every currently-registered schema, e.g. `"IFC4X3_ADD2"` -- no primitive gap after all),
+   `storage_mode()` (still unaddressed; RocksDB-related, out of Phase 2's scope). Same pattern as the
    entity_instance primitives this PR *did* add (`attribute_value_shim.h`/`.cpp`'s
    `get_argument_index`/`attribute_name`/`attribute_type`/`get_attribute_category`/`is_a`) —
    bounded, one-function-at-a-time follow-up work, not a design gap. (`_write(fn)` — as
-   `write(path)` — was picked up and shimmed by the async-primitives PR, `file_shim.h`/`.cpp`; the
-   rest of this list is still deferred.)
+   `write(path)` — was picked up and shimmed by the async-primitives PR, `file_shim.h`/`.cpp`.)
 3. **`get_attribute_names()`/`get_inverse_attribute_names()` bulk fetch not implemented** (would need
    a third adapter kind, "sequence of scalar," alongside this PR's new `sequence_of_variant:`
    adapter — the *capability* to enumerate attribute names one at a time already exists via
