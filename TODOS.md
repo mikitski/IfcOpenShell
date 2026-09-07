@@ -340,3 +340,79 @@ build system and every target compiler (MSVC in particular, given this code area
 clang/MSVC divergences per the prior two Phase 1 PRs).
 
 **Depends on / blocked by:** None.
+
+---
+
+### ASAN/UBSan CI + fuzz testing: disclosed scope cuts and local-verification gaps
+
+**What:** The ASAN/UBSan CI job (`asan-ubsan`) and the libFuzzer target + `fuzz` CI job — Phase 1's
+final exit-criterion items — intentionally narrow scope in a few documented ways:
+
+1. **Both new jobs are scoped to Linux x64 only**, not the 6-way OS×arch matrix `build-and-test`
+   uses. Sanitizers are best-supported and most CI-proven on Linux/glibc; this PR's own local
+   development sandbox (macOS 26.5.1, Apple clang 16) surfaced a concrete reason macOS ASan support
+   is real extra scope, not a given — see point 3 below. Extending sanitizer/fuzz coverage to
+   Windows/macOS is a reasonable follow-up but not required for the roadmap's stated exit criterion
+   ("the native addon test build runs under AddressSanitizer/UndefinedBehaviorSanitizer in CI" — one
+   working leg satisfies this; it doesn't require every leg).
+2. **The fuzz job runs for a bounded 90-second time budget per PR (`FUZZ_TIME_BUDGET_SECONDS`), not
+   a fuzzing campaign.** This is a CI regression check (catches an obvious/shallow crash a change
+   just introduced), not deep exploration of the parser's state space. A longer, persistent-corpus,
+   scheduled fuzzing campaign (e.g. a nightly/weekly workflow that runs for hours and accumulates a
+   growing corpus + crash archive across runs, closer to how OSS-Fuzz itself operates) would find
+   more real bugs over time and is a worthwhile follow-up, but is a materially different piece of
+   infrastructure (persistent storage for the corpus/crashes, a schedule trigger, longer runner
+   budgets) than what a single-PR chunk should build unasked.
+3. **ASan could not be locally verified end-to-end in this PR's own development sandbox — a genuine
+   toolchain/OS incompatibility, confirmed independent of any code under test.** Apple clang 16's
+   ASan runtime fails during its own process-init malloc-zone setup
+   (`AddressSanitizer: CHECK failed: sanitizer_malloc_mac.inc:189 "((!asan_init_is_running)) != (0)"`)
+   for a trivial, bug-free "hello world" compiled with `-fsanitize=address` on this sandbox's macOS
+   26.5.1 — i.e. this is not specific to anything this PR added, ASan itself cannot run at all in
+   this environment. UBSan alone (no ASan) works correctly in the same sandbox and was verified to
+   catch a real, deliberately-introduced bug (signed integer overflow) with a nonzero exit and a
+   correct diagnostic — confirming the *toolchain and flag wiring* aren't silently broken, just that
+   ASan specifically needs a real run to verify. The addon-level "introduce a deliberate
+   use-after-free, confirm the sanitizer build fails on it, then revert" verification step this PR's
+   own instructions called for could therefore not be performed locally at all (no working ASan
+   locally, and separately, no `cmake`/full C++ toolchain in this sandbox to build the real addon
+   either way — same category of gap as every prior Phase 1 chunk's local-verification notes). This
+   verification is deferred entirely to the real `asan-ubsan` CI job on Linux, which uses a
+   completely different (glibc-based, actively-tested) ASan runtime — expected to not share this
+   failure mode, but not yet independently confirmed as of this PR's local development.
+4. **The fuzz harness (`native/fuzz/fuzz_parse.cpp`) could not be compiled or linked against the
+   real C++ core locally**, for the same reason as point 3 (no `cmake`, and this sandbox's Homebrew
+   has no actual Boost installation present despite `/opt/homebrew/opt/boost` existing as a stale
+   path). What *was* verified locally: the harness source passes `clang++ -fsyntax-only` against the
+   real, self-contained `ifcopenshell_native_c_api.h` (no transitive Boost/ifcparse dependency for
+   that header alone), confirming the entry-point signatures and ownership/free calls it makes match
+   the real generated C API; and this sandbox's own clang++ was confirmed to lack `-fsanitize=fuzzer`
+   support (`libclang_rt.fuzzer_osx.a not found` at link time) — the CI `fuzz` job's own "Check clang
+   supports -fsanitize=fuzzer" step exists specifically to catch this class of gap on the CI runner
+   itself before spending time on the rest of that job, rather than assuming parity with a
+   Linux/OSS-Fuzz-conventional clang install.
+5. **The event-loop-liveness test (`test/native/event_loop.test.ts`) uses heuristic, CI-tuned
+   timing thresholds** (`MAX_ALLOWED_TICK_GAP_MS = 250`, `WALL_COUNT = 60_000`), not something
+   provably correct independent of hardware — it could not be run against real CI hardware before
+   this PR opened (same no-addon-build-locally constraint as above). If it flakes on slower/loaded
+   CI runners, the fix is to raise `MAX_ALLOWED_TICK_GAP_MS` and/or `WALL_COUNT` (more setup work to
+   guarantee a longer, more clearly-measurable parse duration), not to remove the test — flagged here
+   so whoever investigates a flake starts from that assumption rather than re-deriving it.
+
+**Why:** Each is real, understood, and bounded, matching the scope-discipline precedent set by every
+prior Phase 1 PR (ship a complete, well-reasoned slice; disclose the rest rather than force it in or
+silently skip it). None blocks Phase 1's actual exit criterion — the CI jobs are configured
+correctly per current understanding of ASan/UBSan/libFuzzer best practice (sanitizing both compile
+and link stages, on both the C++ core and whatever links against it, distinct cache keys per
+sanitizer configuration so a plain build never silently substitutes for an instrumented one); they
+just haven't been confirmed green by a real CI run as of this PR's own local development, which is
+what CI itself is for.
+
+**Context:** See this PR's description for the full local-verification writeup, and
+`.github/workflows/ci-ifcopenshell-ts.yml`'s `asan-ubsan`/`fuzz` jobs' own inline comments for the
+per-job reasoning (cache-key isolation, `LD_PRELOAD`/`verify_asan_link_order=0` for the Node+ASan
+combination, `-fsanitize=fuzzer-no-link` vs `-fsanitize=fuzzer` staging).
+
+**Depends on / blocked by:** None block each other; pick up independently as needed. Extending
+sanitizer/fuzz coverage to Windows/macOS and a scheduled longer-running fuzz campaign both depend on
+the Linux-only versions landing and proving stable first.

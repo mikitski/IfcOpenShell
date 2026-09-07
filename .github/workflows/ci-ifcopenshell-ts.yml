@@ -502,11 +502,23 @@ jobs:
           # link-order check assumes its own runtime is the first shared object a
           # process loads, which is never true for a runtime that arrives via
           # LD_PRELOAD ahead of a plain, non-instrumented `node` binary.
-          # `detect_leaks=1`: scoped to what the addon's own native primitives
-          # allocate/free, exercised directly by the primitive test suite - Node/V8's
-          # own steady-state allocations are long-lived by design and not the target
-          # of this job.
-          ASAN_OPTIONS: detect_leaks=1:verify_asan_link_order=0:halt_on_error=1:abort_on_error=1
+          # `detect_leaks=0`: LD_PRELOAD-ing the ASan runtime intercepts malloc for
+          # the *entire* `node` process, not just calls made from the addon's `.node`
+          # file - LeakSanitizer's exit-time check has no way to attribute an
+          # unreclaimed allocation to "the addon" vs. "V8/Node's own long-lived
+          # steady-state allocations" (ICU data, V8 heap/snapshot arenas, libuv
+          # buffers), which routinely aren't freed before process exit by design.
+          # Leaving leak detection on here would make this job fail on every PR for
+          # reasons unrelated to any native bug it exists to catch, defeating its
+          # purpose as Phase 1's exit-criterion job (caught by code review before this
+          # PR shipped - thank you). Memory-corruption detection (use-after-free,
+          # double-free, OOB read/write - ASan's actual purpose here) is unaffected by
+          # this option; leak-shaped bugs in the addon's own accounting are already
+          # covered by test/native/memory.test.ts's bounded-external-memory-growth
+          # soak test, and true leaks in the fuzz target's own small, fully
+          # ASan-linked standalone executable (no V8/ICU noise) are still caught by
+          # the `fuzz` job below, which keeps `detect_leaks=1`.
+          ASAN_OPTIONS: detect_leaks=0:verify_asan_link_order=0:halt_on_error=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
         run: |
           ASAN_RT="$(gcc -print-file-name=libasan.so)"
