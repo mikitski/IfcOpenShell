@@ -5,9 +5,9 @@
 import { describe, expect, test } from "vitest";
 import { EntityInstance } from "../src/entityInstance";
 import type { IfcFile } from "../src/file";
-import { createTestFile } from "./bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile } from "./bootstrap";
 
-describe.each(["IFC2X3", "IFC4", "IFC4X3"] as const)("EntityInstance (%s)", (schema) => {
+describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 	function newFile(): IfcFile {
 		return createTestFile(schema);
 	}

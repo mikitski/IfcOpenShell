@@ -389,9 +389,7 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
         return_cpp_type=f"std::vector<{variant_adapter.cpp_type}>",
         return_adapter=sequence_of_variant_adapter_name,
     )
-    max_depth_parameter = ParameterModel(
-        name="max_depth", cpp_name="max_depth", cpp_type="int", adapter="integer"
-    )
+    max_depth_parameter = ParameterModel(name="max_depth", cpp_name="max_depth", cpp_type="int", adapter="integer")
     entity_instance_sequence_adapter = f"sequence:{entity_instance.cpp_name}"
     traverse = _free_function(
         entity_instance,

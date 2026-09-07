@@ -8,9 +8,9 @@ import * as path from "node:path";
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../src/entityInstance";
 import { IfcFile } from "../src/file";
-import { createTestFile } from "./bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile } from "./bootstrap";
 
-describe.each(["IFC2X3", "IFC4", "IFC4X3"] as const)("IfcFile (%s)", (schema) => {
+describe.each(AVAILABLE_SCHEMAS)("IfcFile (%s)", (schema) => {
 	function newFile(): IfcFile {
 		return createTestFile(schema);
 	}
