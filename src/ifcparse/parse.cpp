@@ -544,6 +544,27 @@ std::string token::to_string() {
         std::ostringstream oss;
         oss << std::setprecision(15) << value_double;
         result = oss.str();
+    } else if (type == Token_IDENTIFIER) {
+        // Direct conversion, not delegated to as_string() below: value_int (not
+        // value_string) is this token kind's storage (see the union's own comment
+        // above), and "#" + id matches this codebase's existing entity-reference
+        // formatting convention (e.g. file::to_string() at parse.cpp:3416). Fixes a
+        // real ASan-caught stack-overflow (found by the ifcopenshell-ts fuzz job via
+        // mutation, not the raw seed corpus): as_string() throws for any type outside
+        // {STRING, ENUMERATION, BOOL, BINARY, KEYWORD} and builds its exception
+        // message via to_string() -- for Token_IDENTIFIER (and Token_NONE below),
+        // to_string()'s own "everything else" branch used to call as_string() right
+        // back, so the two functions recursed into each other with no base case until
+        // the stack overflowed.
+        result = "#" + std::to_string(value_int);
+    } else if (type == Token_NONE) {
+        // Same reasoning as Token_IDENTIFIER above, and for the same reason must not
+        // fall through to as_string() -- but unlike every other token_type, a
+        // default-constructed (Token_NONE) token's union members are genuinely
+        // uninitialized (token()'s own constructor only sets start_pos/type), so this
+        // branch also can't read value_char/value_int/value_double/value_string at
+        // all, unlike the other branches above.
+        result = "<none>";
 	} else {
         return as_string();
     }
