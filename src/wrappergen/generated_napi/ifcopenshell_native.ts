@@ -509,6 +509,16 @@ export class entity_instance {
         return native.base_get_all_attribute_values(this._handle);
     }
 
+    traverse(max_depth: number): entity_instance[] {
+        const result = native.base_traverse(this._handle, max_depth) as unknown[];
+        return result.map((item) => new entity_instance(item));
+    }
+
+    traverse_breadth_first(max_depth: number): entity_instance[] {
+        const result = native.base_traverse_breadth_first(this._handle, max_depth) as unknown[];
+        return result.map((item) => new entity_instance(item));
+    }
+
     get_all_attribute_values_async(): Promise<unknown> {
         return native.base_get_all_attribute_values_async(this._handle) as Promise<unknown>;
     }
@@ -1016,6 +1026,10 @@ export class file {
 
     write(path: string): void {
         native.file_write(this._handle, path);
+    }
+
+    file_pointer(): string {
+        return native.file_file_pointer(this._handle);
     }
 
     dispose(): void {

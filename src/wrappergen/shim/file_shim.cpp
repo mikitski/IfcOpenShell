@@ -43,5 +43,9 @@ void write_file(const ifcopenshell::file& file_obj, const std::string& path) {
     }
 }
 
+std::string file_pointer(const ifcopenshell::file& file_obj) {
+    return std::to_string(reinterpret_cast<uintptr_t>(&file_obj));
+}
+
 } // namespace wrappergen
 } // namespace ifcopenshell

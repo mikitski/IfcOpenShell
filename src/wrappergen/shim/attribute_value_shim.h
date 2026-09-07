@@ -187,6 +187,20 @@ bool is_a(const express::base& instance, const std::string& name);
 // per-attribute (as opposed to per-instance) boundary crossings.
 std::vector<attribute_value_variant> get_all_attribute_values(const express::base& instance);
 
+// `file.traverse(inst, max_levels)` / `traverse(inst, max_levels, breadth_first=true)`
+// (Phase 2's `IfcFile.traverse`, `research/01-python-core-and-lowlevel.md` SS2.2/SS3.1)
+// -- thin pass-throughs to the real, existing `ifcopenshell::file::traverse`/
+// `traverse_breadth_first` static methods (file.h), which clang's static-method
+// discovery skips entirely (`clang_frontend.py`'s `_discover_methods`: `if
+// child.is_static_method(): continue`) -- not previously exposed as a primitive for
+// that mechanical reason alone, not because the underlying C++ traversal doesn't
+// exist or needed new logic. Exposing the real native implementation here (instead of
+// a slower, order-differing pure-TS attribute-walk reimplementation) is the same
+// "free function" injection technique already used for `write`/`file_pointer`
+// (`napi_binding.py`'s `_inject_*_primitives`), not new design.
+std::vector<express::base> traverse(const express::base& instance, int max_depth);
+std::vector<express::base> traverse_breadth_first(const express::base& instance, int max_depth);
+
 } // namespace wrappergen
 } // namespace ifcopenshell
 

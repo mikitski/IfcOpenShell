@@ -2088,6 +2088,50 @@ napi_value napi_base_get_all_attribute_values(napi_env env, napi_callback_info i
     return js_result;
 }
 
+napi_value napi_base_traverse(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    int32_t js_max_depth = 0;
+    napi_get_value_int32(env, argv[1], &js_max_depth);
+    auto* result = ifcopenshell_base_traverse(handle, js_max_depth);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    int size = ifcopenshell_express_base_list_size(result);
+    napi_value js_result;
+    napi_create_array_with_length(env, size, &js_result);
+    for (int index = 0; index < size; ++index) {
+        auto* item = ifcopenshell_express_base_list_get(result, index);
+        napi_set_element(env, js_result, index, wrap_express_base(env, item));
+    }
+    ifcopenshell_express_base_list_free(result);
+    return js_result;
+}
+
+napi_value napi_base_traverse_breadth_first(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    int32_t js_max_depth = 0;
+    napi_get_value_int32(env, argv[1], &js_max_depth);
+    auto* result = ifcopenshell_base_traverse_breadth_first(handle, js_max_depth);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    int size = ifcopenshell_express_base_list_size(result);
+    napi_value js_result;
+    napi_create_array_with_length(env, size, &js_result);
+    for (int index = 0; index < size; ++index) {
+        auto* item = ifcopenshell_express_base_list_get(result, index);
+        napi_set_element(env, js_result, index, wrap_express_base(env, item));
+    }
+    ifcopenshell_express_base_list_free(result);
+    return js_result;
+}
+
 napi_value napi_entity_get_inverse(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2];
@@ -3854,6 +3898,21 @@ napi_value napi_file_write(napi_env env, napi_callback_info info) {
     return js_undefined;
 }
 
+napi_value napi_file_file_pointer(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_ifcopenshell_file(env, argv[0]);
+    char* result = ifcopenshell_file_file_pointer(handle);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);
+    ifcopenshell_string_free(result);
+    return js_result;
+}
+
 napi_value napi_global_id_new(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1];
@@ -4549,6 +4608,16 @@ napi_value Init(napi_env env, napi_value exports) {
     }
     {
         napi_value fn;
+        napi_create_function(env, "base_traverse", NAPI_AUTO_LENGTH, napi_base_traverse, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_traverse", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_traverse_breadth_first", NAPI_AUTO_LENGTH, napi_base_traverse_breadth_first, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_traverse_breadth_first", fn);
+    }
+    {
+        napi_value fn;
         napi_create_function(env, "entity_get_inverse", NAPI_AUTO_LENGTH, napi_entity_get_inverse, nullptr, &fn);
         napi_set_named_property(env, exports, "entity_get_inverse", fn);
     }
@@ -5141,6 +5210,11 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value fn;
         napi_create_function(env, "file_write", NAPI_AUTO_LENGTH, napi_file_write, nullptr, &fn);
         napi_set_named_property(env, exports, "file_write", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "file_file_pointer", NAPI_AUTO_LENGTH, napi_file_file_pointer, nullptr, &fn);
+        napi_set_named_property(env, exports, "file_file_pointer", fn);
     }
     {
         napi_value fn;
