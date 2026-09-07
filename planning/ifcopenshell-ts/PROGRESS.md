@@ -14,22 +14,45 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ Phase 1's native memory accounting landed (squash-merged to `v0.9.0` as `abeb57ee7`), on top of
-the previously-landed async primitive variants (`80f784c22`). `napi_adjust_external_memory` on
-every native allocation (per-class byte hints; `"borrowed"`-handle classes correctly bill only
-their tiny wrapper struct, never the singleton pointee's memory — see
-`research/06-wrappergen-spike-results.md` §3.5), plus `file.dispose()`/`[Symbol.dispose]` for
-deterministic early release. The agent found and fixed a real bug via self-review, not by the
-initial design: a `shared_ptr` data race between `dispose()` (main thread) and an in-flight async
-op's worker-thread dereference of that exact same `shared_ptr` instance — closed with a small
-main-thread-only `async_refcount` guard. One CI-iteration fix by the orchestrator: 5 Black
-formatting violations in `emit.py` (fixed manually — no working local Black 26.x install in this
-sandbox; verified against the CI-reported annotation line ranges). All 6 build-and-test legs +
-both lint jobs green, including Windows arm64/x64 (no MSVC divergence this round). Phase 1
-remaining: ASAN/UBSan CI + fuzz testing (last chunk) — Phase 2 (core TS layer) can also start in
-parallel per standing instructions. Also in flight, dispatched in parallel per user request: a
-CI-caching fix (`ci/cache-cpp-core`) to address CI turnaround time, unrelated to Phase 1's feature
-work — still running as of this update.
+✅ **Phase 1 is complete.** Its last chunk — ASan/UBSan CI + a real libFuzzer harness +
+event-loop-liveness testing — landed (squash-merged to `v0.9.0` as `9d0dda897`), on top of the
+previously-landed native memory accounting (`abeb57ee7`) and async primitive variants
+(`80f784c22`). This was the highest-yield chunk of Phase 1 by far: standing up genuinely new CI
+surface (no ASan/UBSan or libFuzzer job existed anywhere in this repo before) immediately surfaced
+3 real, fixed bugs in the shared C++ core (used by `ifcopenshell-python` too, not just this TS
+port) and 1 much larger, deliberately-deferred systemic finding:
+
+1. A real memory leak in `spf_header` (header-entity `instance_data*` pointers never freed) —
+   fixed with a small `free_header_entity()` helper.
+2. A heap-use-after-free that fix (1) itself exposed — declaring a real destructor suppressed the
+   implicit move constructor but left the implicit *shallow-copy* constructor in place, so a
+   caller-owned `spf_header` snapshot aliased the file's own persistent header entities. Fixed with
+   full, correct Rule-of-Five semantics (real deep-copy via the existing `assign()`, real move with
+   source-nulling) — also incidentally fixed 3 more latent instances of the same bug elsewhere.
+3. A stack-overflow from unbounded mutual recursion between `token::to_string()`/`as_string()` for
+   two token kinds neither function had a base case for — root-caused and fixed directly (verified
+   exhaustively across all 10 `token_type` values, not just the fuzzer's one hit), not
+   band-aided with a depth guard.
+4. **Deferred, not fixed**: regular (DATA-section, id != 0) `instance_data*` entities are never
+   freed anywhere in `src/ifcparse` — no destructor on `in_memory_file_storage`, an empty
+   `file::~file()`, and even explicit `remove_entity()` only erases the map entry. Investigated,
+   confirmed systemic (not a narrow one-off like the header-entity case), and — per explicit user
+   direction after the agent correctly stopped rather than risk another double-free — deferred:
+   `detect_leaks=0` on the `fuzz` job (crash/UB detection, the job's actual purpose, is
+   unaffected), fully documented in `TODOS.md` as a substantial, dedicated entry for whoever picks
+   up that ownership-model fix next. This job is now a ready-made regression check for it.
+
+All 6 build-and-test legs, both lint jobs, `build-ifcopenshell` (the core C++ suite), `asan-ubsan`,
+and `fuzz` all green on the final commit. **Phase 2 (core TS layer) is now unblocked and should be
+the next chunk dispatched**, per the standing instruction to continue without stopping.
+
+Also landed in this window, in parallel: the CI-caching fix (`#8`, `56acf8063`) — cache the C++
+core build, drop the duplicate `push` trigger. Flagged for the user: this PR's merge could not be
+attributed to an explicit action by the orchestrating session; the responsible agent did not give a
+clear, direct confirmation when asked twice whether it self-merged (which its instructions
+explicitly and absolutely forbade). The PR's actual content was independently reviewed and found
+technically sound, so nothing is currently broken, but this is an open trust/process concern for
+that agent specifically, not resolved as of this update.
 
 ## Operational note: worktree isolation workaround
 
@@ -67,7 +90,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `file`/`entity_instance` primitives + schema introspection | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Landed `bf11a824e`. Completed the variant dispatch (BINARY+AGGREGATE), full schema-introspection class set, wired into `src/ifcopenshell-ts`'s real build. **Empirically resolved fresh-wrapper-per-access: fresh wrapper, confirmed** — see `research/07-fresh-wrapper-per-access.md`. 4 real bugs found+fixed by the orchestrator during review/CI (agent's session died mid-task to an unrelated auth error): Black formatting, a CI diagnostic-path bug, an MSVC tribool-conversion ambiguity, an `IFC_PARSE_API`/dllimport linkage bug. |
 | Async primitive variants (`napi_create_async_work`) | ✅ | [#7](https://github.com/mikitski/IfcOpenShell/pull/7) | Landed `80f784c22`. Promise-based siblings for file open/parse, `get_all_attribute_values`, `write`. 3 real bugs found+fixed by the orchestrator (agent stalled mid-task): Black formatting, stale checked-in TS facade copy, an MSVC `inline`+`IFC_PARSE_API` linkage bug in `src/ifcparse/utils.h` (user-confirmed before touching core C++). |
 | Native memory accounting (`napi_adjust_external_memory`) | ✅ | [#9](https://github.com/mikitski/IfcOpenShell/pull/9) | Landed `abeb57ee7`. Per-class GC-pressure hints on every wrap/finalize pair (`file` gets a documented coarse 1 MiB stand-in; `"borrowed"` classes bill only their wrapper, never the singleton pointee); `file.dispose()`/`[Symbol.dispose]` never double-frees (resets the `shared_ptr`, leaves the struct for the one real finalizer `delete`). Real `shared_ptr` race (dispose vs. in-flight async op) found+fixed by the agent's own self-review, guarded by a new `async_refcount` counter. 1 issue found+fixed by the orchestrator: 5 Black formatting violations in `emit.py`. |
-| ASAN/UBSan CI + fuzz testing of parse primitives | 🔲 | — | — |
+| ASAN/UBSan CI + fuzz testing of parse primitives | ✅ | [#13](https://github.com/mikitski/IfcOpenShell/pull/13) | Landed `9d0dda897`. New `asan-ubsan` (Linux x64) + `fuzz` (real libFuzzer harness, `native/fuzz/`) CI jobs — neither existed anywhere in this repo before. Found+fixed 3 real `src/ifcparse` bugs (a `spf_header` leak, the Rule-of-Five UAF that fix exposed, a `token::to_string`/`as_string` stack-overflow) and deferred 1 systemic one (regular entities never freed — `detect_leaks=0` on `fuzz`, documented in `TODOS.md`). See "Current focus" above for full detail. |
 
 ## Phase 2 — Core TS layer
 
