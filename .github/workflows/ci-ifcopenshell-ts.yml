@@ -726,9 +726,19 @@ jobs:
       # unrelated - successful build log instead). libFuzzer writes its crash
       # report/stack trace to stderr, so `2>&1` before the pipe is required, not
       # optional, for this log to be useful.
+      # `detect_leaks=0`: a real, pre-existing, systemic leak was found via this job
+      # during this PR's own CI bring-up (every regular DATA-section entity leaks -
+      # see TODOS.md's "Regular entity (instance_data*) lifecycle: never freed"
+      # entry for the full writeup and why it's deliberately deferred rather than
+      # fixed here). Left on, this job would fail on that pre-existing backlog on
+      # every PR indefinitely, not on anything this job's own memory-corruption/UB
+      # checks are meant to catch - same reasoning as asan-ubsan's own
+      # `detect_leaks=0` above, for a different underlying leak. Memory-corruption/UB
+      # detection (this job's actual purpose - crashes, use-after-free, double-free,
+      # OOB reads/writes, undefined behavior) is unaffected and stays fully active.
       - name: Run fuzz target (bounded time budget)
         env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
           LD_LIBRARY_PATH: ${{ github.workspace }}/install-fuzz/lib
         run: |

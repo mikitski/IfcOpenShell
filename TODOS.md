@@ -400,17 +400,26 @@ final exit-criterion items — intentionally narrow scope in a few documented wa
    so whoever investigates a flake starts from that assumption rather than re-deriving it.
 6. **The `asan-ubsan` job's `npm test` run has LeakSanitizer disabled (`ASAN_OPTIONS=detect_leaks=0`),
    caught by code review before this PR shipped.** An earlier draft left `detect_leaks=1` on, matching
-   the reasoning already applied to the `fuzz` job's own standalone harness — but for `npm test`,
-   `LD_PRELOAD`-ing the ASan runtime intercepts `malloc` for the *entire* `node` process, not just the
-   addon's `.node` file, and LeakSanitizer's exit-time check has no way to attribute an unreclaimed
-   allocation to "the addon" vs. Node/V8's own long-lived steady-state allocations (ICU data, V8
-   heap/snapshot arenas, libuv buffers) that routinely aren't freed before process exit by design.
-   Left on, this would likely fail on every PR for reasons unrelated to any native bug the job exists
-   to catch. Memory-*corruption* detection (use-after-free, double-free, OOB read/write — ASan's
-   actual purpose in this job) is unaffected; leak-shaped bugs in the addon's own accounting are still
-   covered by `test/native/memory.test.ts`'s bounded-external-memory-growth soak test, and the `fuzz`
-   job's own small, fully ASan-linked standalone executable (no V8/ICU noise) keeps
-   `detect_leaks=1`, where it's actually reliable.
+   the reasoning applied at the time to the `fuzz` job's own standalone harness (see point 7 below for
+   why that no longer holds either, for an unrelated reason found later in this same PR's own CI
+   bring-up) — but for `npm test`, `LD_PRELOAD`-ing the ASan runtime intercepts `malloc` for the
+   *entire* `node` process, not just the addon's `.node` file, and LeakSanitizer's exit-time check has
+   no way to attribute an unreclaimed allocation to "the addon" vs. Node/V8's own long-lived
+   steady-state allocations (ICU data, V8 heap/snapshot arenas, libuv buffers) that routinely aren't
+   freed before process exit by design. Left on, this would likely fail on every PR for reasons
+   unrelated to any native bug the job exists to catch. Memory-*corruption* detection (use-after-free,
+   double-free, OOB read/write — ASan's actual purpose in this job) is unaffected; leak-shaped bugs in
+   the addon's own accounting are still covered by `test/native/memory.test.ts`'s
+   bounded-external-memory-growth soak test.
+7. **The `fuzz` job's own standalone harness also has LeakSanitizer disabled
+   (`ASAN_OPTIONS=detect_leaks=0`), for a completely different and more consequential reason than
+   point 6 above: it found a real, pre-existing, systemic leak in `src/ifcparse` itself, not a false
+   positive.** See the dedicated "Regular entity (`instance_data*`) lifecycle: never freed" entry
+   below for the full writeup. Unlike point 6 (a genuine ASan/Node-process false-positive), this is a
+   real bug this job correctly caught — deliberately deferred, not dismissed, because a correct fix
+   needs a real ownership-model investigation this PR's scope doesn't cover. Memory-corruption/UB
+   detection (this job's actual purpose) is unaffected and stays fully active; only leak detection is
+   off, and only until that dedicated entry is picked up.
 
 **Why:** Each is real, understood, and bounded, matching the scope-discipline precedent set by every
 prior Phase 1 PR (ship a complete, well-reasoned slice; disclose the rest rather than force it in or
@@ -429,3 +438,85 @@ combination, `-fsanitize=fuzzer-no-link` vs `-fsanitize=fuzzer` staging).
 **Depends on / blocked by:** None block each other; pick up independently as needed. Extending
 sanitizer/fuzz coverage to Windows/macOS and a scheduled longer-running fuzz campaign both depend on
 the Linux-only versions landing and proving stable first.
+
+---
+
+### Regular entity (`instance_data*`) lifecycle: never freed — a real, systemic leak found by this PR's own `fuzz` job
+
+**What:** Every regular (DATA-section, id != 0) parsed or API-created `ifcopenshell::instance_data*`
+is leaked. Nothing in `src/ifcparse` ever frees one, under any code path:
+
+1. `ifcopenshell::impl::in_memory_file_storage` (`storage.h`) has no user-declared destructor. Its
+   `byid_`/`tbyid_` maps (`std::unordered_map<uint32_t, instance_data*>` in the default,
+   non-`IFOPSH_SAFE_INSTANCE` build - see `express.h`'s `shared_pointer_type` typedef) and
+   `read_simple_type_instances` (`std::vector<instance_data*>`) hold raw, owning pointers; the
+   compiler-generated destructor destroys the containers themselves but never touches what the
+   pointers point to.
+2. `ifcopenshell::file::~file()` (`file.cpp:270`) is `{}` - empty. `file::storage_` is a
+   `std::variant<std::monostate, in_memory_file_storage, rocks_db_file_storage>` value member, so it
+   gets destroyed implicitly when `file` is destroyed, but per point 1 that destruction doesn't free
+   anything either.
+3. Explicit removal leaks too, not just parse-time creation: `file::remove_entity()` →
+   `process_deletion_()` → `byid_.erase(entity.id())` (`parse.cpp:2797`) only erases the *map entry*
+   - it never `delete`s the `instance_data*` the entry held.
+
+Confirmed via a real LeakSanitizer report from this PR's own `fuzz` CI job (a standalone libFuzzer
+target with no Node/N-API involvement, seeded from `test/fixtures/**/*.ifc`) during
+`ReadAndExecuteSeedCorpora` - i.e. triggered by parsing a plain, valid seed file, not a fuzzer
+mutation. The specific report was one leaked `instance_data` (185 bytes across 4 allocations: the
+`instance_data` itself, its heap-allocated `in_memory_attribute_storage`/`variant_array` wrapper, and
+that `variant_array`'s two internal arrays - see `variant_array.h` and `instance_data.h:532`),
+reached via `in_memory_file_storage::load` (`parse.cpp:1042`) →
+`instance_streamer::read_instance()` (`parse.cpp:2213`), most likely triggered by a duplicate entity
+id: `read_from_stream` (`parse.cpp:2330-2336`) logs a "Overwriting instance with name #N" warning on
+a duplicate id but then calls `byid_.insert({id, data})`, which silently no-ops (doesn't overwrite)
+on an already-present key per `std::unordered_map::insert`'s own contract - the corpus includes
+`test/fixtures/validate/*duplicated-guids*.ifc`, which fits.
+
+**This is very likely the tip of a much bigger iceberg, not the whole bug.** LeakSanitizer under
+libFuzzer aborts the entire run on the *first* detected leak (checked after each input execution) -
+`ReadAndExecuteSeedCorpora` never got past whichever early corpus file first triggered this, so the
+other ~190 seed files (and every entity within them) never got a chance to also report. Given points
+1-3 above, there's no reason to believe the duplicate-id path is special; every successfully-parsed
+DATA-section entity in every file - and every entity created via the primitive API
+(`file::create_with_declaration_instance_id`, which inserts into *both* `byid_` and `tbyid_`, per
+`file.cpp:376-378`) - should leak identically. Under this port's own stated threat model
+(`planning/ifcopenshell-ts/20-roadmap.md`'s "(b)": a server-side process parsing many user-uploaded
+`.ifc` files over its lifetime), this is a real, unbounded-growth memory issue, not a cosmetic one.
+
+**Why deferred rather than fixed here:** A correct fix is real, non-trivial investigation into the
+actual intended single-owner model across `byid_`, `tbyid_`, `byguid_` (holds `express::base` by
+value - non-owning views, no cleanup needed there), `bytype_excl_` (same), and
+`read_simple_type_instances` - specifically whether `byid_` and `tbyid_` can hold *the same* pointer
+for API-created entities (confirmed: yes, per `file.cpp:376-378` above) while parser-loaded entities
+only ever land in `byid_`. A destructor that naively walks and frees every raw-pointer-holding
+container risks a real double-free on any entity present in more than one of them. This is the same
+category of investigation as the `spf_header` header-entity leak fixed earlier in this PR's own
+history (see the "ASAN/UBSan CI + fuzz testing" entry above and this PR's commit history), but
+substantially larger in scope: that fix was 3 cleanly-scoped, single-owner pointers; this one spans
+the parser's and the public API's entire entity-storage model, shared by every consumer of
+`src/ifcparse` (**`ifcopenshell-python` too, via the same C++ core, not just this TS port** - every
+`ifcopenshell.open()` call in Python-land hits the exact same leak). Improvising a fix here without
+first mapping that ownership model risks trading a known, disclosed leak for a silent, harder-to-spot
+double-free/use-after-free - exactly what happened once already in this PR when the `spf_header` leak
+fix (correct in isolation) exposed a latent shallow-copy aliasing bug that only became a real
+double-free/UAF once something started actually freeing memory. That was caught by this same `fuzz`
+job's own ASan run; a bug of that kind in this much-larger surface would be far more likely to slip
+through only-narrowly-scoped local review.
+
+**What's already in place for whoever picks this up:** the `fuzz` CI job (Linux x64,
+`.github/workflows/ci-ifcopenshell-ts.yml`) is a ready-made regression-detection asset for this exact
+class of bug - once a real fix lands, flip `ASAN_OPTIONS=detect_leaks=0` back to `detect_leaks=1` in
+that job (see point 7 of the "ASAN/UBSan CI + fuzz testing" entry above) and let it run; a genuine
+fix will show a clean pass, and a wrong/partial one will show exactly which allocation is still
+unowned or double-freed, with a full stack trace, the same way it did throughout this PR's own
+history.
+
+**Context:** Found and diagnosed entirely via this PR's own `fuzz` job (see the PR's own CI history/
+diagnostic comments for the full LeakSanitizer stack traces). Not locally reproducible/verifiable
+beyond static reading, for the same sandbox reasons (`no cmake`, no real Boost install) documented
+throughout this PR's other entries.
+
+**Depends on / blocked by:** None block other work landing. Should be picked up as a dedicated,
+scoped piece of work (likely warranting its own design/plan review given the shared-core blast
+radius and the double-free risk of an incomplete fix) rather than folded into an unrelated PR.
