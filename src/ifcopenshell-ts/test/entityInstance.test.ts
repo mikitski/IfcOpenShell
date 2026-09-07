@@ -104,6 +104,17 @@ describe.each(["IFC2X3", "IFC4", "IFC4X3"] as const)("EntityInstance (%s)", (sch
 		expect(() => wall.get("NoSuchAttribute")).toThrow();
 	});
 
+	test(".get() throws for a DERIVED attribute (EXPRESS rule execution is out of scope)", () => {
+		// IfcSIUnit.Dimensions is redeclared DERIVE in every schema version (category 3)
+		// -- must not be read as an ordinary forward attribute (it has no stored value
+		// at that positional slot; Python falls through to EXPRESS rule execution
+		// instead, which this chunk deliberately doesn't implement, see EntityInstance's
+		// own header comment).
+		const file = newFile();
+		const unit = file.createEntity("IfcSIUnit");
+		expect(() => unit.get("Dimensions")).toThrow();
+	});
+
 	test("getByIndex()/setByIndex() index-based access", () => {
 		const file = newFile();
 		const wall = file.createEntity("IfcWall");

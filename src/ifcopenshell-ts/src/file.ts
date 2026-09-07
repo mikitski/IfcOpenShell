@@ -255,6 +255,23 @@ interface FileState {
 // the underlying native file's stable identity (`file_pointer()`, this chunk's new
 // primitive -- see the final report), not by JS wrapper object identity, since every
 // primitive-layer accessor mints a fresh wrapper (research/07-fresh-wrapper-per-access.md).
+//
+// Two known, inherited characteristics of this pointer-address-as-identity design,
+// not new to this port -- Python's `file_mixin.registry` is keyed by `int(self.this)`,
+// the exact same raw native pointer value, with the exact same properties:
+// (1) an entry here is never removed except by `dispose()` (below) -- a file dropped
+//     without calling `dispose()` (relying on GC alone) leaks its registry entry for
+//     the life of the process, same as Python's `registry` dict, which has no
+//     equivalent cleanup path at all. (2) if a file's native memory is freed (via
+//     `dispose()` running its finalizer, or GC finalizing an un-disposed file) and a
+//     *different*, unrelated `ifcopenshell::file` later happens to be allocated at
+//     that exact same freed address, a new `IfcFile` wrapper for it would look up and
+//     attach to the old file's stale `FileState` (Transaction history) under this key
+//     -- Python's identity-by-`self.this`-address scheme carries the identical risk.
+// Calling `dispose()` (rather than relying on GC) is the recommended mitigation for
+// both: it removes the registry entry deterministically, at the same point the
+// underlying memory is freed, closing the collision window this chunk didn't attempt
+// a novel fix for beyond what the reference implementation itself provides.
 const fileRegistry = new Map<string, FileState>();
 
 const SCHEMA_VERSION_PREFIXES = ["IFC", "X", "_ADD", "_TC"] as const;

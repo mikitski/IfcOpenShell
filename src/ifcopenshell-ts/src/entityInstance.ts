@@ -172,7 +172,7 @@ export class EntityInstance {
 	 */
 	get(name: string): unknown {
 		const category = this.native.get_attribute_category(name);
-		if (category === AttributeCategory.FORWARD || category === AttributeCategory.DERIVED) {
+		if (category === AttributeCategory.FORWARD) {
 			const index = this.native.get_argument_index(name);
 			return this.getByIndex(index);
 		}
@@ -351,6 +351,12 @@ export class EntityInstance {
 	 * per attribute) and recurses into nested entity references in TS, exactly the
 	 * fallback shape `attribute_value_shim.h`'s own doc comment anticipates for this
 	 * chunk.
+	 *
+	 * Parameter order is `(recursive, includeIdentifier, ignore)` -- deliberately NOT
+	 * the same order as Python's `get_info(include_identifier=True, recursive=False,
+	 * ...)`. Both parameters are plain positional booleans with no compile-time way to
+	 * flag a swapped call, so double-check call sites against this order specifically
+	 * if porting Python code that calls `get_info(...)` positionally.
 	 */
 	getInfo(recursive = false, includeIdentifier = true, ignore: readonly string[] = []): Record<string, unknown> {
 		const info: Record<string, unknown> = {};
@@ -403,20 +409,14 @@ export function referencesTarget(value: unknown, target: EntityInstance): boolea
 	return value instanceof EntityInstance && value.identity() === target.identity();
 }
 
-const attributeNamesCache = new WeakMap<NativeEntity, string[]>();
 function attributeNamesOf(entityDeclaration: NativeEntity): string[] {
-	// Uncached-per-declaration-object-identity is intentionally minimal here (the
-	// attribute-metadata cache keyed by schema-version+class-name that
-	// 10-architecture.md SS6 designs for the Proxy is explicitly the *next* Phase 2
-	// chunk's responsibility, once the Proxy exists to consume it) -- this WeakMap
-	// only avoids repeat native calls for the exact same `entity` wrapper instance
-	// within one call, not across calls (per research/07, every `declaration()` call
-	// mints a fresh wrapper, so this cache rarely hits across separate `EntityInstance`
-	// accesses -- purely a micro-optimization within a single `getInfo`, not a
-	// substitute for the real cache).
-	const cached = attributeNamesCache.get(entityDeclaration);
-	if (cached) return cached;
-	const names = entityDeclaration.all_attributes().map((attribute) => attribute.name());
-	attributeNamesCache.set(entityDeclaration, names);
-	return names;
+	// No cache here on purpose: a `Map<schemaVersion, Map<className, AttributeMeta[]>>`
+	// cache (keyed by schema/class name, not by any per-call native wrapper) is
+	// 10-architecture.md SS6's explicit design for the Proxy layer -- the *next*
+	// Phase 2 chunk's responsibility, once the Proxy exists to consume it. A
+	// WeakMap keyed on `entityDeclaration` itself was tried here and removed: per
+	// research/07-fresh-wrapper-per-access.md, every `declaration()`/`as_entity()`
+	// call mints a fresh wrapper object, so such a cache can never actually hit --
+	// it would only add allocation overhead while looking like an optimization.
+	return entityDeclaration.all_attributes().map((attribute) => attribute.name());
 }

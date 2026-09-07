@@ -3,7 +3,7 @@
 // Port of `ifcopenshell/template.py` (src/ifcopenshell-python) -- generates a minimal
 // valid empty IFC4 SPF file as a string, for `IfcFile`-from-scratch bootstrapping.
 // Fully portable (research/01-python-core-and-lowlevel.md SS2.6): pure string
-// formatting + `guid.compress`, no filesystem access (parses an in-memory buffer, not
+// formatting + `guid.new()`, no filesystem access (parses an in-memory buffer, not
 // a path).
 //
 // One disclosed deviation: Python's `DEFAULTS.application`/`.application_version`
@@ -19,7 +19,7 @@
 // not a correctness concern.
 
 import { IfcFile } from "./file";
-import { compress } from "./guid";
+import * as guid from "./guid";
 import { native } from "./native/native_loader";
 
 // A quick way to setup an 'empty' IFC file, taken from:
@@ -106,7 +106,7 @@ export function create(options: CreateOptions = {}): IfcFile {
 		application_version: applicationVersion,
 		timestamp,
 		application,
-		project_globalid: options.projectGlobalId ?? compress(crypto.randomUUID().replace(/-/g, "")),
+		project_globalid: options.projectGlobalId ?? guid.new(),
 		project_name: options.projectName ?? "",
 		mvd: options.mvd ?? mvdFor(schemaIdentifier),
 	};
