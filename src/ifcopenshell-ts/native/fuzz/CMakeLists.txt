@@ -16,18 +16,32 @@
 # Node addon), not a second target bolted onto the same one: the two have almost no
 # overlapping build inputs (no CMAKE_JS_INC/CMAKE_JS_LIB/N-API, no `.node` output) and,
 # more importantly, need *different, incompatible compiler/linker flags* -- this target
-# is meant to be configured with `-fsanitize=fuzzer,address,undefined` (see
-# .github/workflows/ci-ifcopenshell-ts.yml's `fuzz` job), which the ordinary addon build
-# must never pick up by accident. Keeping them as separate CMake projects, each with
+# links against `-fsanitize=fuzzer` (see below) and is built with ASan/UBSan flags (see
+# .github/workflows/ci-ifcopenshell-ts.yml's `fuzz` job), none of which the ordinary
+# addon build must ever pick up by accident. Keeping them as separate CMake projects, each with
 # their own `-DCMAKE_PREFIX_PATH=<installed-core>` configure step, makes that isolation
 # structural rather than something a shared CMakeLists.txt has to remember to gate.
 #
 # Expects `-DCMAKE_PREFIX_PATH=<path-to-installed-ifcopenshell>` (matching ../README.md's
 # addon build instructions) and, for an actual fuzzing run (as opposed to a plain
-# regression build), sanitizer flags supplied via `-DCMAKE_CXX_FLAGS`/
-# `-DCMAKE_EXE_LINKER_FLAGS` by the caller -- this file has no built-in opinion on
-# sanitizer flags, same reasoning as ../CMakeLists.txt has no built-in opinion on
-# CMAKE_BUILD_TYPE.
+# regression build), ASan/UBSan compile+link flags (`-DCMAKE_CXX_FLAGS=-fsanitize=...`,
+# `-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=...`) supplied via those two standard CMake
+# variables by the caller -- this file has no built-in opinion on those, same reasoning
+# as ../CMakeLists.txt has no built-in opinion on CMAKE_BUILD_TYPE.
+#
+# `-fsanitize=fuzzer` itself is the one exception, deliberately hardcoded below via
+# `target_link_options` on `ifcopenshell_fuzz_parse` specifically, rather than left to
+# the caller's `-DCMAKE_EXE_LINKER_FLAGS` the way ASan/UBSan are: passing it as a
+# *global* linker flag broke this file's own `cmake -S ...` configure step in CI
+# (confirmed by reasoning after GitHub's job-log endpoint proved unreachable from the
+# sandbox debugging this -- see this PR's own history). `project(... CXX)` above
+# triggers CMake's built-in "does the compiler work" check, which compiles and links a
+# trivial `int main(){}` probe program using whatever CMAKE_EXE_LINKER_FLAGS is set to
+# at that point -- `-fsanitize=fuzzer` requires the linked program to define
+# `LLVMFuzzerTestOneInput`, which that probe program doesn't, so the probe link (and
+# therefore the whole configure step) fails before this file's own `add_executable`
+# below is ever reached. Scoping it to only the one real target that does define
+# `LLVMFuzzerTestOneInput` (`fuzz_parse.cpp`) avoids the probe entirely.
 
 cmake_minimum_required(VERSION 3.15...3.31)
 project(ifcopenshell_native_fuzz CXX)
@@ -57,3 +71,7 @@ target_include_directories(ifcopenshell_fuzz_parse PRIVATE
     "${IFCOPENSHELL_INSTALL_PREFIX}/include/ifcparse"
 )
 target_link_libraries(ifcopenshell_fuzz_parse PRIVATE IfcOpenShell::IfcParse)
+
+# See the top-of-file comment for why this is scoped to this one target instead of
+# passed via the caller's global -DCMAKE_EXE_LINKER_FLAGS.
+target_link_options(ifcopenshell_fuzz_parse PRIVATE -fsanitize=fuzzer)

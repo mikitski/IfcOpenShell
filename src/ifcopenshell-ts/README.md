@@ -100,13 +100,17 @@ core libraries, seeds it from `test/fixtures/**/*.ifc`, and runs it for a bounde
 (`FUZZ_TIME_BUDGET_SECONDS`, currently 90s) on every PR as a regression check, not a fuzzing
 campaign - see `TODOS.md` for a disclosed follow-up on a longer/scheduled campaign.
 
-To run it locally on a system with clang + libFuzzer support:
+To run it locally on a system with clang + libFuzzer support (note: only ASan/UBSan go
+through `-DCMAKE_EXE_LINKER_FLAGS` here - `native/fuzz/CMakeLists.txt` itself already
+links `-fsanitize=fuzzer` onto the one target that needs it; passing it here too, as a
+*global* linker flag, breaks CMake's own compiler-check step - see that file's
+top-of-file comment):
 
 ```sh
 cmake -S native/fuzz -B build-fuzz \
   -DCMAKE_PREFIX_PATH=<install-prefix> \
   -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer-no-link,address,undefined -g -O1" \
-  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined"
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 cmake --build build-fuzz
 
 # libFuzzer scans a corpus directory non-recursively, but test/fixtures/ nests some

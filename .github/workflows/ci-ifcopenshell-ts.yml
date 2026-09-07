@@ -593,11 +593,15 @@ jobs:
       # parser/tokenizer logic those calls run, which would make it effectively blind
       # (OSS-Fuzz's own build convention for exactly this reason). The full
       # `-fsanitize=fuzzer` (pulls in libFuzzer's `main()` and runtime) is added only
-      # at the fuzz harness executable's own final link, below - never to the core's
-      # shared libraries, which must never define `main()`.
+      # at the fuzz harness executable's own final link - native/fuzz/CMakeLists.txt's
+      # own `target_link_options(ifcopenshell_fuzz_parse ...)`, not this workflow, is
+      # where that happens (see that file's top-of-file comment for why: passing
+      # `-fsanitize=fuzzer` as a *global* `-DCMAKE_EXE_LINKER_FLAGS` here broke this
+      # job's own "Build fuzz harness" step, since CMake's built-in compiler-check
+      # probe program doesn't define `LLVMFuzzerTestOneInput`) - never to the core's
+      # shared libraries below, which must never define `main()` either way.
       FUZZ_COMPILE_FLAGS: -fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g -O1
       FUZZ_SHARED_LINK_FLAGS: -fsanitize=address,undefined
-      FUZZ_EXE_LINK_FLAGS: -fsanitize=fuzzer,address,undefined
       FUZZ_TIME_BUDGET_SECONDS: "90"
     steps:
       - uses: actions/checkout@v7
@@ -673,13 +677,29 @@ jobs:
           path: ${{ env.INSTALL_PREFIX }}
           key: ${{ steps.cache-core.outputs.cache-primary-key }}
 
+      # Piped through `tee` and error-grouped on failure, matching build-and-test's
+      # Unix "Build native addon" step and asan-ubsan's own build step - this step
+      # previously had no captured log at all, which meant a real failure here (as
+      # happened once during this PR's own development) was undiagnosable from the PR
+      # comment alone, since GitHub's job-log endpoint isn't reachable from every
+      # sandbox that might need to debug a CI failure here.
       - name: Build fuzz harness
         run: |
-          cmake -S src/ifcopenshell-ts/native/fuzz -B build-fuzz-harness \
-            -DCMAKE_PREFIX_PATH="$INSTALL_PREFIX" \
-            -DCMAKE_CXX_FLAGS="$FUZZ_COMPILE_FLAGS" \
-            -DCMAKE_EXE_LINKER_FLAGS="$FUZZ_EXE_LINK_FLAGS"
-          cmake --build build-fuzz-harness --parallel
+          set -o pipefail
+          {
+            cmake -S src/ifcopenshell-ts/native/fuzz -B build-fuzz-harness \
+              -DCMAKE_PREFIX_PATH="$INSTALL_PREFIX" \
+              -DCMAKE_CXX_FLAGS="$FUZZ_COMPILE_FLAGS" \
+              -DCMAKE_EXE_LINKER_FLAGS="$FUZZ_SHARED_LINK_FLAGS"
+            cmake --build build-fuzz-harness --parallel
+          } 2>&1 | tee /tmp/build-fuzz-harness.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::Build fuzz harness failure (last 80 lines)"
+            tail -n 80 /tmp/build-fuzz-harness.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
 
       # libFuzzer reads seed corpus files directly out of a given directory, not
       # recursively - test/fixtures/**/*.ifc is nested (rules/, validate/, geom/, ...,
@@ -724,7 +744,17 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `### CI diagnostic: fuzz (${context.sha.slice(0, 8)})\n\nThe fuzz job failed - see the job's own step output for the libFuzzer crash report, and the "fuzz-crash-artifacts" workflow artifact for the minimized reproducer input.\n`;
+            const fs = require('fs');
+            let body = `### CI diagnostic: fuzz (${context.sha.slice(0, 8)})\n`;
+            if (fs.existsSync('/tmp/build-fuzz-harness.log')) {
+              const lines = fs.readFileSync('/tmp/build-fuzz-harness.log', 'utf8').split('\n').slice(-120).join('\n');
+              body += `\nThe fuzz job failed while building the fuzz harness:\n\n<details><summary>/tmp/build-fuzz-harness.log</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
+            } else {
+              body += `\nThe fuzz job failed after the harness built successfully - see the job's own step output for the libFuzzer crash report, and the "fuzz-crash-artifacts" workflow artifact for the minimized reproducer input.\n`;
+            }
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n... truncated';
+            }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
