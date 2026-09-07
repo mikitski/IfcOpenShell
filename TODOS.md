@@ -398,6 +398,19 @@ final exit-criterion items — intentionally narrow scope in a few documented wa
    CI runners, the fix is to raise `MAX_ALLOWED_TICK_GAP_MS` and/or `WALL_COUNT` (more setup work to
    guarantee a longer, more clearly-measurable parse duration), not to remove the test — flagged here
    so whoever investigates a flake starts from that assumption rather than re-deriving it.
+6. **The `asan-ubsan` job's `npm test` run has LeakSanitizer disabled (`ASAN_OPTIONS=detect_leaks=0`),
+   caught by code review before this PR shipped.** An earlier draft left `detect_leaks=1` on, matching
+   the reasoning already applied to the `fuzz` job's own standalone harness — but for `npm test`,
+   `LD_PRELOAD`-ing the ASan runtime intercepts `malloc` for the *entire* `node` process, not just the
+   addon's `.node` file, and LeakSanitizer's exit-time check has no way to attribute an unreclaimed
+   allocation to "the addon" vs. Node/V8's own long-lived steady-state allocations (ICU data, V8
+   heap/snapshot arenas, libuv buffers) that routinely aren't freed before process exit by design.
+   Left on, this would likely fail on every PR for reasons unrelated to any native bug the job exists
+   to catch. Memory-*corruption* detection (use-after-free, double-free, OOB read/write — ASan's
+   actual purpose in this job) is unaffected; leak-shaped bugs in the addon's own accounting are still
+   covered by `test/native/memory.test.ts`'s bounded-external-memory-growth soak test, and the `fuzz`
+   job's own small, fully ASan-linked standalone executable (no V8/ICU noise) keeps
+   `detect_leaks=1`, where it's actually reliable.
 
 **Why:** Each is real, understood, and bounded, matching the scope-discipline precedent set by every
 prior Phase 1 PR (ship a complete, well-reasoned slice; disclose the rest rather than force it in or
