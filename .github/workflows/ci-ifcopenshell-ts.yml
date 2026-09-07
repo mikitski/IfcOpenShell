@@ -717,19 +717,36 @@ jobs:
           done < <(find src/ifcopenshell-ts/test/fixtures -iname '*.ifc' -print0)
           echo "Seeded $(ls fuzz-corpus | wc -l) corpus files"
 
+      # Captured to a log file the same way "Build fuzz harness" above is - a bare,
+      # uncaptured `run:` here meant a failure at *this* step (as opposed to the build
+      # step) had no log for the diagnostic-comment step below to tail, so a crash or
+      # environment failure here was undiagnosable from the PR alone (caught during
+      # this PR's own CI bring-up: a real failure moved here after the harness-build
+      # fix landed, and the diagnostic comment misleadingly kept showing the - by then
+      # unrelated - successful build log instead). libFuzzer writes its crash
+      # report/stack trace to stderr, so `2>&1` before the pipe is required, not
+      # optional, for this log to be useful.
       - name: Run fuzz target (bounded time budget)
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
           LD_LIBRARY_PATH: ${{ github.workspace }}/install-fuzz/lib
         run: |
+          set -o pipefail
           mkdir -p fuzz-artifacts
           ./build-fuzz-harness/ifcopenshell_fuzz_parse \
             -max_total_time="$FUZZ_TIME_BUDGET_SECONDS" \
             -timeout=20 \
             -rss_limit_mb=4096 \
             -artifact_prefix=fuzz-artifacts/ \
-            fuzz-corpus
+            fuzz-corpus 2>&1 | tee /tmp/fuzz-run.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::Run fuzz target failure (last 200 lines)"
+            tail -n 200 /tmp/fuzz-run.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
 
       - name: Upload fuzz crash artifacts
         if: failure()
@@ -739,6 +756,13 @@ jobs:
           path: fuzz-artifacts/
           if-no-files-found: ignore
 
+      # Always includes whichever of the two log files this run actually produced,
+      # rather than picking one - a prior version of this step only ever checked/
+      # tailed the harness-build log, so once that build started succeeding and the
+      # real failure moved downstream to "Run fuzz target", the comment kept reporting
+      # a stale, misleadingly-successful build log instead of the actual failure
+      # (caught during this PR's own CI bring-up). Simplest robust fix: don't try to
+      # infer which step failed, just show every log that exists.
       - name: Post diagnostic log tail as PR comment on failure
         if: failure() && github.event.pull_request.number
         uses: actions/github-script@v7
@@ -746,12 +770,22 @@ jobs:
           script: |
             const fs = require('fs');
             let body = `### CI diagnostic: fuzz (${context.sha.slice(0, 8)})\n`;
-            if (fs.existsSync('/tmp/build-fuzz-harness.log')) {
-              const lines = fs.readFileSync('/tmp/build-fuzz-harness.log', 'utf8').split('\n').slice(-120).join('\n');
-              body += `\nThe fuzz job failed while building the fuzz harness:\n\n<details><summary>/tmp/build-fuzz-harness.log</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
-            } else {
-              body += `\nThe fuzz job failed after the harness built successfully - see the job's own step output for the libFuzzer crash report, and the "fuzz-crash-artifacts" workflow artifact for the minimized reproducer input.\n`;
+            const logs = [
+              ['/tmp/build-fuzz-harness.log', 'Build fuzz harness'],
+              ['/tmp/fuzz-run.log', 'Run fuzz target'],
+            ];
+            let any = false;
+            for (const [file, label] of logs) {
+              if (fs.existsSync(file)) {
+                any = true;
+                const lines = fs.readFileSync(file, 'utf8').split('\n').slice(-200).join('\n');
+                body += `\n<details><summary>${label} (${file})</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
+              }
             }
+            if (!any) {
+              body += '\n(no log files found - see the job\'s own step output)\n';
+            }
+            body += '\nSee the "fuzz-crash-artifacts" workflow artifact (if present) for the minimized reproducer input.\n';
             if (body.length > 60000) {
               body = body.slice(0, 60000) + '\n... truncated';
             }
