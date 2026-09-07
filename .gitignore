@@ -6,6 +6,14 @@
 /build/
 /build.log
 /output/
+# ci-ifcopenshell-ts.yml's asan-ubsan/fuzz jobs' own build/install trees (distinct
+# names from /build/ above so a sanitizer-instrumented build never collides with the
+# ordinary Release one when reproduced locally)
+/build-asan/
+/install-asan/
+/build-fuzz/
+/build-fuzz-harness/
+/install-fuzz/
 /src/examples/build/
 # ifctester docs output
 /src/ifctester/test/build/

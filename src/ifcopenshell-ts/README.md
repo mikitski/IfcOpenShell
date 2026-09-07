@@ -108,7 +108,13 @@ cmake -S native/fuzz -B build-fuzz \
   -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer-no-link,address,undefined -g -O1" \
   -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined"
 cmake --build build-fuzz
-./build-fuzz/ifcopenshell_fuzz_parse test/fixtures -max_total_time=60
+
+# libFuzzer scans a corpus directory non-recursively, but test/fixtures/ nests some
+# seeds under subdirectories (geom/, mvd_parsing/, units/, validate/) - flatten first
+# (same reason the CI `fuzz` job's own "Flatten seed corpus" step exists) or those
+# seeds are silently skipped.
+mkdir -p /tmp/fuzz-corpus && find test/fixtures -iname '*.ifc' -exec cp {} /tmp/fuzz-corpus/ \;
+./build-fuzz/ifcopenshell_fuzz_parse /tmp/fuzz-corpus -max_total_time=60
 ```
 
 ## Linting/formatting

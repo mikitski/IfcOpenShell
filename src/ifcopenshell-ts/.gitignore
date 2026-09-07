@@ -1,3 +1,5 @@
 node_modules/
 dist/
 native/build/
+# README.md's local fuzz-harness repro command (run from this directory)
+build-fuzz/

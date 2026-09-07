@@ -93,9 +93,13 @@ describe("Phase 1 async primitive layer: event-loop liveness under load", () => 
 		expect(tickGaps.length).toBeGreaterThan(0);
 		const maxGap = Math.max(...tickGaps);
 		expect(maxGap).toBeLessThan(MAX_ALLOWED_TICK_GAP_MS);
-		// Belt-and-braces version of the same assertion, robust even if
-		// MAX_ALLOWED_TICK_GAP_MS ever needs relaxing for CI noise: the largest gap must
-		// stay a small fraction of the parse's own duration, not comparable to it.
-		expect(maxGap).toBeLessThan(Math.max(MAX_ALLOWED_TICK_GAP_MS, parseDuration * 0.5));
+		// Complementary assertion scaled to this run's own measured parse duration
+		// instead of the fixed constant above -- written against `parseDuration` alone
+		// (not wrapped in a max() with MAX_ALLOWED_TICK_GAP_MS, which would make this
+		// always true whenever the assertion above already passed, and so add no real
+		// coverage): the largest gap must stay a small fraction of the parse's own
+		// duration, not comparable to it, independent of whatever the fixed constant is
+		// currently tuned to.
+		expect(maxGap).toBeLessThan(parseDuration * 0.5);
 	}, 30_000);
 });
