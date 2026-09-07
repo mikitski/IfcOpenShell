@@ -349,3 +349,373 @@ jobs:
               issue_number: context.payload.pull_request.number,
               body,
             });
+
+  # Phase 1 exit criterion (planning/ifcopenshell-ts/20-roadmap.md) "(a)": the native
+  # addon test build runs under AddressSanitizer/UndefinedBehaviorSanitizer in CI - a
+  # native memory bug here (use-after-free, double-free, OOB read/write, ...) doesn't
+  # throw catchably like a JS exception, it segfaults the whole Node process, and this
+  # is the one bug class a passing (non-sanitized) TS test suite structurally cannot
+  # catch.
+  #
+  # Scoped to Linux x64 only, not the full 6-way OS x arch matrix build-and-test uses:
+  # sanitizers are best-supported and most CI-proven on Linux/glibc + gcc or clang.
+  # Confirmed locally (this PR's own sandbox) that Apple clang's ASan runtime on a
+  # sufficiently new macOS release fails during its own process-init malloc-zone setup
+  # for a plain, bug-free "hello world" - i.e. a macOS ASan leg would need its own,
+  # separately-debugged toolchain/OS-version pairing before it could be trusted not to
+  # produce false failures, which is real, non-trivial extra scope. MSVC's ASan
+  # support for a project this size with a Node addon in the mix is a bigger lift
+  # again. Since the C++ core and addon source are identical across every OS, a memory
+  # bug this job catches on Linux is the same bug on Windows/macOS - it just isn't
+  # *caught* there without also sanitizing those legs, which is a reasonable,
+  # disclosed follow-up (see TODOS.md) rather than required for this exit criterion.
+  asan-ubsan:
+    needs: activate
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-22.04
+    env:
+      CLICOLOR_FORCE: "1"
+      CMAKE_COLOR_DIAGNOSTICS: "ON"
+      INSTALL_PREFIX: ${{ github.workspace }}/install-asan
+      # Both compile AND link flags, on both the C++ core and the addon below - the
+      # single easiest way to silently misconfigure a sanitizer CI job (per this PR's
+      # own scope) is sanitizing only some of the linked code, e.g. compile flags
+      # without matching link flags, or the core without the addon. `-O1` (not `-O0`
+      # or a Release-level `-O2`/`-O3`): ASan's own docs recommend at least light
+      # optimization so its interceptors don't dominate runtime, while still keeping
+      # stack traces meaningful - matches common ASan CI practice.
+      SANITIZE_FLAGS: -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g -O1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            cmake \
+            libboost-date-time-dev \
+            libboost-iostreams-dev \
+            libboost-program-options-dev \
+            libboost-regex-dev \
+            libboost-thread-dev \
+            libeigen3-dev
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ifcopenshell-ts-asan-ubsan-linux-x64
+
+      # Distinct cache key from build-and-test's ("ifcopenshell-ts-core-linux-x64-...")
+      # - an ASan/UBSan-instrumented install tree is NOT interchangeable with the
+      # plain Release one build-and-test caches (different compiler flags at both
+      # compile AND link time produce a different, differently-behaving binary,
+      # notably a different malloc via ASan's allocator). Reusing the same key would
+      # silently feed this job a non-instrumented core on a cache hit - exactly the
+      # "sanitizing only some of the linked libraries" misconfiguration this job
+      # exists to avoid. See build-and-test's own cache-restore step above for why the
+      # restore/save split is used instead of the combined actions/cache@v4 action.
+      - name: Restore cached ASan/UBSan IfcOpenShell C++ core
+        id: cache-core
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: >-
+            ifcopenshell-ts-core-asan-linux-x64-${{
+            hashFiles('src/ifcparse/**', 'src/plugin/**', 'cmake/**', '.github/workflows/ci-ifcopenshell-ts.yml') }}
+
+      - name: Configure and install IfcOpenShell core (ASan/UBSan)
+        id: core-asan
+        if: steps.cache-core.outputs.cache-hit != 'true'
+        run: |
+          cmake -S cmake -B build-asan \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_FLAGS="$SANITIZE_FLAGS" \
+            -DCMAKE_CXX_FLAGS="$SANITIZE_FLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DSCHEMA_VERSIONS=4 \
+            -DBUILD_IFCGEOM=OFF \
+            -DBUILD_IFCPYTHON=OFF \
+            -DBUILD_CONVERT=OFF \
+            -DBUILD_GEOMSERVER=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_CGAL=OFF \
+            -DWITH_OPENCASCADE=OFF \
+            -DCOLLADA_SUPPORT=OFF
+          cmake --build build-asan --target install --parallel
+
+      - name: Save ASan/UBSan IfcOpenShell C++ core cache
+        if: >-
+          steps.cache-core.outputs.cache-hit != 'true' &&
+          steps.core-asan.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: ${{ steps.cache-core.outputs.cache-primary-key }}
+
+      - name: npm ci
+        working-directory: src/ifcopenshell-ts
+        run: npm ci
+
+      - name: Build native addon (ASan/UBSan)
+        working-directory: src/ifcopenshell-ts
+        run: |
+          set -o pipefail
+          npm run build:native -- \
+            --CDCMAKE_PREFIX_PATH="$INSTALL_PREFIX" \
+            --CDCMAKE_C_FLAGS="$SANITIZE_FLAGS" \
+            --CDCMAKE_CXX_FLAGS="$SANITIZE_FLAGS" \
+            --CDCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
+            2>&1 | tee /tmp/build-native-asan.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::build:native (ASan/UBSan) failure (last 80 lines)"
+            tail -n 80 /tmp/build-native-asan.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
+
+      - name: Build TS
+        working-directory: src/ifcopenshell-ts
+        run: npm run build:ts
+
+      - name: Add installed libraries to the runtime search path
+        run: echo "LD_LIBRARY_PATH=$INSTALL_PREFIX/lib" >> "$GITHUB_ENV"
+
+      - name: npm test (under AddressSanitizer/UndefinedBehaviorSanitizer)
+        working-directory: src/ifcopenshell-ts
+        env:
+          # `verify_asan_link_order=0`: node itself is not ASan-instrumented, only the
+          # addon `.node` file loaded into it via dlopen() is - ASan's default
+          # link-order check assumes its own runtime is the first shared object a
+          # process loads, which is never true for a runtime that arrives via
+          # LD_PRELOAD ahead of a plain, non-instrumented `node` binary.
+          # `detect_leaks=1`: scoped to what the addon's own native primitives
+          # allocate/free, exercised directly by the primitive test suite - Node/V8's
+          # own steady-state allocations are long-lived by design and not the target
+          # of this job.
+          ASAN_OPTIONS: detect_leaks=1:verify_asan_link_order=0:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+        run: |
+          ASAN_RT="$(gcc -print-file-name=libasan.so)"
+          echo "Preloading ASan runtime: $ASAN_RT"
+          LD_PRELOAD="$ASAN_RT" npm test
+
+      - name: Post diagnostic log tail as PR comment on failure
+        if: failure() && github.event.pull_request.number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const files = ['src/ifcopenshell-ts/build-native.log', '/tmp/build-native-asan.log'];
+            let body = `### CI diagnostic: asan-ubsan (${context.sha.slice(0, 8)})\n`;
+            let any = false;
+            for (const f of files) {
+              if (fs.existsSync(f)) {
+                any = true;
+                const lines = fs.readFileSync(f, 'utf8').split('\n').slice(-120).join('\n');
+                body += `\n<details><summary>${f}</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
+              }
+            }
+            if (!any) {
+              body += '\n(no log files found - see the job\'s own step output for the ASan/UBSan report)\n';
+            }
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n... truncated';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
+
+  # Phase 1 exit criterion "(b)": fuzz test the file-open/parse primitives,
+  # corpus-seeded from `test/fixtures/**/*.ifc`, against malformed input - this is a
+  # Node-only (server-side) library, and a plausible real deployment is a web service
+  # parsing user-uploaded `.ifc` files, the same untrusted-file-parsing attack surface
+  # that routinely produces CVEs in PDF/image parsers. See
+  # src/ifcopenshell-ts/native/fuzz/fuzz_parse.cpp for the harness itself and
+  # src/ifcopenshell-ts/native/fuzz/CMakeLists.txt for why it's a separate CMake
+  # project from the Node addon rather than a target bolted onto it.
+  #
+  # This is a CI regression check bounded to FUZZ_TIME_BUDGET_SECONDS below, not a
+  # fuzzing campaign - a longer/scheduled campaign against a persistent corpus is a
+  # disclosed, out-of-scope follow-up (see TODOS.md). Linux x64 only, same reasoning
+  # as asan-ubsan above, plus libFuzzer (`-fsanitize=fuzzer`) itself is a clang-only
+  # feature with no GCC equivalent. This job's own "Check clang supports
+  # -fsanitize=fuzzer" step below exists specifically because that support can't be
+  # taken for granted: this PR's own macOS development sandbox has Apple clang, but
+  # its toolchain lacks the fuzzer runtime archive entirely (`clang++
+  # -fsanitize=fuzzer ...` fails at link with "libclang_rt.fuzzer_osx.a not found") -
+  # a real local-verification gap disclosed in TODOS.md, not something this PR could
+  # confirm before relying on Ubuntu's apt-installed clang here instead.
+  fuzz:
+    needs: activate
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-22.04
+    env:
+      CLICOLOR_FORCE: "1"
+      CMAKE_COLOR_DIAGNOSTICS: "ON"
+      INSTALL_PREFIX: ${{ github.workspace }}/install-fuzz
+      CC: clang
+      CXX: clang++
+      # `-fsanitize=fuzzer-no-link` (not the full `-fsanitize=fuzzer`) for the C++
+      # core: adds SanitizerCoverage edge-coverage instrumentation to IfcParse/the
+      # schema plugins - without this, the fuzzer only sees coverage feedback from the
+      # few lines of harness code in fuzz_parse.cpp, not from the actual
+      # parser/tokenizer logic those calls run, which would make it effectively blind
+      # (OSS-Fuzz's own build convention for exactly this reason). The full
+      # `-fsanitize=fuzzer` (pulls in libFuzzer's `main()` and runtime) is added only
+      # at the fuzz harness executable's own final link, below - never to the core's
+      # shared libraries, which must never define `main()`.
+      FUZZ_COMPILE_FLAGS: -fsanitize=fuzzer-no-link,address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g -O1
+      FUZZ_SHARED_LINK_FLAGS: -fsanitize=address,undefined
+      FUZZ_EXE_LINK_FLAGS: -fsanitize=fuzzer,address,undefined
+      FUZZ_TIME_BUDGET_SECONDS: "90"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            cmake \
+            clang \
+            libboost-date-time-dev \
+            libboost-iostreams-dev \
+            libboost-program-options-dev \
+            libboost-regex-dev \
+            libboost-thread-dev \
+            libeigen3-dev
+
+      - name: Check clang supports -fsanitize=fuzzer (libFuzzer)
+        run: |
+          echo 'extern "C" int LLVMFuzzerTestOneInput(const unsigned char* d, unsigned long s){return 0;}' > /tmp/check_fuzzer_support.cc
+          clang++ -fsanitize=fuzzer,address,undefined /tmp/check_fuzzer_support.cc -o /tmp/check_fuzzer_support
+          echo "libFuzzer available"
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ifcopenshell-ts-fuzz-linux-x64
+
+      # Distinct cache key again (see asan-ubsan's own comment above) - this install
+      # tree carries `-fsanitize=fuzzer-no-link` coverage instrumentation neither the
+      # plain build-and-test core nor the asan-ubsan core has.
+      - name: Restore cached fuzz-instrumented IfcOpenShell C++ core
+        id: cache-core
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: >-
+            ifcopenshell-ts-core-fuzz-linux-x64-${{
+            hashFiles('src/ifcparse/**', 'src/plugin/**', 'cmake/**', '.github/workflows/ci-ifcopenshell-ts.yml') }}
+
+      - name: Configure and install IfcOpenShell core (fuzz-instrumented)
+        id: core-fuzz
+        if: steps.cache-core.outputs.cache-hit != 'true'
+        run: |
+          cmake -S cmake -B build-fuzz \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_FLAGS="$FUZZ_COMPILE_FLAGS" \
+            -DCMAKE_CXX_FLAGS="$FUZZ_COMPILE_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="$FUZZ_SHARED_LINK_FLAGS" \
+            -DSCHEMA_VERSIONS=4 \
+            -DBUILD_IFCGEOM=OFF \
+            -DBUILD_IFCPYTHON=OFF \
+            -DBUILD_CONVERT=OFF \
+            -DBUILD_GEOMSERVER=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_CGAL=OFF \
+            -DWITH_OPENCASCADE=OFF \
+            -DCOLLADA_SUPPORT=OFF
+          cmake --build build-fuzz --target install --parallel
+
+      - name: Save fuzz-instrumented IfcOpenShell C++ core cache
+        if: >-
+          steps.cache-core.outputs.cache-hit != 'true' &&
+          steps.core-fuzz.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: ${{ steps.cache-core.outputs.cache-primary-key }}
+
+      - name: Build fuzz harness
+        run: |
+          cmake -S src/ifcopenshell-ts/native/fuzz -B build-fuzz-harness \
+            -DCMAKE_PREFIX_PATH="$INSTALL_PREFIX" \
+            -DCMAKE_CXX_FLAGS="$FUZZ_COMPILE_FLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="$FUZZ_EXE_LINK_FLAGS"
+          cmake --build build-fuzz-harness --parallel
+
+      # libFuzzer reads seed corpus files directly out of a given directory, not
+      # recursively - test/fixtures/**/*.ifc is nested (rules/, validate/, geom/, ...,
+      # mirroring ifcopenshell-python's own layout per
+      # planning/ifcopenshell-ts/40-testing-strategy.md SS2/SS3), so flatten it into one
+      # directory of uniquely-named copies just for this run rather than restructuring
+      # the checked-in fixture tree to suit libFuzzer.
+      - name: Flatten seed corpus
+        run: |
+          mkdir -p fuzz-corpus
+          i=0
+          while IFS= read -r -d '' f; do
+            i=$((i + 1))
+            cp "$f" "fuzz-corpus/seed_${i}_$(basename "$f")"
+          done < <(find src/ifcopenshell-ts/test/fixtures -iname '*.ifc' -print0)
+          echo "Seeded $(ls fuzz-corpus | wc -l) corpus files"
+
+      - name: Run fuzz target (bounded time budget)
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:abort_on_error=1:print_stacktrace=1
+          LD_LIBRARY_PATH: ${{ github.workspace }}/install-fuzz/lib
+        run: |
+          mkdir -p fuzz-artifacts
+          ./build-fuzz-harness/ifcopenshell_fuzz_parse \
+            -max_total_time="$FUZZ_TIME_BUDGET_SECONDS" \
+            -timeout=20 \
+            -rss_limit_mb=4096 \
+            -artifact_prefix=fuzz-artifacts/ \
+            fuzz-corpus
+
+      - name: Upload fuzz crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-artifacts
+          path: fuzz-artifacts/
+          if-no-files-found: ignore
+
+      - name: Post diagnostic log tail as PR comment on failure
+        if: failure() && github.event.pull_request.number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### CI diagnostic: fuzz (${context.sha.slice(0, 8)})\n\nThe fuzz job failed - see the job's own step output for the libFuzzer crash report, and the "fuzz-crash-artifacts" workflow artifact for the minimized reproducer input.\n`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
