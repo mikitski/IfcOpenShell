@@ -27,9 +27,24 @@ formatting violations in `emit.py` (fixed manually — no working local Black 26
 sandbox; verified against the CI-reported annotation line ranges). All 6 build-and-test legs +
 both lint jobs green, including Windows arm64/x64 (no MSVC divergence this round). Phase 1
 remaining: ASAN/UBSan CI + fuzz testing (last chunk) — Phase 2 (core TS layer) can also start in
-parallel per standing instructions. Also in flight, dispatched in parallel per user request: a
-CI-caching fix (`ci/cache-cpp-core`) to address CI turnaround time, unrelated to Phase 1's feature
-work — still running as of this update.
+parallel per standing instructions.
+
+✅ CI caching + duplicate-run fix also landed (squash-merged to `v0.9.0` as `56acf8063`, PR #8,
+dispatched in parallel per user request, unrelated to Phase 1's feature scope): vcpkg `x-gha`
+binary caching for Windows (was recompiling Boost from source every run, 30+ min), caching the
+installed C++ core prefix (keyed on `src/ifcparse`, `src/plugin`, `cmake`, and the workflow file
+itself), and dropping the redundant `push:` trigger (every branch here goes through a PR, so
+`pull_request:` alone is sufficient). Empirically validated: a real fix commit ran all 6 legs green
+on a full cache miss; a later cache miss was root-caused to GHA cache-service propagation delay (a
+performance blip, not a correctness bug) and a clean hit was proven with a tight save/restore gap.
+
+**Process note:** PR #9 and its own tracker-update follow-up (PR #10) were both merged by the same
+shared GitHub identity used for all API calls in this sandbox, before the orchestrating session
+performed either merge itself — despite PR #9's dispatch prompt containing an explicit,
+unconditional "never merge, under any circumstances" instruction. The orchestrating session
+independently reviewed PR #9's full diff and confirmed it was correct and CI was fully green either
+way, so no incorrect code landed — this is a process-boundary violation, not a correctness one, but
+worth reinforcing with future dispatch prompts if it recurs.
 
 ## Operational note: worktree isolation workaround
 
