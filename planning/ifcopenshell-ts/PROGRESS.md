@@ -14,45 +14,41 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ **Phase 1 is complete.** Its last chunk — ASan/UBSan CI + a real libFuzzer harness +
-event-loop-liveness testing — landed (squash-merged to `v0.9.0` as `9d0dda897`), on top of the
-previously-landed native memory accounting (`abeb57ee7`) and async primitive variants
-(`80f784c22`). This was the highest-yield chunk of Phase 1 by far: standing up genuinely new CI
-surface (no ASan/UBSan or libFuzzer job existed anywhere in this repo before) immediately surfaced
-3 real, fixed bugs in the shared C++ core (used by `ifcopenshell-python` too, not just this TS
-port) and 1 much larger, deliberately-deferred systemic finding:
+✅ **Phase 1 is complete** (landed `9d0dda897`, `dc7c890ee`). Its last chunk — ASan/UBSan CI + a
+real libFuzzer harness + event-loop-liveness testing — was the highest-yield chunk of the phase:
+standing up genuinely new CI surface (no ASan/UBSan or libFuzzer job existed anywhere in this repo
+before) immediately surfaced 3 real, fixed bugs in the shared C++ core (a `spf_header` memory leak;
+the Rule-of-Five heap-use-after-free that fix itself exposed, closed with full deep-copy/move
+semantics; a `token::to_string()`/`as_string()` stack-overflow from unbounded mutual recursion,
+root-caused and closed for all 10 `token_type` values, not band-aided) and 1 much larger,
+deliberately-deferred systemic finding (regular DATA-section entities never freed anywhere in
+`src/ifcparse` — investigated, confirmed systemic, `detect_leaks=0` on the `fuzz` job per explicit
+user direction, fully documented in `TODOS.md` for whoever picks up that ownership-model fix next).
 
-1. A real memory leak in `spf_header` (header-entity `instance_data*` pointers never freed) —
-   fixed with a small `free_header_entity()` helper.
-2. A heap-use-after-free that fix (1) itself exposed — declaring a real destructor suppressed the
-   implicit move constructor but left the implicit *shallow-copy* constructor in place, so a
-   caller-owned `spf_header` snapshot aliased the file's own persistent header entities. Fixed with
-   full, correct Rule-of-Five semantics (real deep-copy via the existing `assign()`, real move with
-   source-nulling) — also incidentally fixed 3 more latent instances of the same bug elsewhere.
-3. A stack-overflow from unbounded mutual recursion between `token::to_string()`/`as_string()` for
-   two token kinds neither function had a base case for — root-caused and fixed directly (verified
-   exhaustively across all 10 `token_type` values, not just the fuzzer's one hit), not
-   band-aided with a depth guard.
-4. **Deferred, not fixed**: regular (DATA-section, id != 0) `instance_data*` entities are never
-   freed anywhere in `src/ifcparse` — no destructor on `in_memory_file_storage`, an empty
-   `file::~file()`, and even explicit `remove_entity()` only erases the map entry. Investigated,
-   confirmed systemic (not a narrow one-off like the header-entity case), and — per explicit user
-   direction after the agent correctly stopped rather than risk another double-free — deferred:
-   `detect_leaks=0` on the `fuzz` job (crash/UB detection, the job's actual purpose, is
-   unaffected), fully documented in `TODOS.md` as a substantial, dedicated entry for whoever picks
-   up that ownership-model fix next. This job is now a ready-made regression check for it.
+✅ **Phase 2's first chunk — `IfcFile`/`EntityInstance` foundation — landed** (squash-merged to
+`v0.9.0` as `6b9963954`). Near-verbatim port of `file_mixin`/`entity_instance_mixin`: the
+identity-keyed (`file_pointer()`) `Transaction`/undo-redo registry (per
+`research/07-fresh-wrapper-per-access.md`'s confirmed finding — every native accessor mints a
+fresh JS wrapper, so `EntityInstance.equals()` compares via `identity()`, never `===`), the full
+`.get()`/`.set()` attribute-access escape hatch implementing the real forward/inverse/category
+dispatch (designed for the next chunk's `Proxy` to wrap directly), `getInfo()`, `guid.ts`/
+`settings.ts`/`template.ts`, and the `createTestFile()` bootstrap fixture every later phase's tests
+build on. Two small new N-API primitives added along the way (`file_pointer()`,
+`traverse()`/`traverse_breadth_first()` on `entity_instance` — previously unexposed only because
+wrappergen's clang frontend skips static methods). One CI flake hit and resolved: Windows x64
+failed at the pre-existing "Install build dependencies" vcpkg step (unrelated to this PR's own
+code); confirmed transient by re-running — Windows arm64 passed on the same commit/step first
+attempt, and Windows x64 passed clean on retrigger. **Next chunk: the `Proxy`-based dynamic
+attribute access + the schema-driven `.d.ts` generator** (`10-architecture.md` §6) — explicitly
+flagged there as needing to be scheduled early in Phase 2, not deferred.
 
-All 6 build-and-test legs, both lint jobs, `build-ifcopenshell` (the core C++ suite), `asan-ubsan`,
-and `fuzz` all green on the final commit. **Phase 2 (core TS layer) is now unblocked and should be
-the next chunk dispatched**, per the standing instruction to continue without stopping.
-
-Also landed in this window, in parallel: the CI-caching fix (`#8`, `56acf8063`) — cache the C++
-core build, drop the duplicate `push` trigger. Flagged for the user: this PR's merge could not be
-attributed to an explicit action by the orchestrating session; the responsible agent did not give a
-clear, direct confirmation when asked twice whether it self-merged (which its instructions
-explicitly and absolutely forbade). The PR's actual content was independently reviewed and found
-technically sound, so nothing is currently broken, but this is an open trust/process concern for
-that agent specifically, not resolved as of this update.
+Also resolved this window: the CI-caching PR's (`#8`, `56acf8063`) merge initially looked
+untraceable to any action by the orchestrating session and was raised as an open trust/process
+concern in an earlier revision of this note. The user investigated independently and confirmed it
+was neither a rogue self-merge by the dispatched agent nor a human merging by hand — some other
+legitimate mechanism outside this session's visibility. **Resolved, not an ongoing issue** (noted
+in the orchestrating session's own memory for future reference, in case a similar situation
+recurs).
 
 ## Operational note: worktree isolation workaround
 
@@ -96,11 +92,11 @@ binding could be built, since it decided generated-vs-hand-written.
 
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
-| "Fresh wrapper per access" identity spike (blocks rest of phase) | 🔲 | — | — |
-| `IfcFile` (`file_mixin` port, incl. `dispose()`) | 🔲 | — | — |
-| `EntityInstance` (Proxy + attribute-metadata cache) | 🔲 | — | — |
+| "Fresh wrapper per access" identity spike (blocks rest of phase) | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Resolved empirically during Phase 1's primitive-binding chunk — **fresh wrapper, confirmed**. See `research/07-fresh-wrapper-per-access.md`. |
+| `IfcFile` (`file_mixin` port, incl. `dispose()`) | ✅ | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | Landed `6b9963954`. Identity-keyed `Transaction`/undo-redo registry, full `Transaction` port, `createEntity`/`add`/`byType`/`traverse`/`getInverse`/`remove`/`batch`/`write`/`[Symbol.iterator]`/`dispose()` (delegates to Phase 1's native `dispose()`). New `file_pointer()` primitive added for the registry key. |
+| `EntityInstance` (Proxy + attribute-metadata cache) | 🔄 | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | **Foundation only, landed** `6b9963954`: `identity()`/`isA()`/`equals()` (via `identity()`, never `===`, per the spike above), explicit `.get()`/`.set()` implementing the real forward/inverse/category dispatch, `getInfo()`, `walk()`. **Remaining, next chunk**: the `Proxy`-based dynamic attribute access wrapping `.get()`/`.set()`, and the attribute-metadata cache — `10-architecture.md` §6 flags this as needing to start early in Phase 2, not deferred. |
 | `.d.ts` generator (or hand-written fallback for high-traffic classes) | 🔲 | — | — |
-| `guid.ts`, `settings.ts`, `template.ts` | 🔲 | — | — |
+| `guid.ts`, `settings.ts`, `template.ts` | ✅ | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | Landed `6b9963954` alongside `IfcFile`/`EntityInstance`. |
 | Differential cache-correctness test (all 3 schema versions) | 🔲 | — | — |
 
 ## Phase 2.5 — Alpha checkpoint ⏸️ npm-publish confirmation required
