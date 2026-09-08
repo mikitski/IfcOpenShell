@@ -21,3 +21,11 @@ export { EntityInstance, AttributeCategory } from "./entityInstance";
 export { settings } from "./settings";
 export * as guid from "./guid";
 export * as template from "./template";
+
+// This chunk (planning/ifcopenshell-ts/10-architecture.md SS6): the attribute-metadata
+// cache backing `EntityInstance`'s `Proxy` (re-exported mainly for the differential
+// cache-correctness test, `test/attributeCache.test.ts`, and for anyone wanting the raw
+// `AttributeMeta` shape directly) and the schema-driven `.d.ts` generator's typed
+// output namespaces (`tools/generate-dts.ts` -> `src/generated/*.d.ts`).
+export type { AttributeMeta, ClassAttributeCache } from "./attributeCache";
+export { getClassAttributeMeta } from "./attributeCache";

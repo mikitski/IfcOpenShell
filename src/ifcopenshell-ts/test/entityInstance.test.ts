@@ -98,6 +98,38 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 		expect(inverse[0].equals(rel)).toBe(true);
 	});
 
+	test(".get() inverse attribute resolution is scoped by declared entity_reference type, not just attribute name (regression, found by /code-review)", () => {
+		// "RelatedObjects" is independently declared (same name, unrelated types) on
+		// both IfcRelAggregates and IfcRelDefinesByProperties -- IfcObject.IsDefinedBy
+		// is declared with entity_reference scoped to IfcRelDefinesByType/
+		// IfcRelDefinesByProperties only, so a wall aggregated into an assembly AND
+		// defined by a property set must resolve IsDefinedBy to just the latter, not
+		// both. An earlier implementation matched inverse candidates by attribute name
+		// alone and incorrectly included the IfcRelAggregates too.
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+
+		const parent = file.createEntity("IfcElementAssembly");
+		const agg = file.createEntity("IfcRelAggregates");
+		agg.set("RelatingObject", parent);
+		agg.set("RelatedObjects", [wall]);
+
+		const pset = file.createEntity("IfcPropertySet");
+		const rel = file.createEntity("IfcRelDefinesByProperties");
+		rel.set("RelatingPropertyDefinition", pset);
+		rel.set("RelatedObjects", [wall]);
+
+		const isDefinedBy = wall.get("IsDefinedBy") as EntityInstance[];
+		expect(isDefinedBy).toHaveLength(1);
+		expect(isDefinedBy[0].equals(rel)).toBe(true);
+
+		// Meanwhile Decomposes (IfcObjectDefinition's inverse for IfcRelAggregates
+		// specifically) must resolve to the aggregation relationship only.
+		const decomposes = wall.get("Decomposes") as EntityInstance[];
+		expect(decomposes).toHaveLength(1);
+		expect(decomposes[0].equals(agg)).toBe(true);
+	});
+
 	test(".get() throws for an unknown attribute name", () => {
 		const file = newFile();
 		const wall = file.createEntity("IfcWall");
