@@ -191,14 +191,14 @@ struct ifcopenshell_enumeration_type_list_t {
     std::vector<ifcopenshell::enumeration_type*> value;
 };
 
-struct ifcopenshell_express_entity_list_t {
-    std::shared_ptr<ifcopenshell::file> owner;
-    std::vector<express::entity> value;
-};
-
 struct ifcopenshell_express_base_list_t {
     std::shared_ptr<ifcopenshell::file> owner;
     std::vector<express::base> value;
+};
+
+struct ifcopenshell_express_entity_list_t {
+    std::shared_ptr<ifcopenshell::file> owner;
+    std::vector<express::entity> value;
 };
 
 ifcopenshell_attribute_value_variant_t ifcopenshell_attribute_value_variant_from_native(const ifcopenshell::wrappergen::attribute_value_variant& native, std::shared_ptr<ifcopenshell::file> owner) {
@@ -1518,6 +1518,34 @@ ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return {};
+    }
+}
+
+ifcopenshell_express_base_list_t* ifcopenshell_base_traverse(ifcopenshell_express_base_t* handle, int max_depth) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::traverse(handle->value, max_depth);
+        return new ifcopenshell_express_base_list_t{ handle->owner, std::move(result) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+ifcopenshell_express_base_list_t* ifcopenshell_base_traverse_breadth_first(ifcopenshell_express_base_t* handle, int max_depth) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::traverse_breadth_first(handle->value, max_depth);
+        return new ifcopenshell_express_base_list_t{ handle->owner, std::move(result) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
     }
 }
 
@@ -3322,6 +3350,23 @@ void ifcopenshell_file_write(ifcopenshell_file_t* handle, const char* path) {
     }
 }
 
+char* ifcopenshell_file_file_pointer(ifcopenshell_file_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        if (handle->disposed) {
+            throw std::runtime_error("file has already been disposed");
+        }
+        auto result = ifcopenshell::wrappergen::file_pointer(*handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
 ifcopenshell_global_id_t* ifcopenshell_global_id_new() {
     ifcopenshell_last_error_clear();
     try {
@@ -3584,40 +3629,6 @@ void ifcopenshell_enumeration_type_list_free(ifcopenshell_enumeration_type_list_
     delete handle;
 }
 
-int ifcopenshell_express_entity_list_size(const ifcopenshell_express_entity_list_t* handle) {
-    ifcopenshell_last_error_clear();
-    try {
-        if (handle == nullptr) {
-            throw std::runtime_error("Null list handle received");
-        }
-        return static_cast<int>(handle->value.size());
-    } catch (const std::exception& exception) {
-        set_last_error(exception);
-        return 0;
-    }
-}
-
-ifcopenshell_express_entity_t* ifcopenshell_express_entity_list_get(const ifcopenshell_express_entity_list_t* handle, int index) {
-    ifcopenshell_last_error_clear();
-    try {
-        if (handle == nullptr) {
-            throw std::runtime_error("Null list handle received");
-        }
-        if (index < 0 || static_cast<size_t>(index) >= handle->value.size()) {
-            throw std::out_of_range("List index out of range");
-        }
-        auto item_value = handle->value.at(static_cast<size_t>(index));
-        return new ifcopenshell_express_entity_t{ handle->owner, std::move(item_value) };
-    } catch (const std::exception& exception) {
-        set_last_error(exception);
-        return nullptr;
-    }
-}
-
-void ifcopenshell_express_entity_list_free(ifcopenshell_express_entity_list_t* handle) {
-    delete handle;
-}
-
 int ifcopenshell_express_base_list_size(const ifcopenshell_express_base_list_t* handle) {
     ifcopenshell_last_error_clear();
     try {
@@ -3649,6 +3660,40 @@ ifcopenshell_express_base_t* ifcopenshell_express_base_list_get(const ifcopenshe
 }
 
 void ifcopenshell_express_base_list_free(ifcopenshell_express_base_list_t* handle) {
+    delete handle;
+}
+
+int ifcopenshell_express_entity_list_size(const ifcopenshell_express_entity_list_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null list handle received");
+        }
+        return static_cast<int>(handle->value.size());
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return 0;
+    }
+}
+
+ifcopenshell_express_entity_t* ifcopenshell_express_entity_list_get(const ifcopenshell_express_entity_list_t* handle, int index) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null list handle received");
+        }
+        if (index < 0 || static_cast<size_t>(index) >= handle->value.size()) {
+            throw std::out_of_range("List index out of range");
+        }
+        auto item_value = handle->value.at(static_cast<size_t>(index));
+        return new ifcopenshell_express_entity_t{ handle->owner, std::move(item_value) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+void ifcopenshell_express_entity_list_free(ifcopenshell_express_entity_list_t* handle) {
     delete handle;
 }
 

@@ -276,7 +276,13 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
     `get_attribute_value_variant`/`set_attribute_value_variant`, extended to the rest of
     the entity_instance surface `attribute_value_shim.h`/`.cpp` now also implements:
     `attribute_kind_of`, `get_argument_index`, `attribute_name`, `attribute_type`,
-    `get_attribute_category`, `is_a`, `get_all_attribute_values`.
+    `get_attribute_category`, `is_a`, `get_all_attribute_values`, plus `traverse`/
+    `traverse_breadth_first` -- unlike the rest of this list, these two are thin
+    pass-throughs to real, existing `ifcopenshell::file::traverse`/
+    `traverse_breadth_first` static methods (file.h), not SWIG-only glue; they were
+    missing only because `clang_frontend.py`'s `_discover_methods` unconditionally
+    skips static methods (`if child.is_static_method(): continue`), so the same
+    free-function injection technique picks them up here.
 
     Deliberately NOT injected here (disclosed scope cut, not an oversight):
     `get_attribute_names`/`get_inverse_attribute_names` (`std::vector<std::string>`
@@ -383,6 +389,26 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
         return_cpp_type=f"std::vector<{variant_adapter.cpp_type}>",
         return_adapter=sequence_of_variant_adapter_name,
     )
+    max_depth_parameter = ParameterModel(name="max_depth", cpp_name="max_depth", cpp_type="int", adapter="integer")
+    entity_instance_sequence_adapter = f"sequence:{entity_instance.cpp_name}"
+    traverse = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::traverse",
+        "traverse",
+        "traverse",
+        [max_depth_parameter],
+        return_cpp_type=f"std::vector<{entity_instance.cpp_name}>",
+        return_adapter=entity_instance_sequence_adapter,
+    )
+    traverse_breadth_first = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::traverse_breadth_first",
+        "traverse_breadth_first",
+        "traverse_breadth_first",
+        [max_depth_parameter],
+        return_cpp_type=f"std::vector<{entity_instance.cpp_name}>",
+        return_adapter=entity_instance_sequence_adapter,
+    )
 
     entity_instance.callables.extend(
         [
@@ -395,15 +421,19 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
             get_attribute_category,
             is_a,
             get_all_attribute_values,
+            traverse,
+            traverse_breadth_first,
         ]
     )
 
 
 def _inject_file_primitives(model) -> None:
-    """Appends the one `ifcopenshell::file`-level primitive this PR's async work needs
-    that only exists as SWIG `%extend` glue today (`file_shim.h`/`.cpp`'s `write_file`,
-    TODOS.md's "Phase 1 primitive binding" gap #2): `write`. Same injection technique
-    `_inject_entity_instance_primitives` already established for `express::base`.
+    """Appends the `ifcopenshell::file`-level primitives that only exist as SWIG
+    `%extend` glue today (`file_shim.h`/`.cpp`, TODOS.md's "Phase 1 primitive binding"
+    gap #2): `write` (needed by the async work) and `file_pointer` (Phase 2's
+    `IfcFile`-level identity key, `research/07-fresh-wrapper-per-access.md`). Same
+    injection technique `_inject_entity_instance_primitives` already established for
+    `express::base`.
     """
     file_class = next(class_model for class_model in model.classes if class_model.cpp_name == "ifcopenshell::file")
     path_parameter = ParameterModel(name="path", cpp_name="path", cpp_type="std::string", adapter="string")
@@ -414,7 +444,16 @@ def _inject_file_primitives(model) -> None:
         "write",
         [path_parameter],
     )
-    file_class.callables.append(write)
+    file_pointer = _free_function(
+        file_class,
+        "ifcopenshell::wrappergen::file_pointer",
+        "file_pointer",
+        "file_pointer",
+        [],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
+    file_class.callables.extend([write, file_pointer])
 
 
 def _inject_async_variants(model) -> None:

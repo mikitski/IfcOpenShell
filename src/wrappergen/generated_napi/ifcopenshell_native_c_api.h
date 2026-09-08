@@ -47,8 +47,8 @@ typedef struct ifcopenshell_inverse_attribute_list_t ifcopenshell_inverse_attrib
 typedef struct ifcopenshell_type_declaration_list_t ifcopenshell_type_declaration_list_t;
 typedef struct ifcopenshell_select_type_list_t ifcopenshell_select_type_list_t;
 typedef struct ifcopenshell_enumeration_type_list_t ifcopenshell_enumeration_type_list_t;
-typedef struct ifcopenshell_express_entity_list_t ifcopenshell_express_entity_list_t;
 typedef struct ifcopenshell_express_base_list_t ifcopenshell_express_base_list_t;
+typedef struct ifcopenshell_express_entity_list_t ifcopenshell_express_entity_list_t;
 
 typedef enum ifcopenshell_argument_type_t {
     IFCOPENSHELL_ARGUMENT_TYPE_T_Argument_NULL = 0,
@@ -201,6 +201,8 @@ char* ifcopenshell_base_attribute_type(ifcopenshell_express_base_t* handle, int 
 int ifcopenshell_base_get_attribute_category(ifcopenshell_express_base_t* handle, const char* name);
 bool ifcopenshell_base_is_a(ifcopenshell_express_base_t* handle, const char* name);
 ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_values(ifcopenshell_express_base_t* handle);
+ifcopenshell_express_base_list_t* ifcopenshell_base_traverse(ifcopenshell_express_base_t* handle, int max_depth);
+ifcopenshell_express_base_list_t* ifcopenshell_base_traverse_breadth_first(ifcopenshell_express_base_t* handle, int max_depth);
 ifcopenshell_express_entity_list_t* ifcopenshell_entity_get_inverse(ifcopenshell_express_entity_t* handle, const char* attribute_name);
 ifcopenshell_express_select_t* ifcopenshell_select_new();
 ifcopenshell_express_select_t* ifcopenshell_select_new_with_value(ifcopenshell_express_base_t* value);
@@ -320,6 +322,7 @@ void ifcopenshell_file_batch(ifcopenshell_file_t* handle);
 void ifcopenshell_file_unbatch(ifcopenshell_file_t* handle);
 void ifcopenshell_file_reset_identity_cache(ifcopenshell_file_t* handle);
 void ifcopenshell_file_write(ifcopenshell_file_t* handle, const char* path);
+char* ifcopenshell_file_file_pointer(ifcopenshell_file_t* handle);
 ifcopenshell_global_id_t* ifcopenshell_global_id_new();
 ifcopenshell_global_id_t* ifcopenshell_global_id_new_with_logger(ifcopenshell_logger_t* logger);
 ifcopenshell_global_id_t* ifcopenshell_global_id_new_with_value(const char* value);
@@ -350,13 +353,13 @@ int ifcopenshell_enumeration_type_list_size(const ifcopenshell_enumeration_type_
 ifcopenshell_enumeration_type_t* ifcopenshell_enumeration_type_list_get(const ifcopenshell_enumeration_type_list_t* handle, int index);
 void ifcopenshell_enumeration_type_list_free(ifcopenshell_enumeration_type_list_t* handle);
 
-int ifcopenshell_express_entity_list_size(const ifcopenshell_express_entity_list_t* handle);
-ifcopenshell_express_entity_t* ifcopenshell_express_entity_list_get(const ifcopenshell_express_entity_list_t* handle, int index);
-void ifcopenshell_express_entity_list_free(ifcopenshell_express_entity_list_t* handle);
-
 int ifcopenshell_express_base_list_size(const ifcopenshell_express_base_list_t* handle);
 ifcopenshell_express_base_t* ifcopenshell_express_base_list_get(const ifcopenshell_express_base_list_t* handle, int index);
 void ifcopenshell_express_base_list_free(ifcopenshell_express_base_list_t* handle);
+
+int ifcopenshell_express_entity_list_size(const ifcopenshell_express_entity_list_t* handle);
+ifcopenshell_express_entity_t* ifcopenshell_express_entity_list_get(const ifcopenshell_express_entity_list_t* handle, int index);
+void ifcopenshell_express_entity_list_free(ifcopenshell_express_entity_list_t* handle);
 
 void ifcopenshell_exception_free(ifcopenshell_exception_t* handle);
 void ifcopenshell_attribute_out_of_range_exception_free(ifcopenshell_attribute_out_of_range_exception_t* handle);

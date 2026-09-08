@@ -4,6 +4,7 @@
 
 #include "argument.h"
 #include "argument_type.h"
+#include "file.h"
 #include "instance_data.h"
 #include "schema.h"
 
@@ -485,6 +486,14 @@ std::vector<attribute_value_variant> get_all_attribute_values(const express::bas
         values.push_back(get_attribute_value_variant(instance, static_cast<int>(index)));
     }
     return values;
+}
+
+std::vector<express::base> traverse(const express::base& instance, int max_depth) {
+    return ifcopenshell::file::traverse(instance, max_depth);
+}
+
+std::vector<express::base> traverse_breadth_first(const express::base& instance, int max_depth) {
+    return ifcopenshell::file::traverse_breadth_first(instance, max_depth);
 }
 
 } // namespace wrappergen
