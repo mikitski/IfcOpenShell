@@ -2,19 +2,28 @@
 //
 // Near-verbatim port of `ifcopenshell/entity_instance.py`'s `entity_instance_mixin`
 // (src/ifcopenshell-python) -- planning/ifcopenshell-ts/research/01-python-core-and-lowlevel.md
-// SS1/SS2.3. This is the *foundation* `EntityInstance` chunk
-// (planning/ifcopenshell-ts/20-roadmap.md Phase 2): `identity()`/`isA()`/`equals()`,
-// explicit `.get()`/`.set()` as the primitive attribute-access escape hatch
-// (implementing the real forward/inverse/category-dispatch branching logic
-// `__getattr__`/`__setattr__` use), `getInfo()`, and the `walk()` tree-transform
-// helper. The next Phase 2 chunk wraps a `Proxy` around `.get()`/`.set()` for
-// `wall.Name`-style dynamic property access and generates per-schema `.d.ts` types
-// (planning/ifcopenshell-ts/10-architecture.md SS6) -- explicitly out of scope here.
+// SS1/SS2.3. The *foundation* `EntityInstance` chunk (planning/ifcopenshell-ts/20-roadmap.md
+// Phase 2) built `identity()`/`isA()`/`equals()`, explicit `.get()`/`.set()` as the
+// primitive attribute-access escape hatch (implementing the real forward/inverse/
+// category-dispatch branching logic `__getattr__`/`__setattr__` use), `getInfo()`, and
+// the `walk()` tree-transform helper -- all of that logic is UNCHANGED by this chunk.
+// This chunk (planning/ifcopenshell-ts/10-architecture.md SS6) adds: every
+// `EntityInstance` is now constructed as a `Proxy` wrapping itself (see
+// `ENTITY_INSTANCE_PROXY_HANDLER`/the constructor below), whose `get`/`set` traps
+// consult `attributeCache.ts`'s attribute-metadata cache to resolve a `wall.Name`-style
+// dynamic property access to a forward-attribute index or an inverse-attribute lookup
+// *without* the native `get_attribute_category`/`get_argument_index` calls `.get()`/
+// `.set()` themselves still do on every call -- the Proxy is the fast, cached path;
+// `.get()`/`.set()` remain the always-correct, uncached escape hatch (needed by Phase
+// 5's `selector.py` port for dynamically-computed attribute names, and used directly
+// by the Proxy itself as the fallback for a cache miss, so an unknown attribute name
+// gets exactly `.get()`'s own error, not a silently different one).
 //
 // Explicitly out of scope for this chunk (see the task brief this was built from):
 // - The EXPRESS derived-attribute (`calc_<Type>_<name>`) rule-compilation fallback
 //   `__getattr__` falls through to for non-forward/non-inverse attribute names
-//   (research/01 SS2.3: "not relevant to a base TS port"). `.get()` throws instead.
+//   (research/01 SS2.3: "not relevant to a base TS port"). `.get()` throws instead,
+//   and the Proxy (falling back to `.get()` on a cache miss) inherits that behavior.
 // - `compare()`/`__lt__`/`__le__`/`__gt__`/`__ge__` EXPRESS-style ordering and
 //   `__dir__` -- not part of this chunk's explicit method list.
 // - Attribute values on non-entity (simple/defined-type, e.g. a standalone
@@ -23,22 +32,28 @@
 //   `%extend express::base`); this project's N-API shim
 //   (`src/wrappergen/shim/attribute_value_shim.cpp`'s `entity_declaration_of`)
 //   doesn't yet support that case and throws for it -- a real, disclosed primitive-
-//   layer gap surfaced while building this chunk, not silently worked around here.
-//   `.get()`/`.set()`/`.getInfo()` therefore only support entity-typed instances.
+//   layer gap surfaced while building the foundation chunk, not silently worked around
+//   here. `.get()`/`.set()`/`.getInfo()` therefore only support entity-typed instances;
+//   the Proxy's cache resolves to `EMPTY_CLASS_ATTRIBUTE_CACHE` for these (see
+//   `_resolveTypeInfo`), so every property access on one falls back to `.get()`/`.set()`
+//   unchanged.
+// - Also out of scope, explicitly per this chunk's own brief (a genuine primitive gap
+//   found while building the attribute-metadata cache, not assumed a new primitive
+//   should be added to close): a bulk *forward-vs-derived* split -- see
+//   `attributeCache.ts`'s header comment for the full reasoning.
 
+import { AttributeCategory, EMPTY_CLASS_ATTRIBUTE_CACHE, getClassAttributeMeta } from "./attributeCache";
+import type { AttributeMeta, ClassAttributeCache } from "./attributeCache";
 import type { IfcFile } from "./file";
 import type { IfcopenshellAttributeValueVariantT, entity as NativeEntity } from "./native/ifcopenshell_native";
-import { entity_instance as NativeEntityInstance } from "./native/ifcopenshell_native";
+import {
+	declaration as NativeDeclarationCtor,
+	entity_instance as NativeEntityInstance,
+} from "./native/ifcopenshell_native";
 import { native } from "./native/native_loader";
 import { settings } from "./settings";
 
-/** `entity_instance.get_attribute_category(name)`'s return value (research/01 SS5). */
-export const AttributeCategory = {
-	INVALID: 0,
-	FORWARD: 1,
-	INVERSE: 2,
-	DERIVED: 3,
-} as const;
+export { AttributeCategory } from "./attributeCache";
 
 function structurallyEqual(a: unknown, b: unknown): boolean {
 	if (a === b) return true;
@@ -79,13 +94,70 @@ export class EntityInstance {
 	/** @internal */ readonly _handle: unknown;
 	readonly file: IfcFile | undefined;
 
+	/**
+	 * @internal Lazily populated by `_resolveTypeInfo()`; backs the attribute Proxy's
+	 * cached name -> index/category lookup (10-architecture.md SS6). Resolving an
+	 * instance's own declared type is itself a native call
+	 * (`declaration()`/`declaration().schema()`/`declaration().as_entity()`) -- caching
+	 * it here means that cost is paid at most once per `EntityInstance` object's
+	 * lifetime, not once per attribute access, on top of the per-(schema,class)
+	 * caching `attributeCache.ts` already does.
+	 */
+	private _typeInfo?: {
+		readonly schemaIdentifier: string;
+		readonly className: string;
+		readonly cache: ClassAttributeCache;
+	};
+
 	constructor(handle: unknown, file?: IfcFile) {
 		this._handle = handle;
 		this.file = file;
+		// Every `EntityInstance` is minted as a `Proxy` wrapping itself -- decided over
+		// a separate factory function so every construction site (`IfcFile.byId`/
+		// `.byType`/`.createEntity`/etc., and `wrapValue`'s own recursive minting of
+		// entity-typed attribute *values*) automatically gets `wall.Name`-style dynamic
+		// property access with zero call-site changes, matching how deeply entity
+		// instances get minted (not just at `IfcFile` boundaries) per the task brief's
+		// own guidance. A JS class constructor that `return`s an object overrides the
+		// default `this` -- `new EntityInstance(...)` therefore returns the `Proxy`, not
+		// the raw instance; `instanceof EntityInstance` still holds through it (a
+		// `Proxy`'s default, un-overridden `getPrototypeOf` trap delegates to the
+		// target, per spec -- verified with an explicit test, not assumed, see
+		// `test/entityInstance.test.ts`).
+		// biome-ignore lint/correctness/noConstructorReturn: intentional -- this is the mechanism by which every `EntityInstance` becomes a `Proxy`, see the comment above.
+		return new Proxy(this, ENTITY_INSTANCE_PROXY_HANDLER);
 	}
 
 	private get native(): NativeEntityInstance {
 		return new NativeEntityInstance(this._handle);
+	}
+
+	/**
+	 * @internal Resolves (and caches, per-instance) this entity's own schema
+	 * identifier, class name, and cached attribute metadata -- the Proxy trap's entry
+	 * point into `attributeCache.ts`. Non-entity (simple/defined-type) instances
+	 * resolve to `EMPTY_CLASS_ATTRIBUTE_CACHE`: every property access on one is
+	 * therefore a cache miss, falling back to `.get()`/`.set()` unchanged (matching
+	 * this class's pre-existing "entity-typed instances only" scope for attribute
+	 * access, see this file's header comment).
+	 */
+	_resolveTypeInfo(): {
+		readonly schemaIdentifier: string;
+		readonly className: string;
+		readonly cache: ClassAttributeCache;
+	} {
+		if (!this._typeInfo) {
+			const declaration = this.native.declaration();
+			const className = declaration.name();
+			const schemaIdentifier = declaration.schema().name();
+			const entityDeclaration = declaration.as_entity();
+			const cache =
+				entityDeclaration === null
+					? EMPTY_CLASS_ATTRIBUTE_CACHE
+					: getClassAttributeMeta(schemaIdentifier, className, entityDeclaration, this.native);
+			this._typeInfo = { schemaIdentifier, className, cache };
+		}
+		return this._typeInfo;
 	}
 
 	/** Cross-file-unique runtime id (distinct from the STEP `id()`). */
@@ -162,13 +234,12 @@ export class EntityInstance {
 
 	/**
 	 * `entity_instance_mixin.__getattr__`'s branching logic, ported to an explicit
-	 * method: forward attributes resolve via `get_argument_index`/`get_attribute_value`,
-	 * inverse attributes are resolved by scanning `file.instances_by_reference`
-	 * (see `getInverseAttribute` below -- the native primitive layer has no
-	 * `entity_instance._get_inverse(name)` equivalent, only a coarser
-	 * `file.instances_by_reference(id)` unfiltered-by-relationship query, so the
-	 * per-named-inverse-attribute filtering Python gets from native `_get_inverse` is
-	 * done here in TS instead, on top of that primitive).
+	 * method: forward attributes resolve via `get_argument_index`/`get_attribute_value`;
+	 * inverse attributes resolve via `getInverseAttribute` below, which delegates to
+	 * the native `file.get_inverse(instanceId, declaration, attributeIndex)` primitive
+	 * -- see that method's own extended comment for the full story (this chunk's fix
+	 * for a real, `/code-review`-found bug in an earlier version of this method that
+	 * matched inverse candidates by attribute name alone, unscoped by declared type).
 	 */
 	get(name: string): unknown {
 		const category = this.native.get_attribute_category(name);
@@ -208,44 +279,71 @@ export class EntityInstance {
 		this.setByIndex(index, value);
 	}
 
-	private getInverseAttribute(name: string): EntityInstance[] {
-		const entityDeclaration = this.entityDeclaration();
-		const inverse = entityDeclaration.all_inverse_attributes().find((i) => i.name() === name);
-		if (!inverse) {
-			throw new Error(`entity instance of type '${this.isA(true)}' has no attribute '${name}'`);
+	/**
+	 * @internal Loosened from `private` (unchanged behavior otherwise) so the module-
+	 * level Proxy handler below can call it directly with a pre-resolved `meta` (from
+	 * `attributeCache.ts`'s `AttributeMeta`), skipping the schema walk this method
+	 * still does itself when called without one -- e.g. from `.get()` above, which is
+	 * deliberately left untouched (this chunk doesn't change `.get()`/`.set()`'s own
+	 * dispatch logic, only this internal helper's own implementation, and only to fix
+	 * a genuine bug found by `/code-review` while building on top of it, see below).
+	 *
+	 * Resolves via the native `file.get_inverse(instanceId, declaration,
+	 * attributeIndex)` primitive -- correctly scoped to candidates whose *declared
+	 * type* is-a the inverse attribute's `entity_reference()` (via the native
+	 * `visit_subtypes` C++ already implements, `src/ifcparse/parse.cpp`), at the
+	 * specific `attributeIndex` the inverse attribute's `attribute_reference()`
+	 * occupies on that type. An earlier version of this method instead scanned every
+	 * entity referencing `this` (`file.instances_by_reference`, unscoped by type) and
+	 * matched candidates purely by attribute *name* -- `/code-review` found, and a
+	 * real repro against the built addon confirmed, that this is unsound: EXPRESS
+	 * attribute names like "RelatedObjects" are independently declared on multiple,
+	 * unrelated sibling entities (`IfcRelAggregates`, `IfcRelDefinesByProperties`,
+	 * `IfcRelAssociatesMaterial`, ...), so a narrowly-scoped inverse attribute like
+	 * `IfcObject.IsDefinedBy` (which should only ever resolve `IfcRelDefinesByType`/
+	 * `IfcRelDefinesByProperties` instances) incorrectly also matched an unrelated
+	 * `IfcRelAggregates` that merely happened to reference `this` via its own,
+	 * differently-scoped "RelatedObjects" attribute.
+	 *
+	 * The non-obvious part: `declaration` argument. `inverse_attribute.entity_reference()`
+	 * returns an `entity`-typed native handle, not a `declaration`-typed one --
+	 * `file.get_inverse`'s N-API binding expects the latter. `entity` is a C++
+	 * `entity : public declaration` (single, non-virtual inheritance -- confirmed by
+	 * reading `src/ifcparse/schema.h`), and both classes' generated C-API wrapper
+	 * structs are `{ T* value; }` (a single pointer field, confirmed by reading
+	 * `ifcopenshell_native_c_api.cpp`) -- so an `entity*`'s address, reinterpreted as
+	 * a `declaration*`, is the *same, valid* pointer (a standard-layout upcast is a
+	 * pointer-value no-op for a non-virtual sole base). Constructing a `declaration`
+	 * wrapper directly around an `entity` handle's `_handle` is therefore safe, not
+	 * just convenient -- verified empirically against the real, built addon (not just
+	 * reasoned about), not merely assumed: `new NativeDeclaration(entityHandle).name()`
+	 * correctly returns the entity's own name, and `file.get_inverse` using it
+	 * correctly excludes the unrelated `IfcRelAggregates` from the repro above. No new
+	 * native primitive was added for this -- reusing an already-exposed one via this
+	 * (disclosed, deliberately-commented) handle reinterpretation.
+	 */
+	getInverseAttribute(name: string, meta?: AttributeMeta): EntityInstance[] {
+		let entityReferenceHandle = meta?.entityReferenceHandle;
+		let referenceAttributeIndex = meta?.referenceAttributeIndex;
+		if (entityReferenceHandle === undefined || referenceAttributeIndex === undefined) {
+			const entityDeclaration = this.entityDeclaration();
+			const inverse = entityDeclaration.all_inverse_attributes().find((i) => i.name() === name);
+			if (!inverse) {
+				throw new Error(`entity instance of type '${this.isA(true)}' has no attribute '${name}'`);
+			}
+			const entityReference = inverse.entity_reference();
+			const attributeReference = inverse.attribute_reference();
+			entityReferenceHandle = entityReference._handle;
+			referenceAttributeIndex = entityReference
+				.all_attributes()
+				.findIndex((attribute) => attribute.name() === attributeReference.name());
 		}
 		if (!this.file) {
 			throw new Error(`Cannot resolve inverse attribute '${name}': entity instance has no owning file`);
 		}
-		// `inverse.entity_reference(): entity` would be the natural way to pre-filter
-		// candidates by declared referencing type, but the generated facade's `entity`
-		// class has no `.name()` (or any other `declaration`-inherited method) --
-		// wrappergen's clang frontend only discovers a class's own directly-declared
-		// methods, not members inherited from a C++ base class (`entity : public
-		// declaration`), so `entity_reference()`'s result carries no usable name here.
-		// Skipping the type-name pre-filter and instead trying to resolve the named
-		// attribute directly on each candidate (catching "no such attribute" for
-		// candidates of an unrelated class) is actually equally correct -- it's the
-		// same relationship the type filter would have checked, just verified from the
-		// attribute side instead of the type side.
-		const attributeName = inverse.attribute_reference().name();
-		const candidates = this.file.nativeFile.instances_by_reference(this.id());
-		const results: EntityInstance[] = [];
-		for (const handle of candidates) {
-			const candidate = new EntityInstance(handle._handle, this.file);
-			if (!candidate.isEntity()) continue;
-			let attributeIndex: number;
-			try {
-				attributeIndex = candidate.native.get_argument_index(attributeName);
-			} catch {
-				continue;
-			}
-			const value = candidate.getByIndex(attributeIndex);
-			if (referencesTarget(value, this)) {
-				results.push(candidate);
-			}
-		}
-		return results;
+		const declaration = new NativeDeclarationCtor(entityReferenceHandle);
+		const handles = this.file.nativeFile.get_inverse(this.id(), declaration, referenceAttributeIndex);
+		return handles.map((handle) => new EntityInstance(handle._handle, this.file));
 	}
 
 	private wrapValue(raw: unknown): unknown {
@@ -367,8 +465,17 @@ export class EntityInstance {
 		if (!this.isEntity()) {
 			return info;
 		}
-		const entityDeclaration = this.entityDeclaration();
-		const names = attributeNamesOf(entityDeclaration);
+		// Sources attribute names from this chunk's attribute-metadata cache
+		// (`_resolveTypeInfo`) instead of a fresh `entityDeclaration.all_attributes()`
+		// walk per call -- the same one-bulk-call-per-(schema,class) cache the Proxy
+		// trap consults, now with a second consumer. `list` is FORWARD entries followed
+		// by INVERSE ones (`attributeCache.ts`'s `buildClassAttributeCache`), each
+		// FORWARD entry's position among just the FORWARD entries equal to its own
+		// `index` field, so filtering preserves the exact name-by-index ordering
+		// `get_all_attribute_values()` returns values in.
+		const names = this._resolveTypeInfo()
+			.cache.list.filter((meta) => meta.category === AttributeCategory.FORWARD)
+			.map((meta) => meta.name);
 		const rawValues = this.native.get_all_attribute_values() as unknown[];
 		for (let index = 0; index < rawValues.length; index++) {
 			const name = names[index];
@@ -399,6 +506,20 @@ export class EntityInstance {
 		}
 		return value;
 	}
+
+	/**
+	 * The "typed accessor helper" `10-architecture.md` SS6 describes: intersects this
+	 * (already-Proxy'd) instance with a generated per-schema interface (see
+	 * `tools/generate-dts.ts`/`src/generated/*.d.ts`) purely for the type checker's
+	 * benefit -- a compile-time-only cast (`as unknown as this & T`), zero runtime
+	 * cost, no new object created. The runtime object underneath is unchanged: the
+	 * same class-agnostic `Proxy` every `EntityInstance` already is, per this file's
+	 * header comment. Usage: `file.byId(id).as<generated.IfcWall>().Name` type-checks
+	 * as `string | null`.
+	 */
+	as<T>(): this & T {
+		return this as unknown as this & T;
+	}
 }
 
 /** Shared with `file.ts`'s `getInverse`/`Transaction.getElementInverses` helpers. */
@@ -409,14 +530,61 @@ export function referencesTarget(value: unknown, target: EntityInstance): boolea
 	return value instanceof EntityInstance && value.identity() === target.identity();
 }
 
-function attributeNamesOf(entityDeclaration: NativeEntity): string[] {
-	// No cache here on purpose: a `Map<schemaVersion, Map<className, AttributeMeta[]>>`
-	// cache (keyed by schema/class name, not by any per-call native wrapper) is
-	// 10-architecture.md SS6's explicit design for the Proxy layer -- the *next*
-	// Phase 2 chunk's responsibility, once the Proxy exists to consume it. A
-	// WeakMap keyed on `entityDeclaration` itself was tried here and removed: per
-	// research/07-fresh-wrapper-per-access.md, every `declaration()`/`as_entity()`
-	// call mints a fresh wrapper object, so such a cache can never actually hit --
-	// it would only add allocation overhead while looking like an optimization.
-	return entityDeclaration.all_attributes().map((attribute) => attribute.name());
-}
+/**
+ * The `Proxy` handler backing every `EntityInstance` (see the constructor above).
+ * Module-level and stateless (no per-instance handler allocation) -- "one `Proxy`
+ * handler implementation serves every entity, every schema version"
+ * (`10-architecture.md` SS6).
+ *
+ * Dispatch order, both traps: a real class member (own property or anything on
+ * `EntityInstance.prototype` -- methods, the `file` field, the internal `_handle`/
+ * `_typeInfo`) always wins over attribute-cache resolution, checked via the `in`
+ * operator (own + prototype chain) before ever consulting the cache -- getting this
+ * backwards would make e.g. `wall.file`/`wall.isA()` themselves resolve as IFC
+ * attribute lookups instead of the real class members they are. Symbols are passed
+ * straight through for the same reason (an IFC attribute name is never a symbol).
+ *
+ * On a cache hit: resolves straight to `getByIndex`/`setByIndex`/`getInverseAttribute`
+ * -- no native `get_attribute_category`/`get_argument_index` call, the whole point of
+ * this chunk's cache. On a cache miss (including every access on a non-entity
+ * instance, whose `_resolveTypeInfo()` always resolves to
+ * `EMPTY_CLASS_ATTRIBUTE_CACHE`): falls back to the real `.get(name)`/`.set(name,
+ * value)` methods unchanged, so an unknown attribute name fails exactly as loudly and
+ * with exactly the same message as the uncached primitive escape hatch already does --
+ * never a silent `undefined`.
+ */
+const ENTITY_INSTANCE_PROXY_HANDLER: ProxyHandler<EntityInstance> = {
+	get(target, prop, receiver) {
+		if (typeof prop === "symbol" || prop in target) {
+			return Reflect.get(target, prop, receiver);
+		}
+		const meta = target._resolveTypeInfo().cache.byName.get(prop);
+		if (meta === undefined) {
+			return target.get(prop);
+		}
+		if (meta.category === AttributeCategory.FORWARD) {
+			return target.getByIndex(meta.index);
+		}
+		const values = target.getInverseAttribute(prop, meta);
+		if (settings.unpackNonAggregateInverses && meta.bound1 === -1 && meta.bound2 === -1) {
+			return values.length ? values[0] : null;
+		}
+		return values;
+	},
+	set(target, prop, value, receiver) {
+		if (typeof prop === "symbol" || prop in target) {
+			return Reflect.set(target, prop, value, receiver);
+		}
+		const meta = target._resolveTypeInfo().cache.byName.get(prop);
+		if (meta !== undefined && meta.category === AttributeCategory.FORWARD) {
+			target.setByIndex(meta.index, value);
+			return true;
+		}
+		// Cache miss, or an attempt to write an INVERSE attribute (never settable,
+		// matching `.set()`'s own -- unchanged -- behavior, which only ever resolves a
+		// *forward* index and throws otherwise): falls back to `.set()` for the exact
+		// same error.
+		target.set(prop, value);
+		return true;
+	},
+};

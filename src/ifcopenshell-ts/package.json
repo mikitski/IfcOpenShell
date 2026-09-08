@@ -20,7 +20,8 @@
 		"build": "npm run build:native && npm run build:ts",
 		"test": "vitest run",
 		"lint": "biome check .",
-		"lint:fix": "biome check --write ."
+		"lint:fix": "biome check --write .",
+		"generate:dts": "vite-node tools/generate-dts.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
@@ -28,6 +29,7 @@
 		"cmake-js": "^8.0.0",
 		"node-addon-api": "^8.9.2",
 		"typescript": "^5.7.2",
+		"vite-node": "^2.1.8",
 		"vitest": "^2.1.8"
 	}
 }
