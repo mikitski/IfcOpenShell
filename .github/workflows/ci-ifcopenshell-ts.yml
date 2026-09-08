@@ -305,9 +305,32 @@ jobs:
         run: |
           "$env:INSTALL_PREFIX\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: npm test
+      - name: npm test (Unix)
+        if: matrix.os != 'windows'
         working-directory: src/ifcopenshell-ts
         run: npm test
+
+      # Captured to a log file (matching this same job's "Configure and
+      # install IfcOpenShell core (Windows)"/"Build native addon (Windows)"
+      # steps' own `Tee-Object`+`$LASTEXITCODE` idiom above) rather than a
+      # bare `run: npm test` -- a real Windows x64 `npm test` failure was
+      # previously undiagnosable from the PR alone: the diagnostic-comment
+      # step below only ever tailed `configure.log`/`build.log`/
+      # `build-native.log`, none of which cover this step's own output, the
+      # same "diagnostic step tailing the wrong/incomplete log set" gap the
+      # `fuzz` job hit earlier in this project (see that job's own comments).
+      - name: npm test (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        working-directory: src/ifcopenshell-ts
+        run: |
+          npm test 2>&1 | Tee-Object -FilePath npm-test.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::group::npm test failure (last 200 lines)"
+            Get-Content npm-test.log -Tail 200 | ForEach-Object { Write-Output "::error::$_" }
+            Write-Output "::endgroup::"
+            exit $LASTEXITCODE
+          }
 
       # Temporary Phase 0 bring-up aid: the sandbox this workflow is being
       # iterated from can only reach api.github.com, not the blob-storage
@@ -327,6 +350,7 @@ jobs:
               'build-native.log',
               'src/ifcopenshell-ts/build-native.log',
               '/tmp/build-native.log',
+              'src/ifcopenshell-ts/npm-test.log',
             ];
             let body = `### CI diagnostic: ${{ matrix.os }} ${{ matrix.arch }} (${context.sha.slice(0, 8)})\n`;
             let any = false;
