@@ -26,10 +26,20 @@ describe("Generated .d.ts type-checking (10-architecture.md SS6 exit criterion)"
 		const packageRoot = path.join(__dirname, "..");
 		let failureOutput: string | undefined;
 		try {
+			// `shell: true`: on Windows, `npx` resolves to `npx.cmd` -- a batch file,
+			// which Windows can only execute via `cmd.exe`, not directly through
+			// `CreateProcess` -- so `execFileSync` without a shell fails with
+			// `spawnSync npx ENOENT` there (a well-known Node-on-Windows gotcha for any
+			// npm-wrapped `.cmd`/`.bat` executable, unrelated to `tsc`/the generated
+			// types themselves, which this test confirmed compile cleanly on every
+			// other platform). `shell: true` is safe here: all arguments are plain
+			// identifiers/flags with no spaces or shell metacharacters, so quoting
+			// differences between bash and `cmd.exe` don't matter.
 			execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.typecheck.json"], {
 				cwd: packageRoot,
 				stdio: ["ignore", "pipe", "pipe"],
 				encoding: "utf-8",
+				shell: true,
 			});
 		} catch (e) {
 			const err = e as { stdout?: string; stderr?: string; message?: string };
