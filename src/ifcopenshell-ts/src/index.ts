@@ -29,3 +29,10 @@ export * as template from "./template";
 // output namespaces (`tools/generate-dts.ts` -> `src/generated/*.d.ts`).
 export type { AttributeMeta, ClassAttributeCache } from "./attributeCache";
 export { getClassAttributeMeta } from "./attributeCache";
+
+// Phase 3, chunk 1: `ifcopenshell.util.element`'s pset/qto and type/material/style
+// query functions (planning/ifcopenshell-ts/20-roadmap.md Phase 3) -- see
+// `util/element.ts`'s own header comment for this chunk's exact scope and disclosed
+// findings. Namespaced as `util.element.getPset(...)`, mirroring Python's
+// `ifcopenshell.util.element.get_pset(...)` (see `util/index.ts`).
+export * as util from "./util";

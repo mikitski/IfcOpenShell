@@ -533,3 +533,51 @@ throughout this PR's other entries.
 **Depends on / blocked by:** None block other work landing. Should be picked up as a dedicated,
 scoped piece of work (likely warranting its own design/plan review given the shared-core blast
 radius and the double-free risk of an incomplete fix) rather than folded into an unrelated PR.
+
+---
+
+### CI: `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3-parameterized tests are silently skipped, not run
+
+**What:** `ci-ifcopenshell-ts.yml` builds the C++ core with `-DSCHEMA_VERSIONS=4` (IFC4 only, a
+deliberate Phase 0-era speed choice). Every test suite in `src/ifcopenshell-ts/test/` that's
+version-parameterized via `test/bootstrap.ts`'s `AVAILABLE_SCHEMAS` (filtered from `ALL_SCHEMAS` at
+collection time by actually trying to load each schema and dropping ones the addon doesn't have,
+see `bootstrap.ts`'s own header comment) silently drops its IFC2X3/IFC4X3 cases in CI — they don't
+fail, they don't show up as skipped in an obvious way either, they simply never execute there. Only
+IFC4 gets real CI coverage today for any test written this way.
+
+**Why this matters, concretely:** this is not a hypothetical — it's what happened in
+`util/element.test.ts` (Phase 3, chunk 1, this PR's own predecessor commit): two tests hardcoded
+`createTestFile("IFC2X3")` directly instead of going through `AVAILABLE_SCHEMAS`, and CI's `SCHEMA_
+VERSIONS=4` build made this fail loudly with "No schema loaded" (a real, correctly-caught bug) —
+but had those same two tests instead gone through the *correct* `AVAILABLE_SCHEMAS`-filtered
+pattern from the start (as they now do), the exact same IFC2X3 behavior would have been silently
+skipped in CI without any signal at all, passing locally (author's own manually-built addon
+happened to include all three schemas) and in CI (nothing to fail — just nothing to run) alike. The
+"correct" fix for one bug (respect `AVAILABLE_SCHEMAS`) is also, structurally, what makes the
+broader coverage gap invisible rather than loud. Every future chunk's IFC2X3/IFC4X3-parameterized
+tests inherit this same silent gap by construction, not by mistake per-chunk.
+
+**Fix:** widen `SCHEMA_VERSIONS` in `ci-ifcopenshell-ts.yml` to build all three schema versions
+(IFC2X3, IFC4, IFC4X3) into the C++ core, matching the exact schema-name strings/list syntax
+`cmake/CMakeLists.txt`'s own default (`set(SCHEMA_VERSIONS "2x3" "4" "4x3_add2")`) already expects.
+**User-approved** (via this project's orchestrating session, 2026-09-09) as the correct direction —
+deliberately *not* done as part of this PR, since it isn't needed to fix this PR's own CI failure
+(the `AVAILABLE_SCHEMAS` fix above is sufficient and properly scoped to this chunk) and is a
+separate, real cost (slower core build on every future PR, plus likely a C++-core build-cache miss
+on the first post-change run, since the cache key is keyed in part on the workflow file's own
+content hash) that deserves its own explicit, standalone change rather than being folded into an
+unrelated chunk's fix-up commit. Also worth doing alongside: the PR diagnostic-comment mechanism
+currently only tails `build-native.log` on Unix legs (unlike the Windows-specific log-capture fix
+from an earlier chunk), so a future CI failure on Unix under the widened schema set may still need
+the GitHub Checks API / check-run annotations to diagnose rather than the PR comment alone — worth
+closing that gap in the same pass.
+
+**Context:** Surfaced during Phase 3 chunk 1 (`util.element` psets/qto/type/material/style query
+functions) CI bring-up, 2026-09-09 — see that PR's own commit history for the concrete repro
+(two IFC2X3 tests written against a literal schema string instead of `AVAILABLE_SCHEMAS`, caught
+by CI's real `SCHEMA_VERSIONS=4` build failing loudly rather than silently skipping).
+
+**Depends on / blocked by:** None block other work landing. Should be picked up whenever a future
+chunk actually needs real IFC2X3/IFC4X3 CI coverage (not just skip-safe fallback behavior) — at that
+point, silent skipping stops being an acceptable substitute for real coverage.
