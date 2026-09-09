@@ -3,3 +3,6 @@ dist/
 native/build/
 # README.md's local fuzz-harness repro command (run from this directory)
 build-fuzz/
+# Written by test/bench/reporter.ts (`npm run bench`) -- raw per-run measurements, not
+# a tracked artifact; the checked-in tracked file is tools/BASELINE_RATIOS.json.
+bench-results.json

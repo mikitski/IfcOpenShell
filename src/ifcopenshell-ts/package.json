@@ -19,6 +19,7 @@
 		"build:ts": "tsc -p tsconfig.json",
 		"build": "npm run build:native && npm run build:ts",
 		"test": "vitest run",
+		"bench": "vitest run --config vitest.bench.config.ts",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"generate:dts": "vite-node tools/generate-dts.ts"
