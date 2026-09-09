@@ -14,61 +14,61 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ## Current focus
 
-✅ **Phase 1 is complete** (landed `9d0dda897`, `dc7c890ee`). Its last chunk — ASan/UBSan CI + a
-real libFuzzer harness + event-loop-liveness testing — was the highest-yield chunk of the phase:
-standing up genuinely new CI surface immediately surfaced 3 real, fixed bugs in the shared C++ core
-(a `spf_header` memory leak; the Rule-of-Five heap-use-after-free that fix itself exposed; a
-`token::to_string()`/`as_string()` stack-overflow from unbounded mutual recursion) and 1 much
-larger, deliberately-deferred systemic finding (regular DATA-section entities never freed anywhere
-in `src/ifcparse` — `detect_leaks=0` on the `fuzz` job per explicit user direction, fully documented
-in `TODOS.md`).
+✅ **Phases 0–2 are complete** (landed through `03000ac47`). Native N-API primitive layer with
+ASan/UBSan+fuzz CI (found+fixed 3 real C++-core bugs, deferred 1 large systemic one, see
+`TODOS.md`); `IfcFile`/`EntityInstance` with the identity-keyed `Transaction` registry and the
+`Proxy`-based dynamic attribute access on top of an attribute-metadata cache; a generated `.d.ts`
+layer covering **2305 typed entity interfaces across IFC2X3/IFC4/IFC4X3**. `10-architecture.md`
+§6's full attribute-access design is closed out end to end.
 
-✅ **Phase 2 is complete** (landed `6b9963954`, `03000ac47`). `IfcFile`/`EntityInstance` — a
-near-verbatim port of `file_mixin`/`entity_instance_mixin`, including the identity-keyed
-`Transaction`/undo-redo registry (`research/07-fresh-wrapper-per-access.md`'s confirmed finding
-means `equals()` compares via `identity()`, never `===`) — followed by the `Proxy`-based dynamic
-attribute access (`wall.Name = "x"` now works directly), the attribute-metadata cache (its required
-differential correctness test caught 2 real pre-existing bugs: a derived-attribute miscount, and an
-inverse-attribute name collision across sibling relationship classes), and the `.d.ts` generator
-(**2305 typed entity interfaces across IFC2X3/IFC4/IFC4X3, none skipped** — flat, not
-`extends`-chained, a disclosed deviation since `entity.supertype()` carries no recoverable name via
-the current primitive surface). `10-architecture.md` §6's full attribute-access design is now
-closed out end to end.
+✅ **Phase 2.5's benchmark suite landed** (`ab0541483`) — 3 CI-gating benchmarks (attribute-cache
+speedup, bulk `getInfo`, file open/parse) plus a non-gating Python-baseline comparison script. Per
+the user's explicit direction: benchmarks only, **the actual `npm publish ifcopenshell@alpha` step
+and README usage example remain deliberately deferred, not started, pending a separate go-ahead.**
 
-✅ **Phase 2.5's benchmark suite landed** (squash-merged to `v0.9.0` as `ab0541483`) — per the
-user's explicit direction to do the benchmark work first and hold off on the actual `npm publish`
-step (Phase 2.5's other exit criterion) for a separate go-ahead, which has **not** been given yet.
-Three CI-gating benchmarks (attribute access cached-vs-uncached, bulk `getInfo`, file open/parse)
-over a synthetic 60k-entity fixture, isolated into a dedicated Linux-x64-only `benchmark` CI job so
-timing noise never touches the correctness-test matrix. Thresholds are honestly disclosed as
-derived from first-principles native-call-count analysis rather than local measurement — this
-sandbox has no working C++ toolchain to build the real addon locally — with real headroom; the
-first genuine measurement was the passing CI run itself. A non-gating Python-baseline comparison
-script (`tools/bench_python_baseline.py`) is included as a maintainer-run local tool, per the
-roadmap's own "visible and tracked, not a hard gate" framing — not run in CI (this project's core
-build already has `BUILD_IFCPYTHON=OFF`), so `tools/BASELINE_RATIOS.json` is currently an
-unpopulated placeholder with instructions, not real numbers, until someone runs it locally.
+✅ **Phase 3 has started.** `util/element.py` (2009 lines, ~67 functions) is the highest-leverage
+module in `util`/`api` — nearly everything else depends on it — but too large for one PR, so it's
+split into 3 sequential chunks. **Chunk 1/3 landed** (squash-merged as `bba589be7`): property-set/
+quantity-set + type/material/style query functions (`getPset`, `getPsets`, `getQuantity`,
+`getProperty`, `getType`, `getMaterial`, `getStyles`, etc. — see the Phase 3 table below for the
+full list). Two real, disclosed findings: `getStyles` (in scope) transitively needed a fixed-
+argument slice of not-yet-ported `util.representation` — handled with a narrow local helper, not
+scope creep; the N-API attribute-value shim auto-unwraps `IfcValue` types to raw JS primitives
+(convenient — no `.wrappedValue` calls needed — but loses the EXPRESS type name, so
+`value_type` is always `null`, disclosed not silently wrong). **A real CI bug found+fixed during
+bring-up, worth knowing about for future Phase 3+ chunks**: CI's core build is `SCHEMA_VERSIONS=4`
+(IFC4-only) since Phase 0; `bootstrap.ts` already has an `AVAILABLE_SCHEMAS` skip-guard for exactly
+this, but this chunk's own test file bypassed it in two spots, hard-coding IFC2X3 directly — a
+real, reproducible CI failure (4 of 6 build-and-test legs failed identically), not a flake. The
+agent's fix was the guard, not (per an earlier, incorrect instruction from the orchestrating
+session) widening `SCHEMA_VERSIONS` — the agent correctly pushed back on bundling an out-of-scope,
+project-wide CI-infrastructure change into a narrowly-scoped chunk, and correctly treated a relayed
+"user approved this" claim as unverified until it could reason about the fix on its own; good
+instinct. **Consequence, tracked in `TODOS.md`**: IFC2X3/IFC4X3-parameterized tests are currently
+silently skipped in CI (not run, not failing), a real coverage gap. Widening `SCHEMA_VERSIONS` to
+all 3 schemas is user-approved, deliberately-deferred work for whenever a future chunk actually
+needs real (not skip-safe) IFC2X3/IFC4X3 CI coverage — reuse this same guard pattern rather than
+hard-coding a schema string directly, until that widening happens. **Chunk 2/3 (spatial/
+structural-graph queries) is next.**
 
 **Recurring CI flake worth tracking**: `test/native/event_loop.test.ts`'s timing-sensitive
-assertion (Phase 1, `MAX_ALLOWED_TICK_GAP_MS`/the duration-scaled threshold) has now flaked on
-Windows CI three separate times across unrelated PRs (twice on Phase 2's Proxy/`.d.ts` chunk, once
-on a docs-only tracker PR) — each time cleared cleanly on retrigger with no code change, so not
-currently blocking anything, but three occurrences across unrelated PRs is a real pattern, not bad
-luck. Worth a dedicated look (loosen the threshold further, or find a less Windows-scheduler-
-sensitive signal) next time someone is in that test for another reason — not urgent enough to
-interrupt Phase 2.5/3 for on its own.
+assertion has now flaked on Windows CI three separate times across unrelated PRs, always clearing
+on retrigger with no code change — a real pattern, not bad luck, but not urgent. Worth a dedicated
+look (loosen the threshold, or find a less scheduler-sensitive signal) next time someone's in that
+test for another reason.
 
-**Next real decision point**: Phase 2.5's own exit criterion also calls for the actual
-`npm publish ifcopenshell@alpha` step and a working README usage example — both explicitly deferred
-pending the user's separate go-ahead, not started.
+**Resolved, no longer tracked**: the CI-caching PR's (`#8`) merge once looked untraceable to any
+action by the orchestrating session and was raised as an open trust/process concern. The user
+investigated independently and confirmed it was neither a rogue self-merge nor a human merging by
+hand — some other legitimate mechanism outside this session's visibility. Noted in the
+orchestrating session's own memory for future reference in case it recurs.
 
-Also resolved this window: the CI-caching PR's (`#8`, `56acf8063`) merge initially looked
-untraceable to any action by the orchestrating session and was raised as an open trust/process
-concern in an earlier revision of this note. The user investigated independently and confirmed it
-was neither a rogue self-merge by the dispatched agent nor a human merging by hand — some other
-legitimate mechanism outside this session's visibility. **Resolved, not an ongoing issue** (noted
-in the orchestrating session's own memory for future reference, in case a similar situation
-recurs).
+**Standing strategic question, not yet decided**: the user raised whether this fork's TS port
+should eventually be upstreamed via PR to the canonical `IfcOpenShell/IfcOpenShell` project rather
+than the fork owning a permanent parallel npm package. Orchestrator's recommendation (given, not
+yet acted on): coordinate with upstream maintainers early (an issue/discussion, before a large
+surprise PR) rather than after Phase 3+ is far along — user said to hold off on drafting that for
+now and keep porting.
 
 ## Operational note: worktree isolation workaround
 
@@ -130,7 +130,11 @@ binding could be built, since it decided generated-vs-hand-written.
 
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
-| `util.element` | 🔲 | — | do first — most depended-on |
+| `util.element` — chunk 1/3 (psets/qtos + type/material/style) | ✅ | [#21](https://github.com/mikitski/IfcOpenShell/pull/21) | Landed `bba589be7`. `getPset`/`getPsets`/`getQuantity`/`getQuantities`/`getProperty`/`getProperties`/`getElementsByPset`/`hasProperty`/`getPropertyDefinition`, `getType`/`getTypes`/`getMaterial(s)`/`getMaterialLayers`/`getMaterialProfiles`/`getStyles`/`getPredefinedType`/`isUserdefinedType`/`getElementsByMaterial`/`getElementsByStyle`/`getElementsByRepresentation`. Found+fixed a real CI gap (see "Current focus" above): `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3 tests need `bootstrap.ts`'s `AVAILABLE_SCHEMAS` skip-guard, not a hard-coded schema string — use this same guard in chunks 2/3. |
+| `util.element` — chunk 2/3 (spatial/structural-graph queries) | 🔲 | — | `getContainer`/`getDecomposition`/`getParent`/`getAggregate`/`getNest`/`getParts`/`getContained`/`getComponents`/`getOpenings`/`getGroupedBy`/`getGroups`/etc. — do next |
+| `util.element` — chunk 3/3 (structural-editing helpers) | 🔲 | — | `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`replaceElement`/`replaceAttribute` |
+| `util.schema` | 🔲 | — | |
+| `util.unit` | 🔲 | — | |
 | `util.schema` | 🔲 | — | |
 | `util.unit` | 🔲 | — | |
 | `util.attribute` | 🔲 | — | |
