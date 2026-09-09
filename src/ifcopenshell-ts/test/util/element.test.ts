@@ -333,35 +333,43 @@ describe("util.element getPset/getPsets (IFC4)", () => {
 	});
 });
 
-describe("util.element getPset/getPsets material/profile psets (IFC2X3)", () => {
-	test("getting a profile pset is a no-op (unsupported in IFC2X3)", () => {
-		const file = createTestFile("IFC2X3");
-		const profile = file.createEntity("IfcRectangleProfileDef");
-		const pset = file.createEntity("IfcProfileProperties");
-		pset.set("ProfileDefinition", profile);
-		// We don't support them (IFC2X3 profiles have no name), just making sure there
-		// are no errors.
-		expect(subject.getPset(profile, "Test")).toBeNull();
-		expect(subject.getPsets(profile)).toEqual({});
-	});
+// `describe.skipIf` (not a bare `describe`) -- IFC2X3 isn't necessarily built into
+// this environment's addon (`bootstrap.ts`'s own documented gap: CI currently builds
+// the C++ core with `-DSCHEMA_VERSIONS=4`, IFC4 only). Mirrors every other
+// schema-parameterized suite in this file, which drives off `AVAILABLE_SCHEMAS`
+// rather than a literal `createTestFile("IFC2X3")` for exactly this reason.
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))(
+	"util.element getPset/getPsets material/profile psets (IFC2X3)",
+	() => {
+		test("getting a profile pset is a no-op (unsupported in IFC2X3)", () => {
+			const file = createTestFile("IFC2X3");
+			const profile = file.createEntity("IfcRectangleProfileDef");
+			const pset = file.createEntity("IfcProfileProperties");
+			pset.set("ProfileDefinition", profile);
+			// We don't support them (IFC2X3 profiles have no name), just making sure there
+			// are no errors.
+			expect(subject.getPset(profile, "Test")).toBeNull();
+			expect(subject.getPsets(profile)).toEqual({});
+		});
 
-	test("getting a material's extended-properties pset", () => {
-		const file = createTestFile("IFC2X3");
-		const material = file.createEntity("IfcMaterial");
-		const extended = file.createEntity("IfcExtendedMaterialProperties");
-		extended.set("Material", material);
-		extended.set("Name", "Test");
-		const prop = file.createEntity("IfcPropertySingleValue");
-		prop.set("Name", "GassPressure");
-		prop.set("NominalValue", 25.0);
-		extended.set("ExtendedProperties", [prop]);
+		test("getting a material's extended-properties pset", () => {
+			const file = createTestFile("IFC2X3");
+			const material = file.createEntity("IfcMaterial");
+			const extended = file.createEntity("IfcExtendedMaterialProperties");
+			extended.set("Material", material);
+			extended.set("Name", "Test");
+			const prop = file.createEntity("IfcPropertySingleValue");
+			prop.set("Name", "GassPressure");
+			prop.set("NominalValue", 25.0);
+			extended.set("ExtendedProperties", [prop]);
 
-		const psetData = subject.getPset(material, "Test") as Record<string, unknown>;
-		expect(psetData.GassPressure).toBe(25.0);
-		const psetsData = subject.getPsets(material);
-		expect(psetsData.Test.GassPressure).toBe(25.0);
-	});
-});
+			const psetData = subject.getPset(material, "Test") as Record<string, unknown>;
+			expect(psetData.GassPressure).toBe(25.0);
+			const psetsData = subject.getPsets(material);
+			expect(psetsData.Test.GassPressure).toBe(25.0);
+		});
+	},
+);
 
 describe("util.element getPropertyDefinition (IFC4)", () => {
 	function newFile(): IfcFile {
@@ -510,34 +518,41 @@ describe("util.element getProperties (IFC4)", () => {
 	});
 });
 
-describe.each(["IFC4", "IFC2X3"] as Schema[])("util.element getElementsByPset (%s)", (schema) => {
-	test("elements and element types using a pset", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWall");
-		const elementType = file.createEntity("IfcWallType");
-		const pset = file.createEntity("IfcPropertySet");
-		const rel = file.createEntity("IfcRelDefinesByProperties");
-		rel.set("RelatedObjects", [element]);
-		rel.set("RelatingPropertyDefinition", pset);
-		elementType.set("HasPropertySets", [pset]);
+// Python: parameterized IFC4 + IFC2X3 (`TestGetElementsUsingPset`/
+// `TestGetElementsUsingPsetIFC2X3`) -- filtered through `AVAILABLE_SCHEMAS` rather
+// than a literal `["IFC4", "IFC2X3"]` list, same reasoning as the `describe.skipIf`
+// above: IFC2X3 isn't guaranteed built into this environment's addon.
+describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC4" || s === "IFC2X3"))(
+	"util.element getElementsByPset (%s)",
+	(schema) => {
+		test("elements and element types using a pset", () => {
+			const file = createTestFile(schema);
+			const element = file.createEntity("IfcWall");
+			const elementType = file.createEntity("IfcWallType");
+			const pset = file.createEntity("IfcPropertySet");
+			const rel = file.createEntity("IfcRelDefinesByProperties");
+			rel.set("RelatedObjects", [element]);
+			rel.set("RelatingPropertyDefinition", pset);
+			elementType.set("HasPropertySets", [pset]);
 
-		expect(ids(subject.getElementsByPset(pset))).toEqual(ids([element, elementType]));
-	});
+			expect(ids(subject.getElementsByPset(pset))).toEqual(ids([element, elementType]));
+		});
 
-	test("material using a pset", () => {
-		const file = createTestFile(schema);
-		const material = file.createEntity("IfcMaterial");
-		const pset = addPset(file, material, "FooBar");
-		expect(ids(subject.getElementsByPset(pset))).toEqual(ids([material]));
-	});
+		test("material using a pset", () => {
+			const file = createTestFile(schema);
+			const material = file.createEntity("IfcMaterial");
+			const pset = addPset(file, material, "FooBar");
+			expect(ids(subject.getElementsByPset(pset))).toEqual(ids([material]));
+		});
 
-	test("profile using a pset", () => {
-		const file = createTestFile(schema);
-		const profile = file.createEntity("IfcRectangleProfileDef");
-		const pset = addPset(file, profile, "FooBar");
-		expect(ids(subject.getElementsByPset(pset))).toEqual(ids([profile]));
-	});
-});
+		test("profile using a pset", () => {
+			const file = createTestFile(schema);
+			const profile = file.createEntity("IfcRectangleProfileDef");
+			const pset = addPset(file, profile, "FooBar");
+			expect(ids(subject.getElementsByPset(pset))).toEqual(ids([profile]));
+		});
+	},
+);
 
 // --- Type / material / style ---
 
