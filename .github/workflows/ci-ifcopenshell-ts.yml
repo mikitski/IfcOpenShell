@@ -578,6 +578,199 @@ jobs:
               body,
             });
 
+  # Phase 2.5's "performance benchmark suite" (planning/ifcopenshell-ts/20-roadmap.md's
+  # "Phase 2.5 -- Alpha checkpoint"): attribute access in a tight loop with/without the
+  # attribute-metadata cache, bulk get_info() on a large synthetic fixture, and file
+  # open/parse time - each gated by a documented, deliberately generous regression
+  # threshold (see test/bench/*.bench.ts's own header comments for the reasoning behind
+  # each one). A real regression that reintroduces per-attribute native-boundary
+  # crossings the Phase 2 caching design exists to avoid (10-architecture.md SS6) - or
+  # otherwise meaningfully slows any of these three paths - fails this job.
+  #
+  # Linux x64 only, not the full 6-way OS x arch matrix build-and-test uses: benchmarks
+  # are inherently noisier across OS/arch than correctness tests (different scheduler
+  # behavior, virtualization overhead, etc.), and this project already has an
+  # established precedent for scoping exactly this class of job (noisy/expensive,
+  # correctness-orthogonal) to a single representative leg - see asan-ubsan/fuzz above,
+  # both Linux x64 only for their own analogous reasons. A performance regression in the
+  # shared TS/native code this suite measures is not OS/arch-specific; it doesn't need
+  # 6 legs to catch.
+  #
+  # Deliberately does NOT run tools/bench_python_baseline.py (the roadmap's
+  # non-gating Python-baseline comparison) - see that script's own header comment for
+  # the full reasoning: this project's CI already deliberately builds the C++ core with
+  # -DBUILD_IFCPYTHON=OFF (an existing Phase-0-era scope cut), and standing up a full
+  # Python/SWIG binding build in CI just for a comparison that can never fail the build
+  # anyway would be a disproportionate amount of new CI surface for what this job needs.
+  # That script is a documented, maintainer-run local/manual tool instead (see its own
+  # header comment and tools/BASELINE_RATIOS.json for how a maintainer runs and records
+  # it) - its own instructions include pulling the "ts" numbers out of this job's own
+  # bench-results.json artifact (uploaded below).
+  benchmark:
+    needs: activate
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-22.04
+    env:
+      CLICOLOR_FORCE: "1"
+      CMAKE_COLOR_DIAGNOSTICS: "ON"
+      INSTALL_PREFIX: ${{ github.workspace }}/install-benchmark
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            cmake \
+            libboost-date-time-dev \
+            libboost-iostreams-dev \
+            libboost-program-options-dev \
+            libboost-regex-dev \
+            libboost-thread-dev \
+            libeigen3-dev
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ifcopenshell-ts-benchmark-linux-x64
+
+      # Distinct cache key from build-and-test's Linux x64 leg (and asan-ubsan/fuzz's
+      # own), even though this leg's cmake flags happen to be identical to
+      # build-and-test's Linux x64 Release build today - matches this workflow's own
+      # established per-job cache-isolation precedent (see asan-ubsan/fuzz's own cache
+      # steps' comments) rather than risking two jobs racing to save the same key in
+      # the same workflow run.
+      - name: Restore cached IfcOpenShell C++ core
+        id: cache-core
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: >-
+            ifcopenshell-ts-core-benchmark-linux-x64-${{
+            hashFiles('src/ifcparse/**', 'src/plugin/**', 'cmake/**', '.github/workflows/ci-ifcopenshell-ts.yml') }}
+
+      - name: Configure and install IfcOpenShell core
+        id: core-benchmark
+        if: steps.cache-core.outputs.cache-hit != 'true'
+        run: |
+          cmake -S cmake -B build-benchmark \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSCHEMA_VERSIONS=4 \
+            -DBUILD_IFCGEOM=OFF \
+            -DBUILD_IFCPYTHON=OFF \
+            -DBUILD_CONVERT=OFF \
+            -DBUILD_GEOMSERVER=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DWITH_CGAL=OFF \
+            -DWITH_OPENCASCADE=OFF \
+            -DCOLLADA_SUPPORT=OFF
+          cmake --build build-benchmark --target install --parallel
+
+      - name: Save IfcOpenShell C++ core cache
+        if: >-
+          steps.cache-core.outputs.cache-hit != 'true' &&
+          steps.core-benchmark.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.INSTALL_PREFIX }}
+          key: ${{ steps.cache-core.outputs.cache-primary-key }}
+
+      - name: npm ci
+        working-directory: src/ifcopenshell-ts
+        run: npm ci
+
+      - name: Build native addon
+        working-directory: src/ifcopenshell-ts
+        run: |
+          set -o pipefail
+          npm run build:native -- --CDCMAKE_PREFIX_PATH="$INSTALL_PREFIX" 2>&1 | tee /tmp/build-native-benchmark.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::build:native failure (last 80 lines)"
+            tail -n 80 /tmp/build-native-benchmark.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
+
+      - name: Build TS
+        working-directory: src/ifcopenshell-ts
+        run: npm run build:ts
+
+      - name: Add installed libraries to the runtime search path
+        run: echo "LD_LIBRARY_PATH=$INSTALL_PREFIX/lib" >> "$GITHUB_ENV"
+
+      - name: npm run bench
+        working-directory: src/ifcopenshell-ts
+        run: |
+          set -o pipefail
+          npm run bench 2>&1 | tee /tmp/bench.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::group::npm run bench failure (last 200 lines)"
+            tail -n 200 /tmp/bench.log | while IFS= read -r line; do echo "::error::$line"; done
+            echo "::endgroup::"
+            exit $status
+          fi
+
+      # test/bench/reporter.ts writes this at the package root on every run
+      # (regardless of pass/fail) - upload it unconditionally so the actual measured
+      # numbers are inspectable from the Actions run page even when every threshold
+      # passed, not just tailed from the log on a failure. Also what a maintainer
+      # pulls "ts" numbers from for tools/BASELINE_RATIOS.json (see that file's own
+      # comment).
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: src/ifcopenshell-ts/bench-results.json
+          if-no-files-found: ignore
+
+      - name: Post diagnostic log tail as PR comment on failure
+        if: failure() && github.event.pull_request.number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const files = [
+              'src/ifcopenshell-ts/build-native.log',
+              '/tmp/build-native-benchmark.log',
+              '/tmp/bench.log',
+            ];
+            let body = `### CI diagnostic: benchmark (${context.sha.slice(0, 8)})\n`;
+            let any = false;
+            for (const f of files) {
+              if (fs.existsSync(f)) {
+                any = true;
+                const lines = fs.readFileSync(f, 'utf8').split('\n').slice(-200).join('\n');
+                body += `\n<details><summary>${f}</summary>\n\n\`\`\`\n${lines}\n\`\`\`\n</details>\n`;
+              }
+            }
+            if (!any) {
+              body += '\n(no log files found - see the job\'s own step output)\n';
+            }
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n... truncated';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
+
   # Phase 1 exit criterion "(b)": fuzz test the file-open/parse primitives,
   # corpus-seeded from `test/fixtures/**/*.ifc`, against malformed input - this is a
   # Node-only (server-side) library, and a plausible real deployment is a web service
