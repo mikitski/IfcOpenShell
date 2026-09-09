@@ -16,51 +16,51 @@ orchestrator reviewing against design) · ✏️ changes requested · ✅ landed
 
 ✅ **Phase 1 is complete** (landed `9d0dda897`, `dc7c890ee`). Its last chunk — ASan/UBSan CI + a
 real libFuzzer harness + event-loop-liveness testing — was the highest-yield chunk of the phase:
-standing up genuinely new CI surface (no ASan/UBSan or libFuzzer job existed anywhere in this repo
-before) immediately surfaced 3 real, fixed bugs in the shared C++ core (a `spf_header` memory leak;
-the Rule-of-Five heap-use-after-free that fix itself exposed, closed with full deep-copy/move
-semantics; a `token::to_string()`/`as_string()` stack-overflow from unbounded mutual recursion,
-root-caused and closed for all 10 `token_type` values, not band-aided) and 1 much larger,
-deliberately-deferred systemic finding (regular DATA-section entities never freed anywhere in
-`src/ifcparse` — investigated, confirmed systemic, `detect_leaks=0` on the `fuzz` job per explicit
-user direction, fully documented in `TODOS.md` for whoever picks up that ownership-model fix next).
+standing up genuinely new CI surface immediately surfaced 3 real, fixed bugs in the shared C++ core
+(a `spf_header` memory leak; the Rule-of-Five heap-use-after-free that fix itself exposed; a
+`token::to_string()`/`as_string()` stack-overflow from unbounded mutual recursion) and 1 much
+larger, deliberately-deferred systemic finding (regular DATA-section entities never freed anywhere
+in `src/ifcparse` — `detect_leaks=0` on the `fuzz` job per explicit user direction, fully documented
+in `TODOS.md`).
 
-✅ **Phase 2's first chunk — `IfcFile`/`EntityInstance` foundation — landed** (squash-merged to
-`v0.9.0` as `6b9963954`). Near-verbatim port of `file_mixin`/`entity_instance_mixin`: the
-identity-keyed (`file_pointer()`) `Transaction`/undo-redo registry (per
-`research/07-fresh-wrapper-per-access.md`'s confirmed finding — every native accessor mints a
-fresh JS wrapper, so `EntityInstance.equals()` compares via `identity()`, never `===`), the full
-`.get()`/`.set()` attribute-access escape hatch implementing the real forward/inverse/category
-dispatch, `getInfo()`, `guid.ts`/`settings.ts`/`template.ts`, and the `createTestFile()` bootstrap
-fixture every later phase's tests build on. Two small new N-API primitives added along the way
-(`file_pointer()`, `traverse()`/`traverse_breadth_first()` on `entity_instance`). One CI flake hit
-and resolved: Windows x64 failed at the pre-existing "Install build dependencies" vcpkg step
-(unrelated to this PR's own code); confirmed transient by re-running.
+✅ **Phase 2 is complete** (landed `6b9963954`, `03000ac47`). `IfcFile`/`EntityInstance` — a
+near-verbatim port of `file_mixin`/`entity_instance_mixin`, including the identity-keyed
+`Transaction`/undo-redo registry (`research/07-fresh-wrapper-per-access.md`'s confirmed finding
+means `equals()` compares via `identity()`, never `===`) — followed by the `Proxy`-based dynamic
+attribute access (`wall.Name = "x"` now works directly), the attribute-metadata cache (its required
+differential correctness test caught 2 real pre-existing bugs: a derived-attribute miscount, and an
+inverse-attribute name collision across sibling relationship classes), and the `.d.ts` generator
+(**2305 typed entity interfaces across IFC2X3/IFC4/IFC4X3, none skipped** — flat, not
+`extends`-chained, a disclosed deviation since `entity.supertype()` carries no recoverable name via
+the current primitive surface). `10-architecture.md` §6's full attribute-access design is now
+closed out end to end.
 
-✅ **Phase 2's second chunk — `Proxy`-based dynamic attribute access + the schema-driven `.d.ts`
-generator — landed** (squash-merged to `v0.9.0` as `03000ac47`), closing out `10-architecture.md`
-§6's full design. Every `EntityInstance` is now `Proxy`-wrapped at construction (confirmed
-`instanceof EntityInstance` still holds through the wrapper), so `wall.Name = "x"` works directly —
-the trap dispatches through the prior chunk's existing `.get()`/`.set()` primitives, never
-reimplementing that logic. A `Map<schemaIdentifier, Map<className, AttributeMeta[]>>` cache
-(populated once per schema, never per-access) backs the trap's category/index lookups; the required
-differential correctness test (`40-testing-strategy.md` §5.5) passes for every entity class across
-all three schema versions and caught two real, pre-existing bugs along the way — a derived-attribute
-miscount, and an inverse-attribute name collision across sibling relationship classes (fixed by
-switching to the correctly-scoped `file.get_inverse(...)` primitive instead of a name-only match).
-The `.d.ts` generator (a new Node-based tool, not a wrappergen/Python extension — `entity.supertype()`
-carries no recoverable name via the current primitive surface, so generated interfaces are flat, not
-`extends`-chained, a disclosed deviation) emits **2305 typed entity interfaces across
-IFC2X3/IFC4/IFC4X3 (653/776/876), none skipped**; the exit-criterion test (`wall.Name` type-checks as
-`string | null` via real `tsc --noEmit`) passes. One real bug found and fixed mid-PR: a Windows-only
-`spawnSync npx ENOENT` (the classic Node-on-Windows `.cmd`-resolution gotcha) breaking the type-check
-test's own subprocess invocation — fixed with `shell: true`, verified with both a positive and a
-deliberately-broken negative-case check so the fix doesn't silently swallow real `tsc` failures. One
-unrelated CI flake (a timing-sensitive assertion in Phase 1's pre-existing `event_loop.test.ts`,
-untouched by this PR) hit once on Windows x64 and cleared on retrigger — confirmed not a regression
-since Windows arm64 passed the same test on the same commit. **Phase 2 remaining**: the differential
-cache-correctness test row and this chunk's own row in the table below are now both satisfied by this
-same landing.
+✅ **Phase 2.5's benchmark suite landed** (squash-merged to `v0.9.0` as `ab0541483`) — per the
+user's explicit direction to do the benchmark work first and hold off on the actual `npm publish`
+step (Phase 2.5's other exit criterion) for a separate go-ahead, which has **not** been given yet.
+Three CI-gating benchmarks (attribute access cached-vs-uncached, bulk `getInfo`, file open/parse)
+over a synthetic 60k-entity fixture, isolated into a dedicated Linux-x64-only `benchmark` CI job so
+timing noise never touches the correctness-test matrix. Thresholds are honestly disclosed as
+derived from first-principles native-call-count analysis rather than local measurement — this
+sandbox has no working C++ toolchain to build the real addon locally — with real headroom; the
+first genuine measurement was the passing CI run itself. A non-gating Python-baseline comparison
+script (`tools/bench_python_baseline.py`) is included as a maintainer-run local tool, per the
+roadmap's own "visible and tracked, not a hard gate" framing — not run in CI (this project's core
+build already has `BUILD_IFCPYTHON=OFF`), so `tools/BASELINE_RATIOS.json` is currently an
+unpopulated placeholder with instructions, not real numbers, until someone runs it locally.
+
+**Recurring CI flake worth tracking**: `test/native/event_loop.test.ts`'s timing-sensitive
+assertion (Phase 1, `MAX_ALLOWED_TICK_GAP_MS`/the duration-scaled threshold) has now flaked on
+Windows CI three separate times across unrelated PRs (twice on Phase 2's Proxy/`.d.ts` chunk, once
+on a docs-only tracker PR) — each time cleared cleanly on retrigger with no code change, so not
+currently blocking anything, but three occurrences across unrelated PRs is a real pattern, not bad
+luck. Worth a dedicated look (loosen the threshold further, or find a less Windows-scheduler-
+sensitive signal) next time someone is in that test for another reason — not urgent enough to
+interrupt Phase 2.5/3 for on its own.
+
+**Next real decision point**: Phase 2.5's own exit criterion also calls for the actual
+`npm publish ifcopenshell@alpha` step and a working README usage example — both explicitly deferred
+pending the user's separate go-ahead, not started.
 
 Also resolved this window: the CI-caching PR's (`#8`, `56acf8063`) merge initially looked
 untraceable to any action by the orchestrating session and was raised as an open trust/process
@@ -123,8 +123,8 @@ binding could be built, since it decided generated-vs-hand-written.
 
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
-| Benchmark suite + one-time Python-baseline comparison | 🔲 | — | — |
-| `npm publish ifcopenshell@alpha` | 🔲 | — | ⏸️ stops for explicit user go-ahead |
+| Benchmark suite + one-time Python-baseline comparison | ✅ | [#19](https://github.com/mikitski/IfcOpenShell/pull/19) | Landed `ab0541483`. 3 CI-gating benchmarks, dedicated Linux-x64 `benchmark` job. Python-baseline script included but not run (no Python/SWIG build in this project's CI); `tools/BASELINE_RATIOS.json` is an unpopulated placeholder pending a maintainer running it locally. |
+| `npm publish ifcopenshell@alpha` | 🔲 | — | ⏸️ Explicit user go-ahead requested (per "do benchmarks first" direction) — **not yet given**. README usage example also still needed for this exit criterion. |
 
 ## Phase 3 — `util` Tier A [Lane A]
 
