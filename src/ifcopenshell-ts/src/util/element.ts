@@ -6,21 +6,30 @@
 // of everything else in `util` since most of it depends on this module). This is
 // **chunk 1 of 3** for `element.py` (2009 lines, ~67 functions -- too large for one
 // PR, matching this project's own chunk-size discipline): the property-set/quantity-set
-// and type/material/style query functions. Chunks 2 (spatial/structural-graph queries)
-// and 3 (structural-editing helpers: `copy`/`remove_deep`/`replace_element`) are
-// separate, later PRs against this same file -- not touched here.
+// and type/material/style query functions. Chunk 2 (this same file, appended below)
+// covers the spatial/structural-graph query functions. Chunk 3 (structural-editing
+// helpers: `copy`/`remove_deep`/`replace_element`) is a separate, later PR against this
+// same file -- not touched here.
 //
-// Ported in this chunk:
+// Ported in chunk 1:
 // - Psets/Qtos: get_pset, get_psets, get_property_definition, get_quantity,
 //   get_quantities, get_property, get_properties, get_elements_by_pset, has_property.
 // - Type/material/style: get_predefined_type, is_userdefined_type, get_type, get_types,
 //   get_material, get_materials, get_material_layers, get_material_profiles, get_styles,
 //   get_elements_by_material, get_elements_by_style, get_elements_by_representation.
 //
+// Ported in chunk 2 (spatial/structural-graph queries -- see that section's own header
+// comment below for scope-inclusion notes on `get_controls`):
+// - get_container, get_referenced_structures, get_structure_referenced_elements,
+//   get_decomposition, get_grouped_by, get_groups, get_controls, get_parent,
+//   get_filled_void, get_voided_element, get_adhered_element, get_aggregate, get_nest,
+//   get_parts, get_contained, get_components, get_openings, has_openings.
+//
 // Explicitly NOT in this chunk's scope (see the task brief this was built from):
 // `get_shape_aspects` (calls `ifcopenshell.util.representation`, a not-yet-ported Tier B
-// module) and everything else in `element.py` not listed above (spatial/structural-graph
-// queries, structural-editing helpers) -- future chunks.
+// module), `get_referenced_elements` (see chunk 2's header comment below for why), and
+// everything else in `element.py` not listed above (structural-editing helpers) --
+// future chunks.
 //
 // Two real, disclosed findings surfaced while building this chunk (both flagged in this
 // chunk's PR description/final report, neither "fixed" by adding a new native primitive
@@ -174,15 +183,27 @@ function attributeNameAt(entity: EntityInstance, index: number): string {
  * project's established convention for a Python `set()`-returning function, matching
  * `IfcFile.getInverse`'s own default-`allowDuplicate=false` return shape) only at the
  * end via `toSet()`.
+ *
+ * `add`/`update` tolerate a `null`/`undefined` member: a real Python `set()` happily
+ * accepts `None` as a member (e.g. `getElementsByPset`, chunk 1, calling
+ * `elements.add(pset.get("ProfileDefinition"))`/`.add(pset.get("Material"))` against an
+ * `IfcProfileProperties`/`IfcMaterialProperties` whose mandatory attribute hasn't been
+ * set yet -- an edge case, but not one Python itself guards against). `Set<EntityInstance>`
+ * has no `null` member to match that with, so this silently drops the null instead of
+ * crashing on `instance.identity()` -- a disclosed, narrow divergence (found during this
+ * chunk's `/code-review` pass; fixed here, in the shared helper, rather than chunk 1's
+ * `getElementsByPset` itself, since every `set()`-returning function in this module --
+ * chunk 2's included -- goes through this same class).
  */
 class EntityInstanceSet {
 	private readonly byIdentity = new Map<number, EntityInstance>();
 
-	add(instance: EntityInstance): void {
+	add(instance: EntityInstance | null | undefined): void {
+		if (!instance) return;
 		this.byIdentity.set(instance.identity(), instance);
 	}
 
-	update(instances: Iterable<EntityInstance>): void {
+	update(instances: Iterable<EntityInstance | null | undefined>): void {
 		for (const instance of instances) this.add(instance);
 	}
 
@@ -1029,4 +1050,405 @@ export function getElementsByRepresentation(
 		}
 	}
 	return results.toSet();
+}
+
+// --- Spatial / structural-graph queries (chunk 2 of 3) ---
+//
+// Ported from `element.py` lines ~1061-1965: the container/decomposition/aggregation/
+// nesting/grouping/void relationship-graph query functions. Uses the same internal
+// helpers (`attrOrMissing`/`attrOrNull`/`attrList`/`entityEquals`/`EntityInstanceSet`)
+// as chunk 1 above -- see that section's own doc comments for what each reconstructs
+// and why (Python's `getattr(x, name, default)` three-way None/missing/empty semantics,
+// and `set()`-returning functions' `Set<EntityInstance>` dedup-by-identity convention).
+//
+// A note on `getattr(..., default)` vs. direct attribute access: several Python
+// functions here read `element`'s own top-level attribute with an explicit `getattr`
+// default (e.g. `getattr(element, "ContainedInStructure", None)`), meaning the class
+// might not declare that inverse at all and Python tolerates that by falling back to
+// the default -- these are ported via `attrList`/`attrOrNull` below, matching chunk 1's
+// own convention. A few (`get_structure_referenced_elements`'s `structure
+// .ReferencesElements`, `get_groups`/`get_controls`'s `element.HasAssignments`) instead
+// access the attribute directly with **no** default, meaning Python itself would raise
+// `AttributeError` if called against an element whose class doesn't declare it -- these
+// are ported via a direct `.get(...)` call (which throws the TS equivalent), not
+// `attrList`, to preserve that same "wrong argument type raises" behavior rather than
+// silently swallowing it into `[]`. Every relationship object's own *forward* attribute
+// access (e.g. `rel.RelatedObjects`, `rel.RelatingStructure`) is likewise a direct
+// `.get(...)` call throughout -- Python never defaults those either, since `rel` is
+// always already known to be of the expected relationship class at that point.
+//
+// `get_controls` (Python: `Generator[entity_instance]`, via `HasAssignments` ->
+// `IfcRelAssignsToControl`) is included in this chunk's scope: the task brief asked to
+// check whether it belongs here, and it does -- it's the exact same
+// `HasAssignments`-iteration-by-relationship-subtype shape as `get_groups` (which *is*
+// explicitly in scope), just filtering `IfcRelAssignsToControl`/`RelatingControl`
+// instead of `IfcRelAssignsToGroup`/`RelatingGroup`. `get_referenced_elements` (the
+// task brief's other candidate) is NOT included: unlike everything else in this
+// grouping, it isn't a decomposition/aggregation/containment/grouping graph walk --
+// it's keyed off `REFERENCE_TYPES` (`IfcClassificationReference`/`IfcDocumentReference`/
+// `IfcLibraryReference`/etc.), i.e. classification/document/library *association*
+// relationships, which is squarely `util.classification`/`util.document` territory (both
+// separate, not-yet-ported Phase 3 chunks per `PROGRESS.md`'s own module list) rather
+// than this chunk's spatial/structural-graph domain. Porting it here would require
+// either duplicating that REFERENCE_TYPES table now (scope creep, pre-empting those
+// future chunks' own design decisions) or leaving it half-implemented; left for a later
+// chunk instead.
+//
+// Both Python `Generator`-returning functions in this chunk's scope (`get_controls`,
+// `get_openings`) are ported as plain eager `EntityInstance[]`-returning functions, not
+// TS generator functions -- every other list/set-returning function in this module
+// (chunk 1 included) already returns a concrete array/Set, and nothing in either
+// Python function's own behavior (nor `has_openings`, `get_openings`'s only real
+// caller within this module) depends on laziness for correctness, only for not walking
+// more of the aggregate chain than necessary -- a performance nicety, not an observable
+// behavior, and a real Python `list(get_controls(element))`/`next(get_openings(element)
+// , False)` call site sees identical values either way. Disclosed here rather than
+// silently diverging from the "match Python's return shape" rule chunk 1 established.
+
+/**
+ * Python: `get_container(element, should_get_direct=False, ifc_class=None) ->
+ * Union[entity_instance, None]`.
+ *
+ * Retrieves the spatial structure container of an element.
+ */
+export function getContainer(
+	element: EntityInstance,
+	shouldGetDirect = false,
+	ifcClass: string | null = null,
+): EntityInstance | null {
+	if (shouldGetDirect) {
+		const containedInStructure = attrList(element, "ContainedInStructure");
+		if (containedInStructure.length > 0) {
+			const container = containedInStructure[0].get("RelatingStructure") as EntityInstance;
+			if (!ifcClass) return container;
+			if (container.isA(ifcClass)) return container;
+		}
+		return null;
+	}
+
+	const containedInStructure = attrList(element, "ContainedInStructure");
+	if (containedInStructure.length > 0) {
+		let container: EntityInstance | null = containedInStructure[0].get("RelatingStructure") as EntityInstance;
+		if (!ifcClass) return container;
+		while (container) {
+			if (container.isA(ifcClass)) return container;
+			container = getAggregate(container);
+		}
+		return null;
+	}
+
+	const parent = getParent(element);
+	if (parent) {
+		return getContainer(parent, shouldGetDirect, ifcClass);
+	}
+	return null;
+}
+
+/**
+ * Python: `get_referenced_structures(element) -> list[entity_instance]`.
+ *
+ * Retrieves a list of referenced spatial elements. Typically useful for multistorey
+ * elements, such as columns or facade elements, or elements that span multiple spaces
+ * or in-between spaces, such as stairs, doors, etc.
+ */
+export function getReferencedStructures(element: EntityInstance): EntityInstance[] {
+	return attrList(element, "ReferencedInStructures").map((r) => r.get("RelatingStructure") as EntityInstance);
+}
+
+/**
+ * Python: `get_structure_referenced_elements(structure) -> set[entity_instance]`.
+ *
+ * Retrieves a set of elements referenced by a structure.
+ */
+export function getStructureReferencedElements(structure: EntityInstance): Set<EntityInstance> {
+	const referenced = new EntityInstanceSet();
+	for (const rel of structure.get("ReferencesElements") as EntityInstance[]) {
+		referenced.update(rel.get("RelatedElements") as EntityInstance[]);
+	}
+	return referenced.toSet();
+}
+
+/**
+ * Python: `get_decomposition(element, is_recursive=True) -> set[entity_instance]`.
+ *
+ * Retrieves all subelements of an element based on the spatial decomposition
+ * hierarchy. This includes all subspaces and elements contained in subspaces, parts of
+ * an aggregate, all openings, all fills of any openings, and any surface features
+ * adhering to an element (IFC4.3 and above).
+ */
+export function getDecomposition(element: EntityInstance, isRecursive = true): Set<EntityInstance> {
+	const queue: EntityInstance[] = [element];
+	const results = new EntityInstanceSet();
+	while (queue.length > 0) {
+		const current = queue.pop() as EntityInstance;
+		for (const rel of attrList(current, "ContainsElements")) {
+			const related = rel.get("RelatedElements") as EntityInstance[];
+			queue.push(...related);
+			results.update(related);
+		}
+		for (const rel of attrList(current, "IsDecomposedBy")) {
+			const related = rel.get("RelatedObjects") as EntityInstance[];
+			queue.push(...related);
+			results.update(related);
+		}
+		for (const rel of attrList(current, "HasOpenings")) {
+			const related = rel.get("RelatedOpeningElement") as EntityInstance;
+			queue.push(related);
+			results.add(related);
+		}
+		for (const rel of attrList(current, "HasFillings")) {
+			const related = rel.get("RelatedBuildingElement") as EntityInstance;
+			queue.push(related);
+			results.add(related);
+		}
+		for (const rel of attrList(current, "IsNestedBy")) {
+			const related = rel.get("RelatedObjects") as EntityInstance[];
+			queue.push(...related);
+			results.update(related);
+		}
+		for (const rel of attrList(current, "HasSurfaceFeatures")) {
+			const related = rel.get("RelatedSurfaceFeatures") as EntityInstance[];
+			queue.push(...related);
+			results.update(related);
+		}
+		if (!isRecursive) break;
+	}
+	return results.toSet();
+}
+
+/**
+ * Python: `get_grouped_by(element, is_recursive=True) -> list[entity_instance]`.
+ *
+ * Retrieves all subelements of an element based on the group.
+ */
+export function getGroupedBy(element: EntityInstance, isRecursive = true): EntityInstance[] {
+	const queue: EntityInstance[] = [element];
+	const results: EntityInstance[] = [];
+	while (queue.length > 0) {
+		const current = queue.pop() as EntityInstance;
+		for (const rel of attrList(current, "IsGroupedBy")) {
+			const relatedObjects = rel.get("RelatedObjects") as EntityInstance[];
+			queue.push(...relatedObjects);
+			results.push(...relatedObjects);
+		}
+		if (!isRecursive) break;
+	}
+	return results;
+}
+
+/**
+ * Python: `get_groups(element) -> list[entity_instance]`.
+ *
+ * Retrieves the groups (`IfcGroup`) an element is assigned to.
+ */
+export function getGroups(element: EntityInstance): EntityInstance[] {
+	const groups: EntityInstance[] = [];
+	for (const rel of element.get("HasAssignments") as EntityInstance[]) {
+		if (rel.isA("IfcRelAssignsToGroup")) {
+			groups.push(rel.get("RelatingGroup") as EntityInstance);
+		}
+	}
+	return groups;
+}
+
+/**
+ * Python: `get_controls(element) -> Generator[entity_instance]`.
+ *
+ * Retrieves the controls (`IfcControl`) assigned to an element. See this section's
+ * header comment for why this is included in this chunk's scope, and why it's ported
+ * as an eager `EntityInstance[]` rather than a lazy generator.
+ */
+export function getControls(element: EntityInstance): EntityInstance[] {
+	const controls: EntityInstance[] = [];
+	for (const rel of element.get("HasAssignments") as EntityInstance[]) {
+		if (rel.isA("IfcRelAssignsToControl")) {
+			controls.push(rel.get("RelatingControl") as EntityInstance);
+		}
+	}
+	return controls;
+}
+
+/**
+ * Python: `get_parent(element, ifc_class=None) -> Union[entity_instance, None]`.
+ *
+ * Retrieves the parent in the spatial hierarchy: spatial containment, aggregation,
+ * nesting, filling, voiding, or adherence (IFC4.3 and above) -- whichever applies.
+ */
+export function getParent(element: EntityInstance, ifcClass: string | null = null): EntityInstance | null {
+	const parent: EntityInstance | null =
+		getContainer(element, true) ??
+		getAggregate(element) ??
+		getNest(element) ??
+		getFilledVoid(element) ??
+		getVoidedElement(element) ??
+		getAdheredElement(element);
+
+	if (!ifcClass) return parent;
+
+	let current = parent;
+	while (current) {
+		if (current.isA(ifcClass)) return current;
+		current = getParent(current);
+	}
+	return null;
+}
+
+/**
+ * Python: `get_filled_void(element) -> Union[entity_instance, None]`.
+ *
+ * If the element is filling a void, get the void (e.g. a window/door filling an
+ * opening inside a wall).
+ */
+export function getFilledVoid(element: EntityInstance): EntityInstance | null {
+	const rel = attrList(element, "FillsVoids");
+	if (rel.length > 0) {
+		return rel[0].get("RelatingOpeningElement") as EntityInstance;
+	}
+	return null;
+}
+
+/**
+ * Python: `get_voided_element(element) -> Union[entity_instance, None]`.
+ *
+ * For an opening, get the building element that the opening is voiding.
+ */
+export function getVoidedElement(element: EntityInstance): EntityInstance | null {
+	const rel = attrList(element, "VoidsElements");
+	if (rel.length > 0) {
+		return rel[0].get("RelatingBuildingElement") as EntityInstance;
+	}
+	return null;
+}
+
+/**
+ * Python: `get_adhered_element(element) -> Union[entity_instance, None]`.
+ *
+ * If the element is a surface feature (IFC4.3 `IfcSurfaceFeature`), get the host
+ * element it adheres to via `IfcRelAdheresToElement`.
+ */
+export function getAdheredElement(element: EntityInstance): EntityInstance | null {
+	const rel = attrList(element, "AdheresToElement");
+	if (rel.length > 0) {
+		return rel[0].get("RelatingElement") as EntityInstance;
+	}
+	return null;
+}
+
+/**
+ * Python: `get_aggregate(element) -> Union[entity_instance, None]`.
+ *
+ * Retrieves the aggregate parent of an element.
+ */
+export function getAggregate(element: EntityInstance): EntityInstance | null {
+	const decomposes = attrList(element, "Decomposes");
+	if (decomposes.length === 0) return null;
+	const isIfc2x3 = (element.file as IfcFile).schema === "IFC2X3";
+	const rel = decomposes[0];
+	if (isIfc2x3 && !rel.isA("IfcRelAggregates")) {
+		// In IFC2X3, Decomposes is used for both aggregates and nests, but only for 1 at
+		// a time.
+		return null;
+	}
+	return rel.get("RelatingObject") as EntityInstance;
+}
+
+/**
+ * Python: `get_nest(element) -> Union[entity_instance, None]`.
+ *
+ * Retrieves the nest parent of an element.
+ */
+export function getNest(element: EntityInstance): EntityInstance | null {
+	const isIfc2x3 = (element.file as IfcFile).schema === "IFC2X3";
+	if (isIfc2x3) {
+		const decomposes = attrList(element, "Decomposes");
+		if (decomposes.length === 0) return null;
+		if (decomposes[0].isA("IfcRelNests")) {
+			return decomposes[0].get("RelatingObject") as EntityInstance;
+		}
+		return null;
+	}
+	const nests = attrList(element, "Nests");
+	if (nests.length > 0) {
+		return nests[0].get("RelatingObject") as EntityInstance;
+	}
+	return null;
+}
+
+/**
+ * Python: `get_parts(element) -> list[entity_instance]`.
+ *
+ * Retrieves the parts of an element that have an aggregation relationship.
+ */
+export function getParts(element: EntityInstance): EntityInstance[] {
+	const objects: EntityInstance[] = [];
+	const isNotIfc2x3 = (element.file as IfcFile).schema !== "IFC2X3";
+	for (const rel of attrList(element, "IsDecomposedBy")) {
+		if (isNotIfc2x3 || rel.isA("IfcRelAggregates")) {
+			objects.push(...(rel.get("RelatedObjects") as EntityInstance[]));
+		}
+	}
+	return objects;
+}
+
+/**
+ * Python: `get_contained(element) -> list[entity_instance]`.
+ *
+ * Retrieves the contained elements of a spatial element.
+ */
+export function getContained(element: EntityInstance): EntityInstance[] {
+	const objects: EntityInstance[] = [];
+	for (const rel of attrList(element, "ContainsElements")) {
+		objects.push(...(rel.get("RelatedElements") as EntityInstance[]));
+	}
+	return objects;
+}
+
+/**
+ * Python: `get_components(element, include_ports=False) -> list[entity_instance]`.
+ *
+ * Retrieves the components of an element that have a nest relationship. For nested
+ * ports, see `ifcopenshell.util.system` (not yet ported).
+ */
+export function getComponents(element: EntityInstance, includePorts = false): EntityInstance[] {
+	const objects: EntityInstance[] = [];
+	const isIfc2x3 = (element.file as IfcFile).schema === "IFC2X3";
+	if (isIfc2x3) {
+		for (const rel of attrList(element, "IsDecomposedBy")) {
+			if (rel.isA("IfcRelNests")) {
+				objects.push(...(rel.get("RelatedObjects") as EntityInstance[]));
+			}
+		}
+	} else {
+		for (const rel of attrList(element, "IsNestedBy")) {
+			objects.push(...(rel.get("RelatedObjects") as EntityInstance[]));
+		}
+	}
+	if (includePorts) return objects;
+	return objects.filter((e) => !e.isA("IfcPort"));
+}
+
+/**
+ * Python: `get_openings(element) -> Generator[entity_instance, None, None]`.
+ *
+ * Get element openings as `IfcRelVoidsElement` (not the `IfcOpeningElement` itself --
+ * use `.get("RelatedOpeningElement")` on each result to get that). See this section's
+ * header comment for why this is ported as an eager `EntityInstance[]` rather than a
+ * lazy generator.
+ */
+export function getOpenings(element: EntityInstance): EntityInstance[] {
+	const openings: EntityInstance[] = [...attrList(element, "HasOpenings")];
+	const aggregate = getAggregate(element);
+	if (aggregate) {
+		openings.push(...getOpenings(aggregate));
+	}
+	return openings;
+}
+
+/**
+ * Python: `has_openings(element) -> bool`.
+ *
+ * Check if the element has openings.
+ */
+export function hasOpenings(element: EntityInstance): boolean {
+	return getOpenings(element).length > 0;
 }
