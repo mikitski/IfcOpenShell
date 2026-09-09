@@ -1,19 +1,29 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/util/test_element.py` (src/ifcopenshell-python), covering
-// exactly this chunk's scope (see `src/util/element.ts`'s own header comment): the
-// pset/qto and type/material/style query functions. Test classes for functions outside
-// this chunk (spatial/structural-graph queries, structural-editing helpers,
-// `get_shape_aspects`) are skipped here -- they land with the chunks that port those
-// functions.
+// this chunk's scope plus chunk 1's (see `src/util/element.ts`'s own header comment):
+// chunk 1's pset/qto and type/material/style query functions, and chunk 2's
+// spatial/structural-graph query functions (container/decomposition/aggregation/
+// nesting/grouping/void relationships). Test classes for functions outside both
+// chunks' scope (structural-editing helpers, `get_shape_aspects`,
+// `get_referenced_elements`) are skipped here -- they land with the chunks that port
+// those functions.
 //
 // Python's own test suite builds its fixtures via `ifcopenshell.api.*` (`api.root
-// .create_entity`, `api.pset.add_pset`, `api.material.assign_material`, ...) -- none of
-// which exist yet in this TS port (`api` is Phase 6+, planning/ifcopenshell-ts/
+// .create_entity`, `api.pset.add_pset`, `api.material.assign_material`,
+// `api.spatial.assign_container`, `api.aggregate.assign_object`, ...) -- none of which
+// exist yet in this TS port (`api` is Phase 6+, planning/ifcopenshell-ts/
 // 20-roadmap.md). This file's `test/bootstrap.ts`-style local helpers below build the
 // same underlying entity graphs directly (`file.createEntity(...)` + `.set(...)`,
 // matching `test/file.test.ts`'s own established pattern for this codebase), matching
 // Python's test *coverage* (the same behaviors/edge cases), not its exact fixture code.
+//
+// Several of chunk 2's own functions have no dedicated Python test class at all
+// (`get_grouped_by`, `get_filled_void`, `get_voided_element`, `get_adhered_element`,
+// `get_openings`/`has_openings` -- confirmed by grepping `test_element.py` for each
+// name) -- for those, the tests below are original coverage of the documented Python
+// behavior (`element.py`'s own docstrings/source), not a port of an existing Python
+// test.
 
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../src/entityInstance";
@@ -143,6 +153,70 @@ function assignMaterial(file: IfcFile, elements: EntityInstance[], material: Ent
 
 function ids(instances: Iterable<EntityInstance>): number[] {
 	return [...instances].map((i) => i.id()).sort((a, b) => a - b);
+}
+
+// --- chunk 2 fixture helpers (spatial/structural-graph relationships -- see this
+// file's header comment; no Python/api counterpart, matching this file's existing
+// `assignType`/`assignMaterial` pattern above) ---
+
+function containElement(file: IfcFile, structure: EntityInstance, elements: EntityInstance[]): EntityInstance {
+	const rel = file.createEntity("IfcRelContainedInSpatialStructure");
+	rel.set("RelatingStructure", structure);
+	rel.set("RelatedElements", elements);
+	return rel;
+}
+
+function referenceStructure(file: IfcFile, structure: EntityInstance, elements: EntityInstance[]): EntityInstance {
+	const rel = file.createEntity("IfcRelReferencedInSpatialStructure");
+	rel.set("RelatingStructure", structure);
+	rel.set("RelatedElements", elements);
+	return rel;
+}
+
+function assignAggregate(
+	file: IfcFile,
+	relatingObject: EntityInstance,
+	relatedObjects: EntityInstance[],
+): EntityInstance {
+	const rel = file.createEntity("IfcRelAggregates");
+	rel.set("RelatingObject", relatingObject);
+	rel.set("RelatedObjects", relatedObjects);
+	return rel;
+}
+
+function assignNest(file: IfcFile, relatingObject: EntityInstance, relatedObjects: EntityInstance[]): EntityInstance {
+	const rel = file.createEntity("IfcRelNests");
+	rel.set("RelatingObject", relatingObject);
+	rel.set("RelatedObjects", relatedObjects);
+	return rel;
+}
+
+function addOpening(file: IfcFile, element: EntityInstance, opening: EntityInstance): EntityInstance {
+	const rel = file.createEntity("IfcRelVoidsElement");
+	rel.set("RelatingBuildingElement", element);
+	rel.set("RelatedOpeningElement", opening);
+	return rel;
+}
+
+function addFilling(file: IfcFile, opening: EntityInstance, element: EntityInstance): EntityInstance {
+	const rel = file.createEntity("IfcRelFillsElement");
+	rel.set("RelatingOpeningElement", opening);
+	rel.set("RelatedBuildingElement", element);
+	return rel;
+}
+
+function assignGroup(file: IfcFile, group: EntityInstance, elements: EntityInstance[]): EntityInstance {
+	const rel = file.createEntity("IfcRelAssignsToGroup");
+	rel.set("RelatingGroup", group);
+	rel.set("RelatedObjects", elements);
+	return rel;
+}
+
+function assignControl(file: IfcFile, control: EntityInstance, elements: EntityInstance[]): EntityInstance {
+	const rel = file.createEntity("IfcRelAssignsToControl");
+	rel.set("RelatingControl", control);
+	rel.set("RelatedObjects", elements);
+	return rel;
 }
 
 // --- Psets / Qtos ---
@@ -550,6 +624,22 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC4" || s === "IFC2X3"))(
 			const profile = file.createEntity("IfcRectangleProfileDef");
 			const pset = addPset(file, profile, "FooBar");
 			expect(ids(subject.getElementsByPset(pset))).toEqual(ids([profile]));
+		});
+
+		// Regression test for a real bug found by this chunk's `/code-review` pass (see
+		// `EntityInstanceSet`'s own doc comment above, in the "internal helpers" section):
+		// `IfcMaterialProperties`/`IfcProfileProperties`' mandatory `Material`/
+		// `ProfileDefinition` attribute not yet being set (e.g. mid-construction) used to
+		// crash here with "Cannot read properties of null (reading 'identity')" --
+		// Python's own `set().add(None)` never raises.
+		test("does not crash when the pset's Material/ProfileDefinition isn't set yet", () => {
+			const file = createTestFile(schema);
+			const materialPset = file.createEntity("IfcMaterialProperties");
+			expect(subject.getElementsByPset(materialPset)).toEqual(new Set());
+			if (schema !== "IFC2X3") {
+				const profilePset = file.createEntity("IfcProfileProperties");
+				expect(subject.getElementsByPset(profilePset)).toEqual(new Set());
+			}
 		});
 	},
 );
@@ -1246,5 +1336,387 @@ describe("util.element hasProperty", () => {
 		const file = createTestFile("IFC4");
 		const product = file.createEntity("IfcWall");
 		expect(subject.hasProperty(product, "NetArea")).toBe(false);
+	});
+});
+
+// --- Spatial / structural-graph queries (chunk 2) ---
+// Python: `TestGetContainerIFC4` (test.bootstrap.IFC4 only, no IFC2X3 variant).
+
+describe("util.element getContainer (IFC4)", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	test("getting the spatial container of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [element]);
+		expect(subject.getContainer(element)?.id()).toBe(building.id());
+	});
+
+	test("getting an indirect spatial container of an element", () => {
+		const file = newFile();
+		const subelement = file.createEntity("IfcWall");
+		const element = file.createEntity("IfcElementAssembly");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [element]);
+		assignAggregate(file, element, [subelement]);
+		expect(subject.getContainer(subelement)?.id()).toBe(building.id());
+	});
+
+	test("getting nothing if we enforce only getting direct spatial containers", () => {
+		const file = newFile();
+		const subelement = file.createEntity("IfcWall");
+		const element = file.createEntity("IfcElementAssembly");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [element]);
+		assignAggregate(file, element, [subelement]);
+		expect(subject.getContainer(subelement, true)).toBeNull();
+	});
+
+	test("getting the specific spatial container of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const building = file.createEntity("IfcBuilding");
+		const storey = file.createEntity("IfcBuildingStorey");
+		assignAggregate(file, building, [storey]);
+		containElement(file, storey, [element]);
+		expect(subject.getContainer(element, false, "IfcBuilding")?.id()).toBe(building.id());
+		expect(subject.getContainer(element, false, "IfcSite")).toBeNull();
+	});
+
+	test("getting the specific spatial container of an element indirectly", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcElementAssembly");
+		const subelement = file.createEntity("IfcWall");
+		assignAggregate(file, element, [subelement]);
+		const building = file.createEntity("IfcBuilding");
+		const storey = file.createEntity("IfcBuildingStorey");
+		assignAggregate(file, building, [storey]);
+		containElement(file, storey, [element]);
+		expect(subject.getContainer(subelement, false, "IfcBuilding")?.id()).toBe(building.id());
+		expect(subject.getContainer(subelement, false, "IfcSite")).toBeNull();
+	});
+});
+
+// Python: `TestGetReferencedStructures`/`TestGetReferencedStructuresIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getReferencedStructures (%s)", (schema) => {
+	test("getting references of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		expect(subject.getReferencedStructures(element)).toEqual([]);
+		const building = file.createEntity("IfcBuilding");
+		referenceStructure(file, building, [element]);
+		expect(ids(subject.getReferencedStructures(element))).toEqual(ids([building]));
+		const building2 = file.createEntity("IfcBuilding");
+		referenceStructure(file, building2, [element]);
+		expect(ids(subject.getReferencedStructures(element))).toEqual(ids([building, building2]));
+	});
+});
+
+// Python: `TestGetStructureReferencedElements`/`TestGetStructureReferencedElementsIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getStructureReferencedElements (%s)", (schema) => {
+	test("getting references of an element", () => {
+		const file = createTestFile(schema);
+		const building = file.createEntity("IfcBuilding");
+		expect(subject.getStructureReferencedElements(building)).toEqual(new Set());
+		const element = file.createEntity("IfcWall");
+		referenceStructure(file, building, [element]);
+		expect(ids(subject.getStructureReferencedElements(building))).toEqual(ids([element]));
+		const element2 = file.createEntity("IfcWall");
+		referenceStructure(file, building, [element2]);
+		expect(ids(subject.getStructureReferencedElements(building))).toEqual(ids([element, element2]));
+	});
+});
+
+// Python: `TestGetDecompositionIFC4` (IFC4 only, no IFC2X3 variant).
+describe("util.element getDecomposition (IFC4)", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	test("getting decomposed subelements of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcElementAssembly");
+		const subelement = file.createEntity("IfcBeam");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [element]);
+		assignAggregate(file, element, [subelement]);
+		expect(ids(subject.getDecomposition(building))).toEqual(ids([element, subelement]));
+	});
+
+	test("getting openings and fills of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const subelement = file.createEntity("IfcOpeningElement");
+		const subsubelement = file.createEntity("IfcWindow");
+		addOpening(file, element, subelement);
+		addFilling(file, subelement, subsubelement);
+		expect(ids(subject.getDecomposition(element))).toEqual(ids([subelement, subsubelement]));
+	});
+});
+
+// No Python test class exists for `get_grouped_by` -- original coverage of the
+// documented behavior (see this file's header comment).
+describe("util.element getGroupedBy (IFC4)", () => {
+	test("recursively collecting grouped elements", () => {
+		const file = createTestFile("IFC4");
+		const topGroup = file.createEntity("IfcGroup");
+		const subGroup = file.createEntity("IfcGroup");
+		const element = file.createEntity("IfcWall");
+		assignGroup(file, topGroup, [subGroup]);
+		assignGroup(file, subGroup, [element]);
+		expect(ids(subject.getGroupedBy(topGroup))).toEqual(ids([subGroup, element]));
+	});
+
+	test("is_recursive=false only collects the direct level", () => {
+		const file = createTestFile("IFC4");
+		const topGroup = file.createEntity("IfcGroup");
+		const subGroup = file.createEntity("IfcGroup");
+		const element = file.createEntity("IfcWall");
+		assignGroup(file, topGroup, [subGroup]);
+		assignGroup(file, subGroup, [element]);
+		expect(ids(subject.getGroupedBy(topGroup, false))).toEqual(ids([subGroup]));
+	});
+});
+
+// Python: `TestGetGroupsIFC4`/`TestGetGroupsIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getGroups (%s)", (schema) => {
+	test("getting the groups an element is assigned to", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const group1 = file.createEntity("IfcGroup");
+		const group2 = file.createEntity("IfcGroup");
+		assignGroup(file, group1, [element]);
+		assignGroup(file, group2, [element]);
+		expect(ids(subject.getGroups(element))).toEqual(ids([group1, group2]));
+	});
+});
+
+// Python: `TestGetControls`/`TestGetControlsIFC4`/`TestGetControlsIFC4X3` -- see
+// `src/util/element.ts`'s chunk 2 header comment for why `get_controls` is included in
+// this chunk's scope.
+describe.each(AVAILABLE_SCHEMAS)("util.element getControls (%s)", (schema) => {
+	test("getting the controls assigned to an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const control = file.createEntity("IfcCostSchedule");
+		assignControl(file, control, [element]);
+		expect(ids(subject.getControls(element))).toEqual(ids([control]));
+	});
+});
+
+// Python: `TestGetParentIFC4` (IFC4 only, no IFC2X3 variant).
+describe("util.element getParent (IFC4)", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	test("getting the parent of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [element]);
+		expect(subject.getParent(element)?.id()).toBe(building.id());
+	});
+
+	test("getting the specific parent of an element", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const building = file.createEntity("IfcBuilding");
+		const storey = file.createEntity("IfcBuildingStorey");
+		assignAggregate(file, building, [storey]);
+		containElement(file, storey, [element]);
+		expect(subject.getParent(element, "IfcBuilding")?.id()).toBe(building.id());
+		expect(subject.getParent(element, "IfcSite")).toBeNull();
+	});
+
+	test("getting the specific parent of an element via voiding", () => {
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+		const building = file.createEntity("IfcBuilding");
+		containElement(file, building, [wall]);
+		const opening = file.createEntity("IfcOpeningElement");
+		addOpening(file, wall, opening);
+		const window = file.createEntity("IfcWindow");
+		addFilling(file, opening, window);
+		expect(subject.getParent(window, "IfcWall")?.id()).toBe(wall.id());
+		expect(subject.getParent(window, "IfcBuilding")?.id()).toBe(building.id());
+		expect(subject.getParent(window, "IfcSite")).toBeNull();
+	});
+});
+
+// No Python test class exists for `get_filled_void`/`get_voided_element` -- original
+// coverage of the documented behavior.
+describe("util.element getFilledVoid / getVoidedElement (IFC4)", () => {
+	test("getting the void an element fills, and the element a void is voiding", () => {
+		const file = createTestFile("IFC4");
+		const wall = file.createEntity("IfcWall");
+		const opening = file.createEntity("IfcOpeningElement");
+		addOpening(file, wall, opening);
+		const window = file.createEntity("IfcWindow");
+		addFilling(file, opening, window);
+
+		expect(subject.getFilledVoid(window)?.id()).toBe(opening.id());
+		expect(subject.getVoidedElement(opening)?.id()).toBe(wall.id());
+	});
+
+	test("returns null when there is no relationship", () => {
+		const file = createTestFile("IFC4");
+		const window = file.createEntity("IfcWindow");
+		const opening = file.createEntity("IfcOpeningElement");
+		expect(subject.getFilledVoid(window)).toBeNull();
+		expect(subject.getVoidedElement(opening)).toBeNull();
+	});
+});
+
+// No Python test class exists for `get_adhered_element` -- original coverage.
+// `IfcRelAdheresToElement`/`IfcSurfaceFeature` are IFC4.3-and-above additions, so this
+// is gated on `AVAILABLE_SCHEMAS` (not a hard-coded `"IFC4X3"` literal in a `describe`
+// call, per this file's own established convention -- see this chunk's task brief).
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("util.element getAdheredElement (IFC4X3)", () => {
+	test("getting the element a surface feature adheres to", () => {
+		const file = createTestFile("IFC4X3");
+		const course = file.createEntity("IfcCourse");
+		const marking = file.createEntity("IfcSurfaceFeature");
+		const rel = file.createEntity("IfcRelAdheresToElement");
+		rel.set("RelatingElement", course);
+		rel.set("RelatedSurfaceFeatures", [marking]);
+		expect(subject.getAdheredElement(marking)?.id()).toBe(course.id());
+	});
+
+	test("returns null when the element does not adhere to anything", () => {
+		const file = createTestFile("IFC4X3");
+		const marking = file.createEntity("IfcSurfaceFeature");
+		expect(subject.getAdheredElement(marking)).toBeNull();
+	});
+});
+
+// Python: `TestGetAggregateIFC4` (IFC4 only, no IFC2X3 variant).
+describe("util.element getAggregate (IFC4)", () => {
+	test("getting the containing aggregate of a subelement", () => {
+		const file = createTestFile("IFC4");
+		const element = file.createEntity("IfcWall");
+		const subelement = file.createEntity("IfcCovering");
+		assignAggregate(file, element, [subelement]);
+		expect(subject.getAggregate(subelement)?.id()).toBe(element.id());
+	});
+
+	test("returns null when the element has no aggregate parent", () => {
+		const file = createTestFile("IFC4");
+		const element = file.createEntity("IfcWall");
+		expect(subject.getAggregate(element)).toBeNull();
+	});
+});
+
+// Python: `TestGetNestIFC4`/`TestGetNestIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getNest (%s)", (schema) => {
+	test("getting the nest parent of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcTask");
+		const subelement = file.createEntity("IfcTask");
+		assignNest(file, element, [subelement]);
+		expect(subject.getNest(subelement)?.id()).toBe(element.id());
+	});
+});
+
+// Python: `TestGetPartsIFC4`/`TestGetPartsIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getParts (%s)", (schema) => {
+	test("getting the aggregated parts of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcElementAssembly");
+		const subelement = file.createEntity("IfcWindow");
+		assignAggregate(file, element, [subelement]);
+
+		// Test two separate rels.
+		const rel = file.createEntity("IfcRelAggregates");
+		const subelement2 = file.createEntity("IfcWindow");
+		rel.set("RelatingObject", element);
+		rel.set("RelatedObjects", [subelement2]);
+
+		expect(ids(subject.getParts(element))).toEqual(ids([subelement, subelement2]));
+	});
+});
+
+// Python: `TestGetContainedIFC4`/`TestGetContainedIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getContained (%s)", (schema) => {
+	test("getting the contained elements of a spatial element", () => {
+		const file = createTestFile(schema);
+		const container = file.createEntity("IfcBuildingStorey");
+		const element = file.createEntity("IfcWindow");
+		containElement(file, container, [element]);
+
+		// Test two separate rels.
+		const rel = file.createEntity("IfcRelContainedInSpatialStructure");
+		const element2 = file.createEntity("IfcWindow");
+		rel.set("RelatingStructure", container);
+		rel.set("RelatedElements", [element2]);
+
+		expect(ids(subject.getContained(container))).toEqual(ids([element, element2]));
+	});
+});
+
+// Python: `TestGetComponentsIFC4`/`TestGetComponentsIFC2X3`.
+describe.each(AVAILABLE_SCHEMAS)("util.element getComponents (%s)", (schema) => {
+	test("getting the nested components of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcElementAssembly");
+		const subelement = file.createEntity("IfcWindow");
+		assignNest(file, element, [subelement]);
+
+		// Test two separate rels.
+		const rel = file.createEntity("IfcRelNests");
+		const subelement2 = file.createEntity("IfcWindow");
+		rel.set("RelatingObject", element);
+		rel.set("RelatedObjects", [subelement2]);
+
+		expect(ids(subject.getComponents(element))).toEqual(ids([subelement, subelement2]));
+	});
+
+	test("include_ports controls whether IfcPort components are returned", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcFlowSegment");
+		const port = file.createEntity("IfcDistributionPort");
+		const subelement = file.createEntity("IfcFlowSegment");
+		assignNest(file, element, [port, subelement]);
+
+		expect(ids(subject.getComponents(element))).toEqual(ids([subelement]));
+		expect(ids(subject.getComponents(element, true))).toEqual(ids([port, subelement]));
+	});
+});
+
+// No Python test class exists for `get_openings`/`has_openings` -- original coverage.
+describe("util.element getOpenings / hasOpenings (IFC4)", () => {
+	test("getting an element's own openings as IfcRelVoidsElement", () => {
+		const file = createTestFile("IFC4");
+		const wall = file.createEntity("IfcWall");
+		const opening = file.createEntity("IfcOpeningElement");
+		const rel = addOpening(file, wall, opening);
+
+		const openings = subject.getOpenings(wall);
+		expect(openings).toHaveLength(1);
+		expect(openings[0].id()).toBe(rel.id());
+		expect((openings[0].get("RelatedOpeningElement") as EntityInstance).id()).toBe(opening.id());
+		expect(subject.hasOpenings(wall)).toBe(true);
+	});
+
+	test("recursing into the aggregate for openings", () => {
+		const file = createTestFile("IFC4");
+		const assembly = file.createEntity("IfcElementAssembly");
+		const wall = file.createEntity("IfcWall");
+		assignAggregate(file, assembly, [wall]);
+		const opening = file.createEntity("IfcOpeningElement");
+		addOpening(file, assembly, opening);
+
+		expect(subject.getOpenings(wall)).toHaveLength(1);
+		expect(subject.hasOpenings(wall)).toBe(true);
+	});
+
+	test("no openings", () => {
+		const file = createTestFile("IFC4");
+		const wall = file.createEntity("IfcWall");
+		expect(subject.getOpenings(wall)).toEqual([]);
+		expect(subject.hasOpenings(wall)).toBe(false);
 	});
 });
