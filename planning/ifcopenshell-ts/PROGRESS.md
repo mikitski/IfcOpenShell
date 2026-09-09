@@ -31,16 +31,36 @@ identity-keyed (`file_pointer()`) `Transaction`/undo-redo registry (per
 `research/07-fresh-wrapper-per-access.md`'s confirmed finding — every native accessor mints a
 fresh JS wrapper, so `EntityInstance.equals()` compares via `identity()`, never `===`), the full
 `.get()`/`.set()` attribute-access escape hatch implementing the real forward/inverse/category
-dispatch (designed for the next chunk's `Proxy` to wrap directly), `getInfo()`, `guid.ts`/
-`settings.ts`/`template.ts`, and the `createTestFile()` bootstrap fixture every later phase's tests
-build on. Two small new N-API primitives added along the way (`file_pointer()`,
-`traverse()`/`traverse_breadth_first()` on `entity_instance` — previously unexposed only because
-wrappergen's clang frontend skips static methods). One CI flake hit and resolved: Windows x64
-failed at the pre-existing "Install build dependencies" vcpkg step (unrelated to this PR's own
-code); confirmed transient by re-running — Windows arm64 passed on the same commit/step first
-attempt, and Windows x64 passed clean on retrigger. **Next chunk: the `Proxy`-based dynamic
-attribute access + the schema-driven `.d.ts` generator** (`10-architecture.md` §6) — explicitly
-flagged there as needing to be scheduled early in Phase 2, not deferred.
+dispatch, `getInfo()`, `guid.ts`/`settings.ts`/`template.ts`, and the `createTestFile()` bootstrap
+fixture every later phase's tests build on. Two small new N-API primitives added along the way
+(`file_pointer()`, `traverse()`/`traverse_breadth_first()` on `entity_instance`). One CI flake hit
+and resolved: Windows x64 failed at the pre-existing "Install build dependencies" vcpkg step
+(unrelated to this PR's own code); confirmed transient by re-running.
+
+✅ **Phase 2's second chunk — `Proxy`-based dynamic attribute access + the schema-driven `.d.ts`
+generator — landed** (squash-merged to `v0.9.0` as `03000ac47`), closing out `10-architecture.md`
+§6's full design. Every `EntityInstance` is now `Proxy`-wrapped at construction (confirmed
+`instanceof EntityInstance` still holds through the wrapper), so `wall.Name = "x"` works directly —
+the trap dispatches through the prior chunk's existing `.get()`/`.set()` primitives, never
+reimplementing that logic. A `Map<schemaIdentifier, Map<className, AttributeMeta[]>>` cache
+(populated once per schema, never per-access) backs the trap's category/index lookups; the required
+differential correctness test (`40-testing-strategy.md` §5.5) passes for every entity class across
+all three schema versions and caught two real, pre-existing bugs along the way — a derived-attribute
+miscount, and an inverse-attribute name collision across sibling relationship classes (fixed by
+switching to the correctly-scoped `file.get_inverse(...)` primitive instead of a name-only match).
+The `.d.ts` generator (a new Node-based tool, not a wrappergen/Python extension — `entity.supertype()`
+carries no recoverable name via the current primitive surface, so generated interfaces are flat, not
+`extends`-chained, a disclosed deviation) emits **2305 typed entity interfaces across
+IFC2X3/IFC4/IFC4X3 (653/776/876), none skipped**; the exit-criterion test (`wall.Name` type-checks as
+`string | null` via real `tsc --noEmit`) passes. One real bug found and fixed mid-PR: a Windows-only
+`spawnSync npx ENOENT` (the classic Node-on-Windows `.cmd`-resolution gotcha) breaking the type-check
+test's own subprocess invocation — fixed with `shell: true`, verified with both a positive and a
+deliberately-broken negative-case check so the fix doesn't silently swallow real `tsc` failures. One
+unrelated CI flake (a timing-sensitive assertion in Phase 1's pre-existing `event_loop.test.ts`,
+untouched by this PR) hit once on Windows x64 and cleared on retrigger — confirmed not a regression
+since Windows arm64 passed the same test on the same commit. **Phase 2 remaining**: the differential
+cache-correctness test row and this chunk's own row in the table below are now both satisfied by this
+same landing.
 
 Also resolved this window: the CI-caching PR's (`#8`, `56acf8063`) merge initially looked
 untraceable to any action by the orchestrating session and was raised as an open trust/process
@@ -94,10 +114,10 @@ binding could be built, since it decided generated-vs-hand-written.
 |---|---|---|---|
 | "Fresh wrapper per access" identity spike (blocks rest of phase) | ✅ | [#5](https://github.com/mikitski/IfcOpenShell/pull/5) | Resolved empirically during Phase 1's primitive-binding chunk — **fresh wrapper, confirmed**. See `research/07-fresh-wrapper-per-access.md`. |
 | `IfcFile` (`file_mixin` port, incl. `dispose()`) | ✅ | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | Landed `6b9963954`. Identity-keyed `Transaction`/undo-redo registry, full `Transaction` port, `createEntity`/`add`/`byType`/`traverse`/`getInverse`/`remove`/`batch`/`write`/`[Symbol.iterator]`/`dispose()` (delegates to Phase 1's native `dispose()`). New `file_pointer()` primitive added for the registry key. |
-| `EntityInstance` (Proxy + attribute-metadata cache) | 🔄 | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | **Foundation only, landed** `6b9963954`: `identity()`/`isA()`/`equals()` (via `identity()`, never `===`, per the spike above), explicit `.get()`/`.set()` implementing the real forward/inverse/category dispatch, `getInfo()`, `walk()`. **Remaining, next chunk**: the `Proxy`-based dynamic attribute access wrapping `.get()`/`.set()`, and the attribute-metadata cache — `10-architecture.md` §6 flags this as needing to start early in Phase 2, not deferred. |
-| `.d.ts` generator (or hand-written fallback for high-traffic classes) | 🔲 | — | — |
+| `EntityInstance` (Proxy + attribute-metadata cache) | ✅ | [#15](https://github.com/mikitski/IfcOpenShell/pull/15), [#17](https://github.com/mikitski/IfcOpenShell/pull/17) | Foundation (`identity()`/`isA()`/`equals()`, `.get()`/`.set()`, `getInfo()`, `walk()`) landed `6b9963954`; `Proxy` wrapping + the `Map<schemaIdentifier, Map<className, AttributeMeta[]>>` cache landed `03000ac47`. Every `EntityInstance` is `Proxy`-wrapped at construction; `instanceof` confirmed to still hold. Cache differential test caught 2 real bugs (a derived-attribute miscount, an inverse-attribute name collision across sibling relationship classes). |
+| `.d.ts` generator (or hand-written fallback for high-traffic classes) | ✅ | [#17](https://github.com/mikitski/IfcOpenShell/pull/17) | Landed `03000ac47`. New Node-based tool (not wrappergen/Python — no recoverable supertype name via the current primitive surface, so interfaces are flat, not `extends`-chained, a disclosed deviation). **2305 typed entity interfaces generated (653/776/876 across IFC2X3/IFC4/IFC4X3), none skipped.** `10-architecture.md` §6 exit criterion passes (`wall.Name` type-checks as `string \| null` via real `tsc --noEmit`). Found+fixed a Windows-only `spawnSync npx ENOENT` bug in the type-check test itself along the way. |
 | `guid.ts`, `settings.ts`, `template.ts` | ✅ | [#15](https://github.com/mikitski/IfcOpenShell/pull/15) | Landed `6b9963954` alongside `IfcFile`/`EntityInstance`. |
-| Differential cache-correctness test (all 3 schema versions) | 🔲 | — | — |
+| Differential cache-correctness test (all 3 schema versions) | ✅ | [#17](https://github.com/mikitski/IfcOpenShell/pull/17) | Landed `03000ac47`, alongside the Proxy/cache chunk above (same test, same PR — see that row's notes). |
 
 ## Phase 2.5 — Alpha checkpoint ⏸️ npm-publish confirmation required
 
