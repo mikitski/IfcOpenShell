@@ -42,7 +42,15 @@ spatial/structural-graph queries → structural-editing helpers (`copy`/`removeD
   real undo/redo test, not just assumption.
 - **Real bugs found along the way**: a null-safety crash in the shared `EntityInstanceSet` helper,
   a V8 spread-argument-limit crash in `removeDeep2`'s BFS queue (>~120k elements) — both fixed with
-  regression tests. Two genuine primitive gaps disclosed rather than papered over (`file`-to-string,
+  regression tests. **Follow-up (`ts/phase-3-element-nominal-unwrap-fix`, 2026-09-10)**: chunk 1's
+  own disclosed finding #2 (`element.ts`'s header comment) turned out to be wrong on
+  investigation — the N-API shim does NOT blanket-auto-unwrap `IfcValue`-SELECT attributes
+  (`NominalValue`/`EnumerationValues`/`ListValues`); whether `getProperty`/`getProperties` see a
+  bare primitive or a real typed-instance `EntityInstance` wrapper depends on how the value was
+  written, and the latter (the realistic, any-real-SPF-file case) was silently returning the raw
+  wrapper object instead of its unwrapped scalar, with `value_type` always `null` even when
+  recoverable. Fixed + regression-tested; see that PR and `element.ts`'s corrected header comment
+  for the full story. Two genuine primitive gaps disclosed rather than papered over (`file`-to-string,
   `aggregation_type::type_of_aggregation`) — see `TODOS.md`.
 
 ✅ **`util.schema`'s first chunk landed** (`d0e1742c2`, PR #27): the query/reflection functions

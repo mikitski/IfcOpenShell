@@ -54,20 +54,46 @@
 //    fixed-argument lookup `get_styles` needs -- not a stand-in for a real
 //    `util.representation` port, which Phase 4 will still need to do properly.
 //
-// 2. The N-API attribute-value shim (`wrappergen/shim/attribute_value_shim.*`) auto-
-//    unwraps `IfcValue`-typed attributes (e.g. `IfcPropertySingleValue.NominalValue`,
-//    declared as `IfcLabel`/`IfcText`/`IfcInteger`/...) directly to a raw JS
-//    string/number/boolean, unlike Python's SWIG binding, which returns a nested
-//    `entity_instance` wrapper requiring `.wrappedValue` to unwrap (confirmed
-//    empirically against the built addon, not assumed). This is convenient -- it means
-//    `get_property`/`get_properties`/`get_quantity`/`get_quantities` never need a
-//    `.wrappedValue` call at all in this port -- but it also means the exact EXPRESS
-//    type name of the wrapped value (e.g. "IfcLabel") is lost at the shim layer, which
-//    Python's verbose `get_property`/`get_properties` output surfaces as `"value_type"`.
-//    This chunk always returns `value_type: null` for that key (see `getProperty`/
-//    `getProperties` below) rather than fabricate a value -- a real, disclosed primitive-
-//    layer limitation, not something this chunk should fix (would need a new native
-//    primitive, out of scope here).
+// 2. CORRECTED 2026-09-10 (`ts/phase-3-element-nominal-unwrap-fix`; the paragraph below
+//    is what this chunk originally believed, kept for the record -- see that PR's final
+//    report for the full investigation): the N-API attribute-value shim does NOT
+//    blanket-auto-unwrap `IfcValue`-typed attributes (`IfcPropertySingleValue
+//    .NominalValue`/`IfcPropertyEnumeratedValue.EnumerationValues`/`IfcPropertyListValue
+//    .ListValues`, all declared as the EXPRESS SELECT `IfcValue`). Whether
+//    `.getByIndex(2)` comes back as an already-bare JS primitive or a wrapped
+//    `EntityInstance` depends entirely on how the value was *written*, exactly like
+//    Python's own SWIG binding: a bare `.set("NominalValue", <primitive>)` call
+//    (`entityInstance.ts`'s `valueToVariant`) stores a raw scalar attribute with no type
+//    info attached, so it reads back unwrapped -- this is what `element.test.ts`'s
+//    fixture helpers use, which is why this chunk's own tests didn't catch the bug
+//    below. A *properly-created* typed-instance value -- what real SPF text always
+//    produces -- stores a real entity reference instead, which `entityInstance.ts`'s
+//    `wrapValue` wraps in an `EntityInstance` on read, exactly like Python's nested
+//    `entity_instance` wrapper requiring `.wrappedValue`. (Building such a value
+//    directly in this port, for a test fixture, can't go through
+//    `file.createEntity("IfcLabel", ...)` -- confirmed empirically while building this
+//    fix's own tests: that throws, a real, pre-existing Phase 2 gap already disclosed in
+//    `entityInstance.ts`'s own header comment -- attribute access, including
+//    `.setByIndex`'s `attribute_kind_of` lookup, isn't supported on a standalone
+//    non-entity/defined-type instance. `element.test.ts`'s `createTypedValue` helper
+//    works around this the same way `test/native/primitives.test.ts` already does:
+//    building the instance via the raw native layer directly, which has no such
+//    restriction.) `getProperty`/`getProperties` originally read
+//    `.getByIndex(2)` and used it directly as the final value -- correct only for the
+//    bare-primitive case, silently wrong (returning a raw `EntityInstance` object
+//    instead of its scalar) for the realistic typed-instance case. Fixed by this PR:
+//    `unwrapSelectValue`/`selectValueType` (below) mirror Python's `v.wrappedValue`/
+//    `v.is_a()` -- unwrap via `.getByIndex(0)` (a declared-type instance stores its
+//    single value at attribute index 0) and read `.isA()` for the real EXPRESS type
+//    name, both only when the raw value is actually an `EntityInstance`; a bare
+//    primitive (or `null`) passes through unchanged with `value_type: null`, since
+//    there's genuinely no type name to recover in that case. `getQuantity`/
+//    `getQuantities` (`IfcPhysicalSimpleQuantity.XXXValue`, e.g. `LengthValue`) do NOT
+//    have this bug: that attribute's declared type is a concrete defined type (e.g.
+//    `IfcLengthMeasure`) directly, not the `IfcValue` SELECT, so P21/the core never
+//    needs a type-tagging wrapper instance for it in the first place -- confirmed against
+//    Python's own `get_quantity`/`get_quantities`, which read `quantity[3]` with no
+//    `.wrappedValue` call either.
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -134,6 +160,37 @@ function attrOrMissing(element: EntityInstance, name: string): unknown {
 function attrOrNull(element: EntityInstance, name: string): unknown {
 	const value = attrOrMissing(element, name);
 	return value === MISSING ? null : value;
+}
+
+/**
+ * Python's `v.wrappedValue` for a `NominalValue`/`EnumerationValues`-element/
+ * `ListValues`-element read back via `.getByIndex(2)` -- see this file's header comment
+ * (point 2) for the full story. Whether the raw value comes back as an already-bare JS
+ * primitive or a wrapped `EntityInstance` depends entirely on how it was *written*, not
+ * on anything this port controls: a bare `.set(name, <primitive>)`/`.setByIndex(...)`
+ * call (`entityInstance.ts`'s `valueToVariant`) stores a raw scalar attribute with no
+ * type info attached, which `wrapValue` then passes through unchanged on read; a
+ * properly-created typed-instance value (what real SPF text and any
+ * `ifcopenshell.api`-style write path produce -- see `element.test.ts`'s
+ * `createTypedValue` helper for how this port itself builds one, since
+ * `file.createEntity("IfcLabel", ...)` doesn't work for a standalone defined-type
+ * instance, a separate pre-existing gap) stores an actual entity reference, which
+ * `wrapValue` wraps in an `EntityInstance` on read. Only the latter case needs
+ * unwrapping; the former is already the final scalar.
+ */
+function unwrapSelectValue(raw: unknown): unknown {
+	return raw instanceof EntityInstance ? raw.getByIndex(0) : raw;
+}
+
+/**
+ * Python's `v.is_a()` on a `NominalValue` value -- the wrapped value's real EXPRESS
+ * type name (e.g. `"IfcLabel"`), recoverable only when `raw` is a real typed-instance
+ * `EntityInstance` wrapper (see `unwrapSelectValue` above for when that is/isn't the
+ * case). `null` for an already-bare primitive (or `null` itself) -- there is genuinely
+ * no type name to recover in that case, not a limitation of this helper.
+ */
+function selectValueType(raw: unknown): string | null {
+	return raw instanceof EntityInstance ? raw.isA() : null;
 }
 
 /**
@@ -582,18 +639,25 @@ export function getProperty(properties: readonly EntityInstance[] | null, name: 
 	for (const prop of arr(properties)) {
 		if ((prop.get("Name") as string | null) !== name) continue;
 		let isSingleValue = false;
+		let singleValueType: string | null = null;
 		let result: unknown;
 		if (prop.isA("IfcPropertySingleValue")) {
-			// 2 IfcPropertySingleValue.NominalValue -- see this file's header comment on
-			// why `.wrappedValue` isn't needed (and `value_type` can't be recovered).
-			result = prop.getByIndex(2);
+			// 2 IfcPropertySingleValue.NominalValue -- unwrap a real typed-instance
+			// wrapper (Python's `v.wrappedValue`) and recover its EXPRESS type name
+			// (Python's `v.is_a()`); see `unwrapSelectValue`/`selectValueType` above and
+			// this file's header comment (point 2) for when that is/isn't possible.
+			const rawValue = prop.getByIndex(2);
+			singleValueType = selectValueType(rawValue);
+			result = unwrapSelectValue(rawValue);
 			isSingleValue = true;
 		} else if (prop.isA("IfcPropertyEnumeratedValue")) {
 			// 2 IfcPropertyEnumeratedValue.EnumerationValues
-			result = prop.getByIndex(2);
+			const rawValues = prop.getByIndex(2) as unknown[] | null;
+			result = rawValues ? rawValues.map(unwrapSelectValue) : rawValues;
 		} else if (prop.isA("IfcPropertyListValue")) {
 			// 2 IfcPropertyListValue.ListValues
-			result = prop.getByIndex(2);
+			const rawValues = prop.getByIndex(2) as unknown[] | null;
+			result = rawValues ? rawValues.map(unwrapSelectValue) : rawValues;
 		} else if (prop.isA("IfcPropertyBoundedValue")) {
 			const data = prop.getInfo();
 			deleteKey(data, "Unit");
@@ -613,9 +677,10 @@ export function getProperty(properties: readonly EntityInstance[] | null, name: 
 		}
 		if (verbose) {
 			const verboseResult: Record<string, unknown> = { id: prop.id(), class: prop.isA(), value: result };
-			// See this file's header comment: the EXPRESS type name of a `NominalValue`
-			// can't be recovered from the N-API shim's already-unwrapped raw JS value.
-			if (isSingleValue) verboseResult.value_type = null;
+			// `null` when `singleValueType` couldn't be recovered (an already-bare
+			// primitive `NominalValue` -- see `selectValueType` above), matching
+			// Python's own `result_type = v.is_a() if v else None`.
+			if (isSingleValue) verboseResult.value_type = singleValueType;
 			result = verboseResult;
 		}
 		return result;
@@ -630,13 +695,19 @@ export function getProperties(properties: readonly EntityInstance[] | null, verb
 		const ifcClass = prop.isA();
 		const propName = prop.getByIndex(0) as string; // 0 IfcProperty.Name
 		if (ifcClass === "IfcPropertySingleValue") {
-			// 2 IfcPropertySingleValue.NominalValue
-			const value = prop.getByIndex(2);
-			// See this file's header comment: `value_type` can't be recovered.
-			results[propName] = verbose ? { id: prop.id(), class: prop.isA(), value, value_type: null } : value;
+			// 2 IfcPropertySingleValue.NominalValue -- unwrap a real typed-instance
+			// wrapper and recover its EXPRESS type name where possible; see
+			// `unwrapSelectValue`/`selectValueType` above and this file's header comment
+			// (point 2).
+			const rawValue = prop.getByIndex(2);
+			const value = unwrapSelectValue(rawValue);
+			results[propName] = verbose
+				? { id: prop.id(), class: prop.isA(), value, value_type: selectValueType(rawValue) }
+				: value;
 		} else if (ifcClass === "IfcPropertyEnumeratedValue" || ifcClass === "IfcPropertyListValue") {
 			// 2 IfcPropertyEnumeratedValue.EnumerationValues / IfcPropertyListValue.ListValues
-			const value = prop.getByIndex(2);
+			const rawValues = prop.getByIndex(2) as unknown[] | null;
+			const value = rawValues ? rawValues.map(unwrapSelectValue) : rawValues;
 			results[propName] = verbose ? { id: prop.id(), class: prop.isA(), value } : value;
 		} else if (ifcClass === "IfcPropertyBoundedValue") {
 			const data = prop.getInfo();
