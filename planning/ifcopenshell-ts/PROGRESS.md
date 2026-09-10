@@ -50,21 +50,39 @@ hard-code a schema string, until that widening actually happens.
 **Chunk 2/3 landed** (`955fdd594`): spatial/structural-graph queries (`getContainer`,
 `getDecomposition`, `getParent`, `getAggregate`, `getNest`, `getGroups`, `getOpenings`, etc., plus
 `get_controls` — confirmed same shape as `get_groups`, included; `get_referenced_elements`
-excluded — classification/document territory, a separate future chunk). Correctly applied chunk
-1's `AVAILABLE_SCHEMAS` fix pattern throughout (no repeat of that bug) and reused chunk 1's
-internal helpers rather than reimplementing them. Found+fixed a real null-safety bug in the shared
-`EntityInstanceSet` helper (crashed on a `null` set member, which Python's own `set()` tolerates —
-reachable via chunk 1's own `getElementsByPset` against an unset mandatory attribute), with a
-verified before/after regression test. Correctly declined to fix 3 other review findings that were
-chunk 1's pre-existing code, out of this chunk's scope. **Chunk 3/3 (structural-editing helpers:
-`copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`replaceElement`/`replaceAttribute`) is next — the
-last piece of `util.element`.**
+excluded — classification/document territory, a separate future chunk). Found+fixed a real
+null-safety bug in the shared `EntityInstanceSet` helper (crashed on a `null` set member, which
+Python's own `set()` tolerates), with a verified before/after regression test.
 
-**Recurring CI flake worth tracking**: `test/native/event_loop.test.ts`'s timing-sensitive
-assertion has now flaked on Windows CI three separate times across unrelated PRs, always clearing
-on retrigger with no code change — a real pattern, not bad luck, but not urgent. Worth a dedicated
-look (loosen the threshold, or find a less scheduler-sensitive signal) next time someone's in that
-test for another reason.
+✅ **`util/element.py` is now fully ported — chunk 3/3 (final chunk) landed** (`ea575b238`): the
+structural-editing helpers — `copy`, `copyDeep`, `removeDeep`, `removeDeep2`, `batchRemoveDeep2`,
+`unbatchRemoveDeep2`, `replaceElement`, `replaceAttribute`. Unlike chunks 1/2's pure queries, these
+genuinely mutate — every one correctly routes through the *existing* `IfcFile.remove`/
+`createEntity`/`EntityInstance.setByIndex` (which already record `Transaction` operations) rather
+than reimplementing mutation logic, verified with a dedicated `removeDeep2` → undo → redo test, not
+just assumed. `FileState` gained a `toDelete` field for `batchRemoveDeep2`'s per-file pending-
+deletion set, mirroring the existing `transaction` field pattern. **Two real primitive gaps found
+and disclosed, neither filled silently**: no `file`-to-string primitive existed for
+`unbatchRemoveDeep2`'s reload-from-serialized-string step — worked around via the existing
+`write()` primitive (confirmed to use the identical serialization path, not an approximation);
+`aggregation_type::type_of_aggregation()` (SET vs. LIST/BAG) was never bound as a primitive, so
+`replaceAttribute` never deduplicates a replaced SET member — a disclosed, tested divergence from
+Python, logged in `TODOS.md`. Found+fixed a real V8 spread-argument-limit bug in `removeDeep2`'s
+BFS queue (`queue.push(...largeArray)` throws past ~120k elements — exactly the scale the
+neighboring large-list-clearing workaround already targets).
+
+**Next Phase 3 dispatch**: a different `util` module entirely (`util.schema`, `util.unit`, etc. —
+see the table below) — `util.element` itself needs no further chunks.
+
+**Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
+`test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
+duration-scaled threshold) has flaked on Windows CI four separate times across unrelated PRs now
+(chunk 3 of `util.element` is the latest), always clearing cleanly on retrigger with no code
+change. Not currently blocking anything, but four independent occurrences is a real, load-bearing
+signal that the threshold (or the whole approach of measuring wall-clock timer-tick gaps on a
+shared, variably-loaded Windows CI runner) needs revisiting — worth prioritizing the next time
+someone's touching Phase 1's async-primitive tests, rather than continuing to treat each occurrence
+as a one-off.
 
 **Resolved, no longer tracked**: the CI-caching PR's (`#8`) merge once looked untraceable to any
 action by the orchestrating session and was raised as an open trust/process concern. The user
@@ -141,7 +159,7 @@ binding could be built, since it decided generated-vs-hand-written.
 |---|---|---|---|
 | `util.element` — chunk 1/3 (psets/qtos + type/material/style) | ✅ | [#21](https://github.com/mikitski/IfcOpenShell/pull/21) | Landed `bba589be7`. `getPset`/`getPsets`/`getQuantity`/`getQuantities`/`getProperty`/`getProperties`/`getElementsByPset`/`hasProperty`/`getPropertyDefinition`, `getType`/`getTypes`/`getMaterial(s)`/`getMaterialLayers`/`getMaterialProfiles`/`getStyles`/`getPredefinedType`/`isUserdefinedType`/`getElementsByMaterial`/`getElementsByStyle`/`getElementsByRepresentation`. Found+fixed a real CI gap (see "Current focus" above): `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3 tests need `bootstrap.ts`'s `AVAILABLE_SCHEMAS` skip-guard, not a hard-coded schema string — use this same guard in chunks 2/3. |
 | `util.element` — chunk 2/3 (spatial/structural-graph queries) | ✅ | [#23](https://github.com/mikitski/IfcOpenShell/pull/23) | Landed `955fdd594`. `getContainer`/`getReferencedStructures`/`getStructureReferencedElements`/`getDecomposition`/`getGroupedBy`/`getGroups`/`getControls`/`getParent`/`getFilledVoid`/`getVoidedElement`/`getAdheredElement`/`getAggregate`/`getNest`/`getParts`/`getContained`/`getComponents`/`getOpenings`/`hasOpenings`. Found+fixed a real null-safety bug in the shared `EntityInstanceSet` helper (see "Current focus" above). |
-| `util.element` — chunk 3/3 (structural-editing helpers) | 🔲 | — | `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`replaceElement`/`replaceAttribute` — last piece of `util.element`, do next |
+| `util.element` — chunk 3/3 (structural-editing helpers) | ✅ | [#25](https://github.com/mikitski/IfcOpenShell/pull/25) | Landed `ea575b238`. `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`unbatchRemoveDeep2`/`replaceElement`/`replaceAttribute`. **`util/element.py` is now fully ported.** 2 real primitive gaps found+disclosed (file-to-string, `type_of_aggregation`), 1 real V8 spread-limit bug found+fixed — see "Current focus" above. |
 | `util.schema` | 🔲 | — | |
 | `util.unit` | 🔲 | — | |
 | `util.schema` | 🔲 | — | |
