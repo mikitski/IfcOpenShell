@@ -9,4 +9,5 @@
 export * as attribute from "./attribute";
 export * as element from "./element";
 export * as schema from "./schema";
+export * as selector from "./selector";
 export * as unit from "./unit";
