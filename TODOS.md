@@ -744,3 +744,60 @@ disclosure and the two exact call sites using the lossy heuristic.
 2, already-shipped code). Low practical impact today (only `util/migrator.ts`'s two retyping checks
 currently depend on this distinction, and only for whole-number REAL literals specifically), but worth
 fixing at the root before a second caller reinvents the same lossy heuristic.
+
+---
+
+### `util.selector.get_element_value`'s positional/geolocated keys and `"profiles"`'s extrusion
+### fallback -- genuinely blocked, not yet portable
+
+**What:** Phase 3's `util.selector` chunk (`src/util/selector.ts`, `get_element_value`/the
+key-path mini-language) ports every key `_get_element_value` supports except two genuine,
+disclosed hard blockers, both throwing a clear, descriptive error naming the real missing Python
+modules rather than being stubbed or silently dropped:
+
+1. **The positional/geolocated keys** `x`/`y`/`z`/`easting`/`northing`/`elevation`/`rotation_x`/
+   `rotation_y`/`rotation_z`. Python's `_get_element_value` calls
+   `ifcopenshell.util.placement.get_local_placement` (all nine keys), plus
+   `ifcopenshell.util.geolocation.auto_xyz2enh` (the `easting`/`northing`/`elevation` trio), plus
+   `ifcopenshell.util.shape_builder.np_matrix_to_euler` (the `rotation_*` trio) -- none of
+   `util.placement`/`util.geolocation`/`util.shape_builder` are ported yet in this TS port (all
+   Tier B, later phases; `util.placement` is this project's own research doc's #3 near-term
+   porting priority, not yet picked up). The blocker only fires when Python itself would actually
+   need the unported math (a real, *set* `ObjectPlacement`) -- these keys still return `null`
+   (matching Python) when the element's class has no `ObjectPlacement` at all, or when it's
+   declared but left unset.
+2. **`"profiles"`'s extrusion-based fallback path.** `ifcopenshell.util.shape.get_profiles`'s
+   `IfcMaterialProfileSet` path is fully ported (self-contained, via already-ported
+   `util.element.getMaterial`), but its fallback (`ifcopenshell.util.shape.get_extrusions`, used
+   when the element has no material profile set) transitively calls
+   `ifcopenshell.util.representation.get_representation`/`.resolve_representation` -- real
+   representation-item graph resolution (including `IfcMappedItem` indirection), not a narrow,
+   self-contained lookup like the `findBodyRepresentation`/`getElementSystemsNarrow`-style
+   re-implementations this same chunk used for the `classification`/`system`/`zone` keys. Neither
+   `util.shape` nor `util.representation` is ported yet.
+
+**Why deferred rather than attempted:** Same category as `convert_file_length_units` above -- a
+genuine cross-module hard blocker, not a "split into a follow-up chunk" situation. Porting only a
+narrow slice of `util.placement`/`util.geolocation`/`util.shape_builder`/`util.representation`
+just to unblock these specific keys would be real, disclosed scope creep into later-phase work
+(`util.placement` and `util.representation` are each substantial modules in their own right), not
+a small addition.
+
+**Fix:** Port `ifcopenshell.util.placement` (Tier B, this project's own #3 near-term priority per
+`planning/ifcopenshell-ts/research/03-python-util-inventory.md`) and `ifcopenshell.util
+.geolocation`/`util.shape_builder` first, to unblock the positional/rotation keys; port
+`ifcopenshell.util.representation`'s `get_representation`/`resolve_representation` (Tier B) to
+unblock `"profiles"`'s extrusion fallback. Once each lands, the corresponding branch in
+`src/util/selector.ts`'s `getElementValueForKeys` is a small, mechanical follow-up (replace the
+`throwPositionalKeyBlocked`/`getProfilesNarrow` blocker call with the real computation) -- the
+grammar/key-resolution plumbing around it is already fully ported and tested.
+
+**Context:** Surfaced during Phase 3's `util.selector` (key-path mini-language) chunk
+(2026-09-10) -- see that chunk's own PR description for the full disclosure.
+`test_selector.py::TestGetElementValue.test_selecting_an_elements_rotation_using_a_query` has no
+full TS counterpart for the same reason (this port's own test covers only the parts it *can*
+reproduce: the blocker firing with a clear error, and the no-`ObjectPlacement`-set `null` case).
+
+**Depends on / blocked by:** Blocked on `util.placement`/`util.geolocation`/`util.shape_builder`/
+`util.representation` landing first (all Tier B, `planning/ifcopenshell-ts/20-roadmap.md` Phase
+4-ish, not yet scheduled in detail).
