@@ -7,11 +7,12 @@
 // up to, but NOT including, `class Migrator:`) -- the query/reflection functions and
 // `BatchReassignClass`. `Migrator` itself (~380 lines, a JSON-data-file-driven
 // cross-schema migration engine) is architecturally distinct and large enough to
-// warrant its own separate, later chunk, matching `util.element`'s own established
-// "split large modules" precedent. `_enum_value_outside_target` (a `Migrator`-only
-// private helper -- verified its one and only call site is inside `Migrator.migrate`,
-// `schema.py` line ~633, no other caller anywhere in the file) is also NOT ported here
-// for the same reason.
+// warrant its own separate file, matching `util.element`'s own established
+// "split large modules" precedent -- now ported in full in `util/migrator.ts` (see
+// that file's own header comment), which also ports `_enum_value_outside_target` (a
+// `Migrator`-only private helper -- verified its one and only call site is inside
+// `Migrator.migrate`, `schema.py` line ~633, no other caller anywhere in the file),
+// reusing this file's own `isEnumMember` (exported below for exactly that reuse).
 //
 // Ported in this chunk: `getFallbackSchema`, `getDeclaration`, `isA`, `getSupertypes`,
 // `getSubtypes`, `geometryClassesIntroducedAfter`, `ifc4OnlyGeometryClasses`,
@@ -329,7 +330,17 @@ function attributeNameAt(entity: EntityInstance, index: number): string {
  * answers exactly this single-value membership question without needing the full
  * item list at all.
  */
-function isEnumMember(attribute: NativeAttribute, value: string): boolean {
+/**
+ * Exported (beyond `reassignClass`'s own original, private use) for `util/migrator.ts`'s
+ * `enumValueOutsideTarget` -- the exact same "is this string a legal member of this
+ * attribute's declared enumeration" question `_enum_value_outside_target` (`schema.py`,
+ * a `Migrator`-only private helper) needs, answered via the same real, working
+ * `lookup_enum_offset` reverse-lookup primitive this function already uses, rather than
+ * re-deriving an identical helper in the new file. See this function's own doc comment
+ * above for why `lookup_enum_offset` (not `util/attribute.ts`'s `getEnumItems`, which
+ * genuinely cannot answer this at all, see that function's own doc comment) is used.
+ */
+export function isEnumMember(attribute: NativeAttribute, value: string): boolean {
 	const namedType = attribute.type_of_attribute().as_named_type();
 	if (namedType === null) return false;
 	const enumeration = namedType.declared_type().as_enumeration_type();

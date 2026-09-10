@@ -654,3 +654,93 @@ same reason.
 
 **Depends on / blocked by:** Blocked on Phase 4's `util.geolocation` and Phase 6's `api.unit`/
 `api.georeference` landing first.
+
+### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch
+
+**What:** `EntityInstance.setByIndex` (called by both `IfcFile.createEntity(type, ...args)`'s own
+initial-attribute-assignment loop and any later `.set()`/`.setByIndex()` call) always calls the
+native `attribute_kind_of` primitive first, to disambiguate ambiguous JS value kinds (`boolean` ->
+BOOL vs. LOGICAL, `number` -> INTEGER vs. DOUBLE, `string` -> STRING vs. ENUMERATION vs. BINARY).
+That primitive's shim implementation (`attribute_value_shim.cpp`'s `attribute_declaration_at` ->
+`entity_declaration_of`) unconditionally throws `"Attribute access is only supported on entity
+instances"` for any non-entity (simple/defined-type) target instance -- entity or not, populated or
+not. So `file.createEntity("IfcLabel", "hello")` (a loose, not-yet-attached simple-type value with an
+initial value -- Python's `file.create_entity("IfcLabel", "hello")`, which works fine there) throws
+in this port, even though *reading* an already-populated simple-type value (via `getByIndex`, which
+calls the unrelated, ungated `get_attribute_value_variant` shim function) works fine regardless of
+how the instance was constructed (confirmed empirically, see `util/unit.ts`'s own finding for the
+*reading* half of this story).
+
+**Why this matters:** `util/migrator.ts`'s `Migrator.migrate` (Phase 3, `util.migrator` chunk,
+2026-09-10) has a dedicated `element.id() === 0` branch (Python: a source value that is itself a
+bare, not-yet-in-any-file simple/defined-type wrapper, e.g. an `IfcLabel`/`IfcCountMeasure` read off
+a SELECT-typed attribute like `IfcPropertySingleValue.NominalValue` or `IfcMeasureWithUnit
+.ValueComponent`) that must recreate that value *with* its wrapped value in the target file --
+exactly the blocked operation above. This is a real, common pattern across IFC files (any
+SELECT-typed attribute value), not a rare corner case -- confirmed with a real repro
+(`IfcMeasureWithUnit.ValueComponent`, a plain `IFCMEASUREWITHUNIT(IFCPLANEANGLEMEASURE(0.5), ...)`
+literal) migrating between schemas that otherwise migrate correctly.
+
+**Fix:** Teach `EntityInstance.setByIndex` (or a new, narrower internal helper it delegates to for
+this one case) to skip the `attribute_kind_of` lookup for a non-entity target instance, and infer the
+variant kind a different way for that case -- e.g. the same runtime-type-inference fallback
+`valueToVariant` already uses for aggregate elements (`entityInstance.ts`'s own doc comment: "number
+-> DOUBLE", a disclosed, narrower rough edge, not a correctness issue) could be reused/extended to
+cover this case too. This is foundational, already-shipped `entityInstance.ts` code from Phase 2,
+well before the `util.migrator` chunk that found this -- fixing it is a cross-cutting change to that
+foundational surface, not something the chunk that found it should do silently; flagged here for the
+orchestrating session's review rather than fixed inline, per that chunk's own instructions ("do NOT
+silently add a new native primitive without flagging it for the orchestrating session's review" --
+this isn't a *new* primitive, but is the same category of "foundational primitive-layer behavior
+change" the instruction is guarding against).
+
+**Context:** Surfaced during Phase 3's `util.migrator` chunk (2026-09-10) -- ported `Migrator.migrate`'s
+`id() === 0` branch faithfully anyway (so it will work correctly the moment this is fixed, with zero
+further changes in `util/migrator.ts`); `test/util/migrator.test.ts` has a dedicated test asserting
+the CURRENT, disclosed, blocked behavior (not silently skipped) that will need updating once this is
+fixed. See `util/migrator.ts`'s own header comment (finding 1) for the full investigation.
+
+**Depends on / blocked by:** Nothing -- purely a Phase 2 `entityInstance.ts` fix, independent of any
+other phase's work. Low urgency for most of this port's other consumers (most callers only ever read
+existing values, never construct a loose simple-type value with an initial value from scratch), but
+directly blocks full `Migrator` fidelity for any file containing SELECT-typed attribute values.
+
+### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
+
+**What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
+preserves whether the underlying STEP literal was INTEGER-typed (`232`) or REAL-typed (`232.`) as a
+real Python `int` vs. `float` object. This port's `EntityInstance.getByIndex`/`wrapValue` returns a
+plain JS `number` for both (the native shim's `get_attribute_value_variant` *does* distinguish
+`ATTRIBUTE_VALUE_KIND_INTEGER` from `ATTRIBUTE_VALUE_KIND_DOUBLE` -- the distinction is lost only when
+crossing into a JS `number`, not lost at the native layer itself). `Number.isInteger(value)` is not a
+safe substitute: `232` and `232.` parse to the *identical* IEEE-754 value with zero fractional part,
+so a whole-number REAL literal is indistinguishable from an INTEGER one by value alone, only a
+genuinely fractional REAL (`232.5`) is reliably detectable this way.
+
+**Why this matters:** `util/migrator.ts`'s `Migrator.migrate`/`migrateClass` (Phase 3, `util.migrator`
+chunk, 2026-09-10) need this exact distinction for two IFC4 -> IFC4X3 class retypings
+(`IfcCountMeasure` -> `IfcNumericMeasure`, `IfcQuantityCount` -> `IfcQuantityNumber`, both keyed on
+"was the source value REAL-typed") and currently use the lossy `Number.isInteger(...) === false` as a
+best-effort approximation, disclosed in that file's own header comment (finding 2) and its own test
+file. `/code-review` (reviewing that chunk's PR) flagged this as a broader architectural concern worth
+its own tracked entry, not just a `Migrator`-local footnote: the *right* place to preserve this
+distinction is `entityInstance.ts`'s own value-unwrapping layer (so every future caller gets a
+correct answer for free), not a symptom-fix reinvented independently by each caller that happens to
+need it.
+
+**Fix:** Give `EntityInstance` some way to expose the native `attribute_value_variant`'s actual kind
+(INTEGER vs. DOUBLE) alongside (or instead of) the unwrapped JS `number` -- e.g. a paired
+`getByIndexTyped`-style accessor, or a documented convention for recovering it via the already-bound
+`attribute_kind_of`/`type()` primitives where an owning attribute/declaration context is available.
+Needs design thought (a bare `number` return type is baked into `getByIndex`'s existing public
+signature/every existing caller) -- not a one-line fix, hence its own tracked entry rather than being
+folded into the entry above.
+
+**Context:** Surfaced during Phase 3's `util.migrator` chunk (2026-09-10), flagged by `/code-review`'s
+review of that chunk's PR. See `util/migrator.ts`'s own header comment (finding 2) for the original
+disclosure and the two exact call sites using the lossy heuristic.
+
+**Depends on / blocked by:** Nothing blocking; independent design work in `entityInstance.ts` (Phase
+2, already-shipped code). Low practical impact today (only `util/migrator.ts`'s two retyping checks
+currently depend on this distinction, and only for whole-number REAL literals specifically), but worth
+fixing at the root before a second caller reinvents the same lossy heuristic.

@@ -13,7 +13,7 @@
 			"types": "./dist/cjs/index.d.ts"
 		}
 	},
-	"files": ["dist", "esm", "native/build/Release/*.node"],
+	"files": ["dist", "esm", "native/build/Release/*.node", "data"],
 	"scripts": {
 		"build:native": "cmake-js compile --directory native",
 		"build:ts": "tsc -p tsconfig.json",
