@@ -13,7 +13,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-function findPackageRoot(startDir: string): string {
+/**
+ * Exported (beyond this module's own original need to locate the compiled `.node`
+ * addon) for `util/migrator.ts`'s JSON migration-rule data files -- the same
+ * "package.json-relative, not `__dirname`-relative" resolution problem (this package
+ * runs both directly against `src/` and from `tsc`'s compiled `dist/cjs/` tree, see
+ * this module's own header comment), reused rather than re-derived. Package-root
+ * assets are otherwise unprecedented in this codebase (`util/migrator.ts`'s own header
+ * comment: no established "bundle a JSON data file" pattern existed before it), so
+ * this walking-upward-to-package.json helper is the one existing piece of "find an
+ * asset relative to the installed package, not the current module" machinery to reuse.
+ */
+export function findPackageRoot(startDir: string): string {
 	let dir = startDir;
 	while (!fs.existsSync(path.join(dir, "package.json"))) {
 		const parent = path.dirname(dir);
