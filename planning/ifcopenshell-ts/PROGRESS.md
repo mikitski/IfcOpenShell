@@ -28,28 +28,37 @@ and README usage example remain deliberately deferred, not started, pending a se
 
 ✅ **Phase 3 has started.** `util/element.py` (2009 lines, ~67 functions) is the highest-leverage
 module in `util`/`api` — nearly everything else depends on it — but too large for one PR, so it's
-split into 3 sequential chunks. **Chunk 1/3 landed** (squash-merged as `bba589be7`): property-set/
-quantity-set + type/material/style query functions (`getPset`, `getPsets`, `getQuantity`,
-`getProperty`, `getType`, `getMaterial`, `getStyles`, etc. — see the Phase 3 table below for the
-full list). Two real, disclosed findings: `getStyles` (in scope) transitively needed a fixed-
-argument slice of not-yet-ported `util.representation` — handled with a narrow local helper, not
-scope creep; the N-API attribute-value shim auto-unwraps `IfcValue` types to raw JS primitives
-(convenient — no `.wrappedValue` calls needed — but loses the EXPRESS type name, so
-`value_type` is always `null`, disclosed not silently wrong). **A real CI bug found+fixed during
-bring-up, worth knowing about for future Phase 3+ chunks**: CI's core build is `SCHEMA_VERSIONS=4`
-(IFC4-only) since Phase 0; `bootstrap.ts` already has an `AVAILABLE_SCHEMAS` skip-guard for exactly
-this, but this chunk's own test file bypassed it in two spots, hard-coding IFC2X3 directly — a
-real, reproducible CI failure (4 of 6 build-and-test legs failed identically), not a flake. The
-agent's fix was the guard, not (per an earlier, incorrect instruction from the orchestrating
-session) widening `SCHEMA_VERSIONS` — the agent correctly pushed back on bundling an out-of-scope,
-project-wide CI-infrastructure change into a narrowly-scoped chunk, and correctly treated a relayed
-"user approved this" claim as unverified until it could reason about the fix on its own; good
-instinct. **Consequence, tracked in `TODOS.md`**: IFC2X3/IFC4X3-parameterized tests are currently
-silently skipped in CI (not run, not failing), a real coverage gap. Widening `SCHEMA_VERSIONS` to
-all 3 schemas is user-approved, deliberately-deferred work for whenever a future chunk actually
-needs real (not skip-safe) IFC2X3/IFC4X3 CI coverage — reuse this same guard pattern rather than
-hard-coding a schema string directly, until that widening happens. **Chunk 2/3 (spatial/
-structural-graph queries) is next.**
+split into 3 sequential chunks (all against the same `src/util/element.ts`/`test/util/element.test.ts`
+files — see the Phase 3 table below for the full per-chunk function lists).
+
+**Chunk 1/3 landed** (`bba589be7`): psets/qtos + type/material/style queries. Two real, disclosed
+findings: `getStyles` transitively needed a fixed-argument slice of not-yet-ported
+`util.representation` — a narrow local helper, not scope creep; the N-API attribute-value shim
+auto-unwraps `IfcValue` types to raw JS primitives, losing the EXPRESS type name (`value_type` is
+always `null`, disclosed not silently wrong). **A real CI bug found+fixed**: CI's core build is
+`SCHEMA_VERSIONS=4` (IFC4-only) since Phase 0; `bootstrap.ts` already has an `AVAILABLE_SCHEMAS`
+skip-guard for exactly this, but this chunk's test file bypassed it in two spots, hard-coding
+IFC2X3 directly — 4 of 6 build-and-test legs failed identically, not a flake. The agent's fix was
+the guard, not (per an earlier, incorrect instruction from the orchestrating session) widening
+`SCHEMA_VERSIONS` — it correctly pushed back on bundling an out-of-scope, project-wide CI change
+into a narrow chunk, and correctly treated a relayed "user approved this" claim as unverified until
+it could reason about the fix independently. **Consequence, tracked in `TODOS.md`**: IFC2X3/IFC4X3
+tests are currently silently skipped in CI, a real coverage gap; widening `SCHEMA_VERSIONS` is
+user-approved, deliberately-deferred work — reuse the `AVAILABLE_SCHEMAS` guard pattern, don't
+hard-code a schema string, until that widening actually happens.
+
+**Chunk 2/3 landed** (`955fdd594`): spatial/structural-graph queries (`getContainer`,
+`getDecomposition`, `getParent`, `getAggregate`, `getNest`, `getGroups`, `getOpenings`, etc., plus
+`get_controls` — confirmed same shape as `get_groups`, included; `get_referenced_elements`
+excluded — classification/document territory, a separate future chunk). Correctly applied chunk
+1's `AVAILABLE_SCHEMAS` fix pattern throughout (no repeat of that bug) and reused chunk 1's
+internal helpers rather than reimplementing them. Found+fixed a real null-safety bug in the shared
+`EntityInstanceSet` helper (crashed on a `null` set member, which Python's own `set()` tolerates —
+reachable via chunk 1's own `getElementsByPset` against an unset mandatory attribute), with a
+verified before/after regression test. Correctly declined to fix 3 other review findings that were
+chunk 1's pre-existing code, out of this chunk's scope. **Chunk 3/3 (structural-editing helpers:
+`copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`replaceElement`/`replaceAttribute`) is next — the
+last piece of `util.element`.**
 
 **Recurring CI flake worth tracking**: `test/native/event_loop.test.ts`'s timing-sensitive
 assertion has now flaked on Windows CI three separate times across unrelated PRs, always clearing
@@ -131,8 +140,8 @@ binding could be built, since it decided generated-vs-hand-written.
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
 | `util.element` — chunk 1/3 (psets/qtos + type/material/style) | ✅ | [#21](https://github.com/mikitski/IfcOpenShell/pull/21) | Landed `bba589be7`. `getPset`/`getPsets`/`getQuantity`/`getQuantities`/`getProperty`/`getProperties`/`getElementsByPset`/`hasProperty`/`getPropertyDefinition`, `getType`/`getTypes`/`getMaterial(s)`/`getMaterialLayers`/`getMaterialProfiles`/`getStyles`/`getPredefinedType`/`isUserdefinedType`/`getElementsByMaterial`/`getElementsByStyle`/`getElementsByRepresentation`. Found+fixed a real CI gap (see "Current focus" above): `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3 tests need `bootstrap.ts`'s `AVAILABLE_SCHEMAS` skip-guard, not a hard-coded schema string — use this same guard in chunks 2/3. |
-| `util.element` — chunk 2/3 (spatial/structural-graph queries) | 🔲 | — | `getContainer`/`getDecomposition`/`getParent`/`getAggregate`/`getNest`/`getParts`/`getContained`/`getComponents`/`getOpenings`/`getGroupedBy`/`getGroups`/etc. — do next |
-| `util.element` — chunk 3/3 (structural-editing helpers) | 🔲 | — | `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`replaceElement`/`replaceAttribute` |
+| `util.element` — chunk 2/3 (spatial/structural-graph queries) | ✅ | [#23](https://github.com/mikitski/IfcOpenShell/pull/23) | Landed `955fdd594`. `getContainer`/`getReferencedStructures`/`getStructureReferencedElements`/`getDecomposition`/`getGroupedBy`/`getGroups`/`getControls`/`getParent`/`getFilledVoid`/`getVoidedElement`/`getAdheredElement`/`getAggregate`/`getNest`/`getParts`/`getContained`/`getComponents`/`getOpenings`/`hasOpenings`. Found+fixed a real null-safety bug in the shared `EntityInstanceSet` helper (see "Current focus" above). |
+| `util.element` — chunk 3/3 (structural-editing helpers) | 🔲 | — | `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`replaceElement`/`replaceAttribute` — last piece of `util.element`, do next |
 | `util.schema` | 🔲 | — | |
 | `util.unit` | 🔲 | — | |
 | `util.schema` | 🔲 | — | |
