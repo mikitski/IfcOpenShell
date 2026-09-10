@@ -4,9 +4,10 @@
 // package) -- mirrors Python's namespace nesting (`ifcopenshell.util.element.get_pset`)
 // as `util.element.getPset` here, rather than flattening every util module's exports
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
-// port more `util` modules (`unit`, `pset`, ...); `element`/`attribute`/`schema` are
-// ported so far (planning/ifcopenshell-ts/20-roadmap.md Phase 3).
+// port more `util` modules (`pset`, ...); `element`/`attribute`/`schema`/`selector`/
+// `unit`/`date` are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phase 3).
 export * as attribute from "./attribute";
+export * as date from "./date";
 export * as element from "./element";
 export * as migrator from "./migrator";
 export * as schema from "./schema";

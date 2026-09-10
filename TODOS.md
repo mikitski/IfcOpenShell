@@ -801,3 +801,42 @@ reproduce: the blocker firing with a clear error, and the no-`ObjectPlacement`-s
 **Depends on / blocked by:** Blocked on `util.placement`/`util.geolocation`/`util.shape_builder`/
 `util.representation` landing first (all Tier B, `planning/ifcopenshell-ts/20-roadmap.md` Phase
 4-ish, not yet scheduled in detail).
+
+---
+
+### `util.date.stringToDate` doesn't reproduce `dateutil.parser.parse(..., fuzzy=True)`'s free-text date extraction
+
+**What:** Python's `string_to_date` tries `dateutil.parser.isoparse` first, then falls back to
+`dateutil.parser.parse(string, dayfirst=True, fuzzy=True)`. `src/util/date.ts`'s `stringToDate`
+hand-rolls an `isoparse`-equivalent (extended + basic-form ISO 8601, no dependency added -- see that
+file's own header comment finding #4) plus explicit `dayfirst=True` numeric-separator (`DD/MM/YYYY`
+etc.) and month-name (`"5 January 2020"`, `"January 5, 2020"`) fallbacks covering `dateutil`'s most
+common non-ISO inputs. What is genuinely **not** reproduced: `dateutil`'s `fuzzy=True` mode, which
+extracts a date from surrounding free text that isn't itself date syntax (e.g. `"Meeting on 5 January
+2020 at noon"` -> `dateutil` still finds `2020-01-05`). `stringToDate` returns `null` for input like
+that instead.
+
+**Why not fixed now:** True fuzzy substring extraction is an open-ended, locale-aware token-scanning
+grammar -- a fundamentally different (and much larger) problem than the small, well-defined ISO 8601
+duration grammar this same chunk hand-rolled successfully for `parseDuration`/`durationIsoformat`.
+Disproportionate effort for a function that has **zero callers anywhere in `ifcopenshell-python`
+itself** (confirmed by repo-wide grep during this chunk's investigation -- `string_to_date` exists for
+external callers, e.g. a UI date-text-field parser, not for any internal `ifcopenshell-python` code
+path), so nothing in this port is currently blocked on it either. Not silently approximated: this
+chunk's own test file (`test/util/date.test.ts`) has an explicit test asserting the fuzzy-extraction
+case returns `null`, so the gap is pinned by a regression test, not just prose.
+
+**Fix, if a future caller needs it:** Either hand-roll a bounded fuzzy scanner (tokenize the input,
+try the existing strict parsers against sliding windows/substrings -- meaningfully more code and edge
+cases than today's `stringToDate`), or -- since this is the one place in `util/date.ts` where hand-
+rolling was explicitly judged disproportionate -- consider a small, focused npm dependency for just
+this function (e.g. a fuzzy-date-extraction library) after review, per this project's own "flag before
+adding a new dependency" convention (not added speculatively here).
+
+**Context:** Surfaced during Phase 3's `util.date` chunk (2026-09-10) while investigating the
+`isodate`/`dateutil` library-equivalence question the chunk's own task brief raised. See
+`src/util/date.ts`'s header comment (finding #4) for the full investigation and exactly what
+`stringToDate` does and doesn't cover.
+
+**Depends on / blocked by:** Nothing -- no current caller anywhere in this port needs the fuzzy case.
+Pure "nice to have if a future caller (e.g. a UI layer) needs free-text date parsing" work.
