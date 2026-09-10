@@ -26,53 +26,39 @@ speedup, bulk `getInfo`, file open/parse) plus a non-gating Python-baseline comp
 the user's explicit direction: benchmarks only, **the actual `npm publish ifcopenshell@alpha` step
 and README usage example remain deliberately deferred, not started, pending a separate go-ahead.**
 
-✅ **Phase 3 has started.** `util/element.py` (2009 lines, ~67 functions) is the highest-leverage
-module in `util`/`api` — nearly everything else depends on it — but too large for one PR, so it's
-split into 3 sequential chunks (all against the same `src/util/element.ts`/`test/util/element.test.ts`
-files — see the Phase 3 table below for the full per-chunk function lists).
+✅ **Phase 3 has started.** `util/element.py` (2009 lines, ~67 functions, the highest-leverage
+module in `util`/`api`) **is now fully ported**, split across 3 sequential PRs (#21/#23/#25) per
+this project's "split large modules" discipline: psets/qtos + type/material/style queries →
+spatial/structural-graph queries → structural-editing helpers (`copy`/`removeDeep2`/
+`replaceElement`/etc.). Notable findings across those 3 PRs, still relevant going forward:
+- **The `AVAILABLE_SCHEMAS` pattern is mandatory for every schema-parameterized test.** CI's core
+  build is `SCHEMA_VERSIONS=4` (IFC4-only) since Phase 0; `bootstrap.ts` has a skip-guard for this.
+  Chunk 1 got it wrong once (hard-coded `"IFC2X3"`, 4/6 CI legs failed identically); every chunk
+  since has gotten it right by copying the fix. Widening `SCHEMA_VERSIONS` itself is user-approved
+  but deliberately deferred (see `TODOS.md`) — reuse the guard, don't hard-code a schema string.
+- **Mutating functions must route through existing `IfcFile`/`EntityInstance` methods**
+  (`remove`/`createEntity`/`setByIndex`, which already record `Transaction` ops) — never
+  reimplement transaction-recording. Every chunk since this became explicit has verified it with a
+  real undo/redo test, not just assumption.
+- **Real bugs found along the way**: a null-safety crash in the shared `EntityInstanceSet` helper,
+  a V8 spread-argument-limit crash in `removeDeep2`'s BFS queue (>~120k elements) — both fixed with
+  regression tests. Two genuine primitive gaps disclosed rather than papered over (`file`-to-string,
+  `aggregation_type::type_of_aggregation`) — see `TODOS.md`.
 
-**Chunk 1/3 landed** (`bba589be7`): psets/qtos + type/material/style queries. Two real, disclosed
-findings: `getStyles` transitively needed a fixed-argument slice of not-yet-ported
-`util.representation` — a narrow local helper, not scope creep; the N-API attribute-value shim
-auto-unwraps `IfcValue` types to raw JS primitives, losing the EXPRESS type name (`value_type` is
-always `null`, disclosed not silently wrong). **A real CI bug found+fixed**: CI's core build is
-`SCHEMA_VERSIONS=4` (IFC4-only) since Phase 0; `bootstrap.ts` already has an `AVAILABLE_SCHEMAS`
-skip-guard for exactly this, but this chunk's test file bypassed it in two spots, hard-coding
-IFC2X3 directly — 4 of 6 build-and-test legs failed identically, not a flake. The agent's fix was
-the guard, not (per an earlier, incorrect instruction from the orchestrating session) widening
-`SCHEMA_VERSIONS` — it correctly pushed back on bundling an out-of-scope, project-wide CI change
-into a narrow chunk, and correctly treated a relayed "user approved this" claim as unverified until
-it could reason about the fix independently. **Consequence, tracked in `TODOS.md`**: IFC2X3/IFC4X3
-tests are currently silently skipped in CI, a real coverage gap; widening `SCHEMA_VERSIONS` is
-user-approved, deliberately-deferred work — reuse the `AVAILABLE_SCHEMAS` guard pattern, don't
-hard-code a schema string, until that widening actually happens.
+✅ **`util.schema`'s first chunk landed** (`d0e1742c2`, PR #27): the query/reflection functions
+(`getSupertypes`/`getSubtypes`/`reassignClass`/`BatchReassignClass`/etc.) plus, as a small disclosed
+prerequisite, the full `util.attribute` module (`getPrimitiveType`/`getEnumItems`/`getSelectItems`).
+**`Migrator`** (`util/schema.py`'s ~380-line, JSON-data-file-driven cross-schema migration engine)
+is deliberately **not** in scope — a separate, later chunk. Investigated two more real primitive
+gaps directly against the C++ source (not assumed) and disclosed both: `simple_type::declared_type()`
+and `enumeration_type::enumeration_items()` are unbound; `getSubtypes` worked around a third
+(`entity::subtypes()`) by reconstructing from `schema_definition.declarations()` grouped by
+supertype, verified to preserve ordering. Two small, justified additions to `EntityInstance`/
+`IfcFile` (a public `declaration()` accessor, `createEntityWithIdAndAttributes`) — both thin
+wrappers around already-bound primitives/existing private logic, not new capability.
 
-**Chunk 2/3 landed** (`955fdd594`): spatial/structural-graph queries (`getContainer`,
-`getDecomposition`, `getParent`, `getAggregate`, `getNest`, `getGroups`, `getOpenings`, etc., plus
-`get_controls` — confirmed same shape as `get_groups`, included; `get_referenced_elements`
-excluded — classification/document territory, a separate future chunk). Found+fixed a real
-null-safety bug in the shared `EntityInstanceSet` helper (crashed on a `null` set member, which
-Python's own `set()` tolerates), with a verified before/after regression test.
-
-✅ **`util/element.py` is now fully ported — chunk 3/3 (final chunk) landed** (`ea575b238`): the
-structural-editing helpers — `copy`, `copyDeep`, `removeDeep`, `removeDeep2`, `batchRemoveDeep2`,
-`unbatchRemoveDeep2`, `replaceElement`, `replaceAttribute`. Unlike chunks 1/2's pure queries, these
-genuinely mutate — every one correctly routes through the *existing* `IfcFile.remove`/
-`createEntity`/`EntityInstance.setByIndex` (which already record `Transaction` operations) rather
-than reimplementing mutation logic, verified with a dedicated `removeDeep2` → undo → redo test, not
-just assumed. `FileState` gained a `toDelete` field for `batchRemoveDeep2`'s per-file pending-
-deletion set, mirroring the existing `transaction` field pattern. **Two real primitive gaps found
-and disclosed, neither filled silently**: no `file`-to-string primitive existed for
-`unbatchRemoveDeep2`'s reload-from-serialized-string step — worked around via the existing
-`write()` primitive (confirmed to use the identical serialization path, not an approximation);
-`aggregation_type::type_of_aggregation()` (SET vs. LIST/BAG) was never bound as a primitive, so
-`replaceAttribute` never deduplicates a replaced SET member — a disclosed, tested divergence from
-Python, logged in `TODOS.md`. Found+fixed a real V8 spread-argument-limit bug in `removeDeep2`'s
-BFS queue (`queue.push(...largeArray)` throws past ~120k elements — exactly the scale the
-neighboring large-list-clearing workaround already targets).
-
-**Next Phase 3 dispatch**: a different `util` module entirely (`util.schema`, `util.unit`, etc. —
-see the table below) — `util.element` itself needs no further chunks.
+**Next Phase 3 dispatch**: either `util.schema`'s `Migrator` (its own chunk) or a different `util`
+module entirely (`util.unit`, `util.type`, `util.classification`, etc. — see the table below).
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -160,11 +146,10 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.element` — chunk 1/3 (psets/qtos + type/material/style) | ✅ | [#21](https://github.com/mikitski/IfcOpenShell/pull/21) | Landed `bba589be7`. `getPset`/`getPsets`/`getQuantity`/`getQuantities`/`getProperty`/`getProperties`/`getElementsByPset`/`hasProperty`/`getPropertyDefinition`, `getType`/`getTypes`/`getMaterial(s)`/`getMaterialLayers`/`getMaterialProfiles`/`getStyles`/`getPredefinedType`/`isUserdefinedType`/`getElementsByMaterial`/`getElementsByStyle`/`getElementsByRepresentation`. Found+fixed a real CI gap (see "Current focus" above): `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3 tests need `bootstrap.ts`'s `AVAILABLE_SCHEMAS` skip-guard, not a hard-coded schema string — use this same guard in chunks 2/3. |
 | `util.element` — chunk 2/3 (spatial/structural-graph queries) | ✅ | [#23](https://github.com/mikitski/IfcOpenShell/pull/23) | Landed `955fdd594`. `getContainer`/`getReferencedStructures`/`getStructureReferencedElements`/`getDecomposition`/`getGroupedBy`/`getGroups`/`getControls`/`getParent`/`getFilledVoid`/`getVoidedElement`/`getAdheredElement`/`getAggregate`/`getNest`/`getParts`/`getContained`/`getComponents`/`getOpenings`/`hasOpenings`. Found+fixed a real null-safety bug in the shared `EntityInstanceSet` helper (see "Current focus" above). |
 | `util.element` — chunk 3/3 (structural-editing helpers) | ✅ | [#25](https://github.com/mikitski/IfcOpenShell/pull/25) | Landed `ea575b238`. `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`unbatchRemoveDeep2`/`replaceElement`/`replaceAttribute`. **`util/element.py` is now fully ported.** 2 real primitive gaps found+disclosed (file-to-string, `type_of_aggregation`), 1 real V8 spread-limit bug found+fixed — see "Current focus" above. |
-| `util.schema` | 🔲 | — | |
+| `util.attribute` | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2` alongside `util.schema` chunk 1 (small, self-contained prerequisite — see below). `getPrimitiveType`/`getEnumItems`/`getSelectItems`. |
+| `util.schema` — chunk 1 (query/reflection + `BatchReassignClass`) | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2`. `getFallbackSchema`/`getDeclaration`/`isA`/`getSupertypes`/`getSubtypes`/`geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses`/`reassignClass`/`BatchReassignClass`. 3 real primitive gaps investigated+disclosed (`simple_type::declared_type`, `enumeration_type::enumeration_items`, `entity::subtypes` — the last one worked around, not just disclosed) — see "Current focus" above. |
+| `util.schema` — chunk 2 (`Migrator`) | 🔲 | — | ~380 lines, JSON-data-file-driven cross-schema migration engine — large enough to warrant its own chunk, not yet dispatched |
 | `util.unit` | 🔲 | — | |
-| `util.schema` | 🔲 | — | |
-| `util.unit` | 🔲 | — | |
-| `util.attribute` | 🔲 | — | |
 | `util.classification` | 🔲 | — | |
 | `util.constraint` | 🔲 | — | |
 | `util.date` | 🔲 | — | |
