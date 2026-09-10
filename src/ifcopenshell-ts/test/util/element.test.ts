@@ -49,8 +49,9 @@
 // without depending on the pre-existing gap.
 
 import { describe, expect, test } from "vitest";
-import type { EntityInstance } from "../../src/entityInstance";
+import { EntityInstance } from "../../src/entityInstance";
 import type { IfcFile } from "../../src/file";
+import { native } from "../../src/native/native_loader";
 import * as subject from "../../src/util/element";
 import { AVAILABLE_SCHEMAS, type Schema, createTestFile } from "../bootstrap";
 
@@ -63,6 +64,38 @@ function buildProperties(file: IfcFile, properties: Record<string, unknown>): En
 		prop.set("NominalValue", value);
 		return prop;
 	});
+}
+
+/**
+ * Builds a real typed-instance value (e.g. a standalone `IfcLabel` wrapping `value`) --
+ * what a `NominalValue`/`EnumerationValues`-element/`ListValues`-element actually looks
+ * like in any real SPF file, unlike `buildProperties` above, which sets a *bare* JS
+ * primitive (`element.ts`'s header comment, finding #2 -- that bare-primitive path is
+ * also real and still covered by the existing `getProperties`/`getPropertyDefinition`
+ * tests below, just not the whole story). `file.createEntity("IfcLabel", value)` can't
+ * be used for this: it throws ("Attribute access is only supported on entity
+ * instances") -- confirmed empirically against the built addon while writing this test,
+ * not assumed -- because `EntityInstance.setByIndex`'s `attribute_kind_of` lookup
+ * requires an entity declaration, which a non-entity/defined-type instance's own
+ * `attributeCount()`/`attribute_kind_of` don't have (a real, pre-existing Phase 2 gap
+ * already disclosed in `entityInstance.ts`'s own header comment: "Attribute values on
+ * non-entity ... instances" are out of scope for `.get()`/`.set()`/`.getInfo()`, and
+ * `.setByIndex` inherits the same restriction via the same native call). This instead
+ * drops to the raw native layer directly (`file.nativeFile`, matching
+ * `test/native/primitives.test.ts`'s own established pattern for building instances
+ * this way), which has no such restriction: `set_attribute_value(0, ...)` -- the same
+ * primitive `IfcOpenShell`'s own STEP parser uses to populate a `NominalValue`'s wrapped
+ * scalar when reading a real file -- works fine on a standalone declared-type
+ * instance's own single value slot. `test/util/unit.test.ts`'s own `createTypedValue`
+ * helper (landed concurrently, in `util.unit`'s chunk, merged into this branch from
+ * `v0.9.0` after this helper was already written) independently arrived at the same
+ * construction for the same reason -- confirms this isn't a one-off workaround.
+ */
+function createTypedValue(file: IfcFile, type: string, value: string): EntityInstance {
+	const declaration = file.nativeFile.schema().declaration_by_name_with_name(type);
+	const handle = file.nativeFile.create_with_declaration_instance_id(declaration, -1);
+	handle.set_attribute_value(0, { kind: native.STRING, string_value: value });
+	return new EntityInstance(handle._handle, file);
 }
 
 /** `entity.set(name, value)`, silently ignoring "no such attribute" -- used only for
@@ -600,18 +633,117 @@ describe("util.element getProperties (IFC4)", () => {
 							id: nestedProp.id,
 							class: "IfcPropertySingleValue",
 							value: "b",
-							// Python's own test asserts `"value_type": "IfcLabel"` here --
-							// see `src/util/element.ts`'s header comment (finding #2) on why
-							// this port can't recover the EXPRESS type name of an
-							// already-shim-unwrapped `NominalValue` and always returns
-							// `null` instead. A disclosed, necessary divergence, not an
-							// oversight.
+							// Python's own test asserts `"value_type": "IfcLabel"` here, but
+							// its fixture builds `NominalValue` by actually creating an
+							// `IfcLabel` instance and assigning it. This fixture instead
+							// sets a bare JS primitive via `.set("NominalValue", "b")`
+							// (`element.ts`'s header comment, finding #2), which stores a raw
+							// scalar attribute with no type info attached -- so `value_type`
+							// is correctly `null` *for this specific fixture*, not because
+							// the type name is unrecoverable in general. See
+							// `getProperty(IFC4) verbose against a real typed-instance value
+							// recovers value_type` below for the realistic, "IfcLabel"-
+							// recovering case this comment used to (incorrectly) claim was
+							// impossible.
 							value_type: null,
 						},
 					},
 				},
 			},
 		});
+	});
+});
+
+// Original coverage (no dedicated Python test class exercises this distinction --
+// Python's own `test_element.py` builds its `NominalValue`/`EnumerationValues`/
+// `ListValues` fixtures via an actual typed instance every time, so it never had a
+// bare-primitive-vs-typed-instance split to test in the first place): regression tests
+// for the real bug this PR fixes -- `getProperty`/`getProperties` used to return the
+// raw `EntityInstance` wrapper object itself (instead of its unwrapped scalar) whenever
+// `NominalValue`/an `EnumerationValues`/`ListValues` element was a real typed-instance
+// value rather than a bare JS primitive, and verbose mode's `value_type` was always
+// `null` regardless of whether the real EXPRESS type name was actually recoverable. See
+// `element.ts`'s header comment (finding #2, corrected 2026-09-10) for the full story.
+describe("util.element getProperty/getProperties against a real typed-instance value (IFC4)", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	test("getProperty unwraps a real typed-instance NominalValue to its bare scalar", () => {
+		const file = newFile();
+		const prop = file.createEntity("IfcPropertySingleValue");
+		prop.set("Name", "a");
+		prop.setByIndex(2, createTypedValue(file, "IfcLabel", "foo"));
+
+		const result = subject.getProperty([prop], "a");
+		expect(result).toBe("foo");
+		expect(result).not.toBeInstanceOf(EntityInstance);
+	});
+
+	test("getProperty(IFC4) verbose against a real typed-instance value recovers value_type", () => {
+		const file = newFile();
+		const prop = file.createEntity("IfcPropertySingleValue");
+		prop.set("Name", "a");
+		prop.setByIndex(2, createTypedValue(file, "IfcLabel", "foo"));
+
+		const result = subject.getProperty([prop], "a", true) as Record<string, unknown>;
+		expect(result).toEqual({ id: prop.id(), class: "IfcPropertySingleValue", value: "foo", value_type: "IfcLabel" });
+	});
+
+	test("getProperty unwraps typed-instance elements of EnumerationValues/ListValues", () => {
+		const file = newFile();
+		const enumProp = file.createEntity("IfcPropertyEnumeratedValue");
+		enumProp.set("Name", "e");
+		enumProp.setByIndex(2, [createTypedValue(file, "IfcLabel", "x"), createTypedValue(file, "IfcLabel", "y")]);
+		expect(subject.getProperty([enumProp], "e")).toEqual(["x", "y"]);
+
+		const listProp = file.createEntity("IfcPropertyListValue");
+		listProp.set("Name", "l");
+		listProp.setByIndex(2, [createTypedValue(file, "IfcLabel", "x"), createTypedValue(file, "IfcLabel", "y")]);
+		expect(subject.getProperty([listProp], "l")).toEqual(["x", "y"]);
+	});
+
+	test("getProperties mirrors the same unwrap for a typed-instance NominalValue, non-verbose and verbose", () => {
+		const file = newFile();
+		const prop = file.createEntity("IfcPropertySingleValue");
+		prop.set("Name", "a");
+		prop.setByIndex(2, createTypedValue(file, "IfcLabel", "foo"));
+
+		expect(subject.getProperties([prop])).toEqual({ a: "foo" });
+		expect(subject.getProperties([prop], true)).toEqual({
+			a: { id: prop.id(), class: "IfcPropertySingleValue", value: "foo", value_type: "IfcLabel" },
+		});
+	});
+
+	test("getProperties unwraps typed-instance elements of EnumerationValues/ListValues", () => {
+		const file = newFile();
+		const enumProp = file.createEntity("IfcPropertyEnumeratedValue");
+		enumProp.set("Name", "e");
+		enumProp.setByIndex(2, [createTypedValue(file, "IfcLabel", "x"), createTypedValue(file, "IfcLabel", "y")]);
+
+		expect(subject.getProperties([enumProp])).toEqual({ e: ["x", "y"] });
+		expect(subject.getProperties([enumProp], true)).toEqual({
+			e: { id: enumProp.id(), class: "IfcPropertyEnumeratedValue", value: ["x", "y"] },
+		});
+	});
+
+	test("getProperty/getProperties still handle a null NominalValue and a bare primitive (regression guard)", () => {
+		const file = newFile();
+		const unset = file.createEntity("IfcPropertySingleValue");
+		unset.set("Name", "unset");
+		expect(subject.getProperty([unset], "unset")).toBeNull();
+		expect(subject.getProperty([unset], "unset", true)).toEqual({
+			id: unset.id(),
+			class: "IfcPropertySingleValue",
+			value: null,
+			value_type: null,
+		});
+
+		const bare = file.createEntity("IfcPropertySingleValue");
+		bare.set("Name", "bare");
+		bare.set("NominalValue", "b");
+		expect(subject.getProperty([bare], "bare")).toBe("b");
+		expect(subject.getProperties([bare])).toEqual({ bare: "b" });
 	});
 });
 
