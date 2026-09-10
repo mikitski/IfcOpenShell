@@ -624,3 +624,33 @@ approximation) and reading it back. `to_string()`/`from_string()` can stay in th
 for anyone who wants an in-memory (no disk I/O) version later, but nothing currently blocks on it.
 
 **Depends on / blocked by:** None. Independent, small, well-scoped primitive addition.
+
+---
+
+### `util.unit.convert_file_length_units` -- genuinely blocked, not yet portable
+
+**What:** `ifcopenshell/util/unit.py`'s `convert_file_length_units` (the file's only function not
+ported by the Phase 3 `util.unit` chunk) transitively imports `ifcopenshell.api.unit`,
+`ifcopenshell.api.georeference`, and `ifcopenshell.util.geolocation` -- none of which exist yet in
+this TS port. `ifcopenshell.api.*` is a separate, much-later phase in this project's roadmap
+(`planning/ifcopenshell-ts/20-roadmap.md` Phase 6+); `util.geolocation` is Phase 4 (`util` Tier B).
+
+**Why deferred rather than attempted:** Unlike `util.element`'s own 3-way chunk split (same module,
+sequenced sub-chunks), this is a genuine cross-module hard blocker -- there is no way to port a
+working `add_si_unit`/`add_conversion_based_unit`/`edit_georeferencing` call without those API
+modules existing first. Porting only a narrow slice of `api.unit`/`api.georeference` just to unblock
+this one function would be real, disclosed scope creep into Phase 6+ work, not a small addition.
+
+**Fix:** Port `ifcopenshell.api.unit` and `ifcopenshell.api.georeference` (Phase 6, `api` Tier 1) and
+`ifcopenshell.util.geolocation` (Phase 4, `util` Tier B) first; `convert_file_length_units` itself is
+then a comparatively small, mechanical port on top of `util/unit.ts`'s already-landed
+`getPrefix`/`getUnitName`/`getProjectUnit`/`convertUnit`/`iterElementAndAttributesPerType`/
+`getUnitAssignment` (all already ported and directly reusable).
+
+**Context:** Surfaced during Phase 3's `util.unit` chunk (2026-09-10) -- see that chunk's own PR
+description for the full disclosure. `test_unit.py::TestConvertFileLengthUnits`/
+`TestConvertFileLengthUnitsIFC4`/`TestConvertFileLengthUnitsIFC4X3` have no TS counterpart for the
+same reason.
+
+**Depends on / blocked by:** Blocked on Phase 4's `util.geolocation` and Phase 6's `api.unit`/
+`api.georeference` landing first.
