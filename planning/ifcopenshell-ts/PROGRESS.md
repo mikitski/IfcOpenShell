@@ -57,8 +57,33 @@ supertype, verified to preserve ordering. Two small, justified additions to `Ent
 `IfcFile` (a public `declaration()` accessor, `createEntityWithIdAndAttributes`) — both thin
 wrappers around already-bound primitives/existing private logic, not new capability.
 
+✅ **`util.unit` landed** (`7fbe3dfed`, PR #29): full port of `util/unit.py` except
+`convert_file_length_units`, a genuine hard blocker (transitively imports the not-yet-ported
+`api.unit`/`api.georeference`/`util.geolocation` — not a "later chunk," see `TODOS.md`).
+`FileState.units` caching follows the `toDelete` getter/setter precedent. `format_length`'s
+imperial-fraction formatting uses a gcd-based `reduceFraction` plus a round-half-to-even
+`pythonRound` helper matching Python's `Fraction`/`round()`; `calculate_unit_scale` substitutes a
+static `getSiDimensions` lookup for `IfcSIUnit.Dimensions` (an EXPRESS derived attribute this
+project doesn't evaluate) — verified dimensionally sound since `IfcDeriveDimensionalExponents`
+depends only on `Name`, not `Prefix`. Full diff independently re-reviewed line-by-line against the
+real Python source before merge.
+- **Resolved a genuine wrapping-behavior question** this chunk's own header comment flagged against
+  `util/element.ts` chunk 1's disclosed finding: an `IfcValue`-typed attribute (e.g. `NominalValue`)
+  reads back as a raw JS primitive only when written via a bare `.set()` call (no typed-instance
+  object gets created); it reads back as a real `EntityInstance` (working `.isA()`/`.getByIndex(0)`,
+  matching Python's `.wrappedValue`) when written as a proper typed instance — which is how real IFC
+  files, and this chunk's own `createTypedValue` test helper, both write it. Not a contradiction —
+  two genuinely different, both-correct code paths, confirmed directly against the N-API shim source
+  (`attribute_value_shim.cpp`'s `get_attribute_value_variant`) and the real Python source.
+- **This also surfaced a real, separate bug in the already-merged `util/element.ts`**:
+  `getProperty`/`getProperties` never did the `.wrappedValue`-equivalent unwrap for
+  `NominalValue`/`EnumerationValues`/`ListValues` (all `IfcValue`-SELECT-typed), so on realistic
+  data (proper typed-instance values) they'd return raw `EntityInstance` objects instead of scalars,
+  and always reported `value_type: null` even where it's recoverable. Fixed in a dedicated follow-up
+  PR — see the entry below once it lands.
+
 **Next Phase 3 dispatch**: either `util.schema`'s `Migrator` (its own chunk) or a different `util`
-module entirely (`util.unit`, `util.type`, `util.classification`, etc. — see the table below).
+module entirely (`util.type`, `util.classification`, etc. — see the table below).
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -149,7 +174,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.attribute` | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2` alongside `util.schema` chunk 1 (small, self-contained prerequisite — see below). `getPrimitiveType`/`getEnumItems`/`getSelectItems`. |
 | `util.schema` — chunk 1 (query/reflection + `BatchReassignClass`) | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2`. `getFallbackSchema`/`getDeclaration`/`isA`/`getSupertypes`/`getSubtypes`/`geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses`/`reassignClass`/`BatchReassignClass`. 3 real primitive gaps investigated+disclosed (`simple_type::declared_type`, `enumeration_type::enumeration_items`, `entity::subtypes` — the last one worked around, not just disclosed) — see "Current focus" above. |
 | `util.schema` — chunk 2 (`Migrator`) | 🔲 | — | ~380 lines, JSON-data-file-driven cross-schema migration engine — large enough to warrant its own chunk, not yet dispatched |
-| `util.unit` | 🔲 | — | |
+| `util.unit` | ✅ | [#29](https://github.com/mikitski/IfcOpenShell/pull/29) | Landed `7fbe3dfed`. Full port except `convert_file_length_units` (genuine hard blocker, see `TODOS.md`). Resolved a wrapping-behavior question vs. `util.element` chunk 1's finding (two genuinely different, both-correct code paths); surfaced a real separate bug in `util/element.ts`'s `getProperty`/`getProperties`, fixed in a follow-up PR. |
 | `util.classification` | 🔲 | — | |
 | `util.constraint` | 🔲 | — | |
 | `util.date` | 🔲 | — | |
