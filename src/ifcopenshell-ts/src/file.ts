@@ -507,6 +507,26 @@ export class IfcFile {
 		return this.createEntityImpl(type, [], id);
 	}
 
+	/**
+	 * Create an entity with both an explicit STEP id AND initial positional attribute
+	 * values in one atomic call -- `util/schema.ts`'s `reassignClass` port (Phase 3,
+	 * `util.schema` chunk) needs this: Python's `reassign_class` calls
+	 * `ifc_file.create_entity(new_class, id=info["id"], **new_attributes)`, a *single*
+	 * creation call carrying both the preserved STEP id and the preserved attribute
+	 * values together, matching `createEntityImpl`'s own existing "don't record initial
+	 * attribute assignments as separate transaction operations -- the creation itself
+	 * already captures them" behavior (see that method's own comment). Neither
+	 * `createEntity` (id always -1) nor `createEntityWithId` (no positional args)
+	 * exposes both together, even though the shared private `createEntityImpl` already
+	 * supports it -- this is a thin, disclosed wrapper exposing exactly that existing
+	 * capability, not new logic, added because `reassignClass` would otherwise have to
+	 * create-then-N-separate-`.set()`-calls (a real behavioral difference: N extra
+	 * recorded transaction edits on top of the creation, instead of one atomic op).
+	 */
+	createEntityWithIdAndAttributes(type: string, id: number, args: readonly unknown[]): EntityInstance {
+		return this.createEntityImpl(type, args, id);
+	}
+
 	byId(id: number): EntityInstance {
 		return new EntityInstance(this.nativeFile.instance_by_id(id)._handle, this);
 	}

@@ -190,6 +190,19 @@ export class EntityInstance {
 		return this.native.declaration().as_entity() !== null;
 	}
 
+	/**
+	 * The schema declaration of this instance (`entity_instance_mixin.declaration`, a
+	 * Python property). Added by `util/schema.ts`'s `getDeclaration` port (Phase 3,
+	 * `util.schema` chunk): this class already resolved `this.native.declaration()`
+	 * internally in several places above (`isEntity`/`entityDeclaration`/
+	 * `attributeCount`/`_resolveTypeInfo`), but had no *public* accessor for it -- a
+	 * thin, disclosed addition (one line, delegates to the already-bound native
+	 * `declaration()` primitive, no new native surface) rather than a new capability.
+	 */
+	declaration(): NativeDeclarationCtor {
+		return this.native.declaration();
+	}
+
 	private entityDeclaration(): NativeEntity {
 		const declaration = this.native.declaration().as_entity();
 		if (declaration === null) {
