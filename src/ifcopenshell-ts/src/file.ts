@@ -249,6 +249,17 @@ interface FileState {
 	history: Transaction[];
 	future: Transaction[];
 	transaction: Transaction | null;
+	/**
+	 * Port of `file_mixin.to_delete: Union[set[entity_instance], None] = None` -- a
+	 * dynamically-added-in-Python attribute (this port instead declares it as a real
+	 * field, same default) that `util/element.ts`'s `batchRemoveDeep2`/`removeDeep2`/
+	 * `unbatchRemoveDeep2` use to accumulate a pending-deletion set across multiple
+	 * `removeDeep2` calls instead of deleting immediately (see that module's own doc
+	 * comments for the full batching story). Threaded through the same identity-keyed
+	 * `FileState` registry as `transaction`/`history`/`future` above -- the established
+	 * per-file mutable side-state pattern this project already uses, not a new one.
+	 */
+	toDelete: Set<EntityInstance> | null;
 }
 
 // Class-level shared state trick (`file_mixin.registry`, research/01 SS2.2): keyed by
@@ -334,7 +345,7 @@ export class IfcFile {
 		this.pointerKey = this.nativeFile.file_pointer();
 		let state = fileRegistry.get(this.pointerKey);
 		if (!state) {
-			state = { history: [], future: [], transaction: null };
+			state = { history: [], future: [], transaction: null, toDelete: null };
 			fileRegistry.set(this.pointerKey, state);
 		}
 		this.state = state;
@@ -359,6 +370,15 @@ export class IfcFile {
 
 	set transaction(value: Transaction | null) {
 		this.state.transaction = value;
+	}
+
+	/** See `FileState.toDelete`'s own doc comment above. */
+	get toDelete(): Set<EntityInstance> | null {
+		return this.state.toDelete;
+	}
+
+	set toDelete(value: Set<EntityInstance> | null) {
+		this.state.toDelete = value;
 	}
 
 	setHistorySize(size: number): void {

@@ -581,3 +581,46 @@ by CI's real `SCHEMA_VERSIONS=4` build failing loudly rather than silently skipp
 **Depends on / blocked by:** None block other work landing. Should be picked up whenever a future
 chunk actually needs real IFC2X3/IFC4X3 CI coverage (not just skip-safe fallback behavior) — at that
 point, silent skipping stops being an acceptable substitute for real coverage.
+
+---
+
+### `aggregation_type::type_of_aggregation()` never bound as a primitive — blocks true SET/LIST/BAG detection
+
+**What:** The real C++ `aggregation_type` class (`src/ifcparse/schema.h`) has a
+`type_of_aggregation()` accessor returning the `array_type`/`bag_type`/`list_type`/`set_type` enum
+(and Python's SWIG binding additionally exposes a `type_of_aggregation_string()` convenience
+wrapper, `src/ifcwrap/IfcParseWrapper.i` line ~1042) — but the N-API primitive layer's
+`aggregation_type` class (`src/wrappergen/generated_napi/ifcopenshell_native.ts`) only exposes
+`bound1()`/`bound2()`/`type_of_element()`/`as_aggregation_type()`. There is currently no way to
+distinguish a `SET`-typed EXPRESS aggregate attribute from a `LIST`/`BAG`/`ARRAY`-typed one from
+this primitive surface at all — confirmed by reading both the generated `.ts` facade and its C API
+header (`ifcopenshell_native_c_api.h`) directly, not assumed.
+
+**Why this matters, concretely:** `util/element.py`'s `replace_attribute` only de-duplicates a
+replaced aggregate member when the attribute is a real `SET` (a `LIST`/`BAG` may legitimately
+contain duplicates) — its private `_is_set_attribute` helper is exactly this schema-introspection
+chain. Phase 3 chunk 3 (`util/element.ts`'s `replaceAttribute`/`isSetAttribute`) hit this gap
+directly: `isSetAttribute` unconditionally returns `false` (never deduplicates) rather than
+guessing, a disclosed, tested divergence from Python (see that PR's own test,
+`replacing into a SET-typed attribute does not deduplicate the survivor`) — concretely,
+`IfcRelAggregates.RelatedObjects` (a real EXPRESS `SET`) keeps a duplicate entry after a
+`replaceAttribute` call where Python would have collapsed it to one.
+
+**Fix:** bind `aggregation_type::type_of_aggregation()` (or a string-returning convenience wrapper
+matching Python's own `type_of_aggregation_string()`) as a new N-API primitive, the same
+one-function-at-a-time follow-up pattern as the Phase 1 gaps list above. Small, self-contained,
+no dependency on anything else in this list.
+
+**Context:** Surfaced during Phase 3 chunk 3 (`util.element` structural-editing helpers:
+`copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`unbatchRemoveDeep2`/
+`replaceElement`/`replaceAttribute`), 2026-09-09. Separately, that same chunk confirmed the
+`to_string()`/`from_string()` gap noted in the Phase 1 gaps list above does *not* block
+`unbatch_remove_deep2`'s file-reload semantics: `from_string` already has a working primitive
+(`native.file_new_with_data_data_size`, already used by `template.ts`), and `to_string` was worked
+around without a new primitive by writing to a throwaway temp file via the existing
+`IfcFile.write(path)` (confirmed, by reading `src/ifcparse/parse.cpp`'s `operator<<`, to serialize
+via the exact same code path `to_string()` itself would use, i.e. byte-identical, not an
+approximation) and reading it back. `to_string()`/`from_string()` can stay in the Phase 1 gaps list
+for anyone who wants an in-memory (no disk I/O) version later, but nothing currently blocks on it.
+
+**Depends on / blocked by:** None. Independent, small, well-scoped primitive addition.
