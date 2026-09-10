@@ -260,6 +260,18 @@ interface FileState {
 	 * per-file mutable side-state pattern this project already uses, not a new one.
 	 */
 	toDelete: Set<EntityInstance> | null;
+	/**
+	 * Port of `file_mixin.units: dict[str, entity_instance] = {}` -- a Python
+	 * *class-level* mutable-default dict (shadowed per-instance the first time an
+	 * instance assigns its own `self.units = {...}`, a deliberate, if unusual, Python
+	 * idiom) backing `util/unit.ts`'s `cacheUnits`/`clearUnitCache`/`getProjectUnit`
+	 * (Phase 3, `util.unit` chunk). Threaded through the same identity-keyed
+	 * `FileState` registry as `transaction`/`history`/`future`/`toDelete` above,
+	 * following the `toDelete` precedent exactly -- default `{}` (an always-present,
+	 * possibly-empty dict), not `null`, matching Python's own default and this
+	 * module's own falsy-dict ("if not ifc_file.units") checks.
+	 */
+	units: Record<string, EntityInstance>;
 }
 
 // Class-level shared state trick (`file_mixin.registry`, research/01 SS2.2): keyed by
@@ -345,7 +357,7 @@ export class IfcFile {
 		this.pointerKey = this.nativeFile.file_pointer();
 		let state = fileRegistry.get(this.pointerKey);
 		if (!state) {
-			state = { history: [], future: [], transaction: null, toDelete: null };
+			state = { history: [], future: [], transaction: null, toDelete: null, units: {} };
 			fileRegistry.set(this.pointerKey, state);
 		}
 		this.state = state;
@@ -379,6 +391,15 @@ export class IfcFile {
 
 	set toDelete(value: Set<EntityInstance> | null) {
 		this.state.toDelete = value;
+	}
+
+	/** See `FileState.units`'s own doc comment above. */
+	get units(): Record<string, EntityInstance> {
+		return this.state.units;
+	}
+
+	set units(value: Record<string, EntityInstance>) {
+		this.state.units = value;
 	}
 
 	setHistorySize(size: number): void {
