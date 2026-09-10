@@ -7,8 +7,12 @@
 // port more `util` modules (`unit`, `pset`, ...); `element`/`attribute`/`schema` are
 // ported so far (planning/ifcopenshell-ts/20-roadmap.md Phase 3).
 export * as attribute from "./attribute";
+export * as classification from "./classification";
+export * as constraint from "./constraint";
 export * as element from "./element";
 export * as migrator from "./migrator";
 export * as schema from "./schema";
 export * as selector from "./selector";
+export * as system from "./system";
+export * as type from "./type";
 export * as unit from "./unit";
