@@ -82,6 +82,18 @@ describe("util.date durationIsoformat / parseDuration (ISO 8601 round trips)", (
 		expect(subject.parseDuration(null)).toBeNull();
 		expect(subject.parseDuration(undefined)).toBeNull();
 	});
+
+	test("'PT' (a matched T separator with no H/M/S after it) is a real, valid, all-zero duration, not an error", () => {
+		// Real `isodate.parse_duration("PT")` returns `timedelta(0)`, not an error --
+		// verified directly against the real library (not assumed) while fixing a bug
+		// this exact case exposed: `isodate`'s `P(?!\b)` lookahead only rejects a bare
+		// `"P"` with nothing after it at all; a matched `T` separator on its own is a
+		// legitimate all-zero duration. A bare `"P"` (no separator, no fields) must
+		// still be rejected -- covered by the "invalid duration string" case above via
+		// `"not a duration"`'s general non-match, and directly here too.
+		expect(subject.parseDuration("PT")).toEqual({ years: 0, months: 0, days: 0, hours: 0, minutes: 0, seconds: 0 });
+		expect(subject.parseDuration("P")).toBeNull();
+	});
 });
 
 describe("util.date timedelta2duration", () => {

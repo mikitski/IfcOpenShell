@@ -193,22 +193,27 @@ export function timedelta2duration(timedelta: TimedeltaLike): Duration {
 // 8601 (e.g. allows combining weeks with other designators), matching `isodate`'s own
 // documented behavior exactly.
 const ISO8601_DURATION_RE =
-	/^(?<sign>[+-])?P(?:(?<years>\d+(?:[.,]\d+)?)Y)?(?:(?<months>\d+(?:[.,]\d+)?)M)?(?:(?<weeks>\d+(?:[.,]\d+)?)W)?(?:(?<days>\d+(?:[.,]\d+)?)D)?(?:T(?:(?<hours>\d+(?:[.,]\d+)?)H)?(?:(?<minutes>\d+(?:[.,]\d+)?)M)?(?:(?<seconds>\d+(?:[.,]\d+)?)S)?)?$/;
+	/^(?<sign>[+-])?P(?:(?<years>\d+(?:[.,]\d+)?)Y)?(?:(?<months>\d+(?:[.,]\d+)?)M)?(?:(?<weeks>\d+(?:[.,]\d+)?)W)?(?:(?<days>\d+(?:[.,]\d+)?)D)?(?:(?<separator>T)(?:(?<hours>\d+(?:[.,]\d+)?)H)?(?:(?<minutes>\d+(?:[.,]\d+)?)M)?(?:(?<seconds>\d+(?:[.,]\d+)?)S)?)?$/;
 
 /**
  * Python: `isodate.parse_duration`'s regex-based branch (the "complete duration
  * specification" form -- the alternative date-complete form is out of scope, see header
  * comment finding #3). Returns `null` (Python: raises `ISO8601Error`, caught by every
- * caller in this file) for a non-matching or all-zero string (Python: `P(?!\b)` rejects
- * a bare `"P"` with nothing after it; ported here as an explicit "at least one component
- * present" check instead of replicating that lookahead literally).
+ * caller in this file) for a non-matching string. Python's `P(?!\b)` lookahead rejects
+ * only a bare `"P"` (nothing at all follows it) -- a matched `T` separator with no H/M/S
+ * after it (e.g. `"PT"`) is a real, valid, all-zero duration in real `isodate`
+ * (`isodate.parse_duration("PT") == timedelta(0)`, verified directly against the real
+ * library, not assumed). Ported as an explicit "at least one component present, *or* a
+ * matched `T` separator" check -- checking `g.separator` alongside the numeric fields,
+ * rather than replicating the lookahead literally -- so `"PT"` is accepted like Python,
+ * while a bare `"P"` (no separator, no fields) is still correctly rejected.
  */
 function parseIso8601Duration(value: string): Duration | null {
 	const match = ISO8601_DURATION_RE.exec(value);
 	if (!match || !match.groups) return null;
 	const g = match.groups;
 	const fields = ["years", "months", "weeks", "days", "hours", "minutes", "seconds"] as const;
-	if (!fields.some((f) => g[f] !== undefined)) return null;
+	if (g.separator === undefined && !fields.some((f) => g[f] !== undefined)) return null;
 
 	const num = (s: string | undefined): number => (s === undefined ? 0 : Number.parseFloat(s.replace(",", ".")));
 	const sign = g.sign === "-" ? -1 : 1;
