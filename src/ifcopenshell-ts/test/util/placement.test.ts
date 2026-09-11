@@ -192,7 +192,13 @@ describe("util.placement rotation", () => {
 	});
 
 	test("0 degrees is the identity matrix", () => {
-		expect(Array.from(subject.rotation(0, "X"))).toEqual(Array.from(mat4.create()));
+		// `toEqual` (Object.is-based deep equality) would fail here: `mat4.fromXRotation`
+		// computes `-Math.sin(0)`, which is IEEE-754 `-0` -- numerically identical to `0`
+		// (and to Python's own `numpy` output, which `==`-compares `-0.0 == 0.0` as
+		// `True`), but distinct under strict `Object.is`. `expectClose` (`toBeCloseTo`)
+		// correctly treats `-0`/`+0` as equal, matching the real numerical semantics
+		// rather than a JS-specific bitwise-sign artifact.
+		expectClose(Array.from(subject.rotation(0, "X")), Array.from(mat4.create()));
 	});
 
 	// Disclosed finding 3 (see placement.ts's header comment): Python's `rotation` has
