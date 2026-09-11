@@ -18,6 +18,13 @@
 // `getSubtypes`, `geometryClassesIntroducedAfter`, `ifc4OnlyGeometryClasses`,
 // `reassignClass`, `BatchReassignClass`.
 //
+// UPDATED 2026-09-10 (`util.pset` chunk): `getSchemaDefinition` (originally a private
+// helper backing `geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses` only, see its
+// own doc comment below) is now `export`ed -- `util/pset.ts`'s `PsetQto` needs the exact
+// same "get a `schema_definition` for an arbitrary `IFC_SCHEMA` name, independent of any
+// already-open `IfcFile`" capability for its own `ifcopenshell.schema_by_name(schema)`
+// port, and this is a direct, narrow reuse rather than a re-derivation.
+//
 // Naming note (flagged per this chunk's own task brief): Python's `schema.is_a(decl,
 // ifc_class)` operates on a *schema declaration* object, not an `entity_instance` --
 // semantically different from (and easily confusable with) this project's own
@@ -224,7 +231,17 @@ const SCHEMA_TEMPLATE_IDENTIFIER: Record<IFC_SCHEMA, string> = {
 
 const schemaFileCache = new Map<IFC_SCHEMA, IfcFile>();
 
-function getSchemaDefinition(schema: IFC_SCHEMA): NativeSchemaDefinition {
+/**
+ * Exported (chunk `util.pset`, 2026-09-10) for reuse: `PsetQto.__init__`'s `self.schema =
+ * ifcopenshell.schema_by_name(schema)` needs exactly this "get a `schema_definition` for
+ * an arbitrary `IFC_SCHEMA` name, independent of any already-open `IfcFile`" capability --
+ * see `util/pset.ts`'s own header comment for the full story. Was previously
+ * module-private (only `geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses` used
+ * it); this is the second real consumer, so it graduates to exported per this project's
+ * "export narrowly once a second real consumer exists" precedent (matching `isEnumMember`,
+ * `getReferences`/`getClassification`, etc.).
+ */
+export function getSchemaDefinition(schema: IFC_SCHEMA): NativeSchemaDefinition {
 	let file = schemaFileCache.get(schema);
 	if (!file) {
 		file = template.create({ schemaIdentifier: SCHEMA_TEMPLATE_IDENTIFIER[schema] });
