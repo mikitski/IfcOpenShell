@@ -1094,6 +1094,26 @@ describe("selector.filterElements", () => {
 		expectElements(subject.filterElements(file, 'IfcWall, Qty.Count>"4.5"'), [element]);
 	});
 
+	// No Python counterpart -- regression test for a bug found and fixed during code
+	// review of this port: Python's `isinstance(element_value, int)` in `compare()` is
+	// also true for `bool` (`bool` subclasses `int` in Python), so a boolean property
+	// compared against a numeric-style string value takes the *numeric* comparison
+	// branch there (`True == int("1")`), not the final `element_value == value`
+	// fallback. `compareValues` must coerce `true`/`false` to `1`/`0` before the
+	// numeric branch to match.
+	test("boolean property/attribute values compare correctly against numeric-style string values (Python bool-is-int)", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		addPset(file, element, "Foobar", { Bar: true });
+		addPset(file, element2, "Foobar", { Bar: false });
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar=1"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar=0"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar!=1"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar>=1"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar<1"), [element2]);
+	});
+
 	// No Python counterpart -- documents `compareValues`'s faithfully-reproduced
 	// `TypeError` crash for a `/regex/` value compared against a non-string element
 	// value (selector.py's own `compare()` has no `try`/`except` around this specific

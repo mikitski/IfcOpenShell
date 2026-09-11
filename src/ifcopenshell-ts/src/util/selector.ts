@@ -223,6 +223,38 @@ function matchesFromStart(pattern: RegExp, value: string): boolean {
 // string, and `keys` collects them into a flat `list[str | re.Pattern]` in order.
 
 /**
+ * Shared raw quoted-string scanner (`ESCAPED_STRING` in both `get_element_grammar` and
+ * `filter_elements_grammar` -- same lark rule, used by two different grammars). Assumes
+ * `query[start] === '"'`. Returns the raw inner content with escape sequences
+ * un-collapsed (each caller applies its own unescape transform -- `parseKeyPath`'s
+ * quoted-key branch and `parseFilterQuery`'s `parseNameToken` differ there, see each
+ * call site) and the index just past the closing quote. `unterminatedMessage` lets each
+ * caller throw its own contextual error text.
+ */
+function scanQuotedContent(
+	query: string,
+	start: number,
+	unterminatedMessage: string,
+): { content: string; next: number } {
+	const n = query.length;
+	let j = start + 1;
+	let content = "";
+	while (j < n && query[j] !== '"') {
+		if (query[j] === "\\" && j + 1 < n) {
+			content += query[j] + query[j + 1];
+			j += 2;
+		} else {
+			content += query[j];
+			j++;
+		}
+	}
+	if (j >= n) {
+		throw new Error(unterminatedMessage);
+	}
+	return { content, next: j + 1 };
+}
+
+/**
  * Hand-rolled recursive-descent-ish scanner for the grammar above -- no new npm
  * dependency, per this project's research doc's own recommendation (the grammar is
  * small and stable). Not a byte-for-byte reproduction of lark's Earley parser (in
@@ -247,21 +279,8 @@ export function parseKeyPath(query: string): (string | RegExp)[] {
 		}
 		const ch = query[i];
 		if (ch === '"') {
-			let j = i + 1;
-			let content = "";
-			while (j < n && query[j] !== '"') {
-				if (query[j] === "\\" && j + 1 < n) {
-					content += query[j] + query[j + 1];
-					j += 2;
-				} else {
-					content += query[j];
-					j++;
-				}
-			}
-			if (j >= n) {
-				throw new Error(`Unterminated quoted key in key-path query: '${query}'`);
-			}
-			i = j + 1;
+			const { content, next } = scanQuotedContent(query, i, `Unterminated quoted key in key-path query: '${query}'`);
+			i = next;
 			// Python: `args[1:-1].replace("\\", "")` -- strip the quotes, then remove
 			// every backslash character, not just ones that formed an escape sequence.
 			return content.replace(/\\/g, "");
@@ -772,24 +791,12 @@ export function parseFilterQuery(query: string): FilterGroup {
 
 	/** Assumes `query[i] === '"'`. Returns the raw inner content (escape sequences
 	 * un-collapsed), advancing `i` past the closing quote -- same scanning logic as
-	 * `parseKeyPath`'s quoted-string branch above, but the *unescape* transform applied
-	 * by the caller differs (see `parseNameToken` below). */
+	 * `parseKeyPath`'s quoted-string branch above (shared via `scanQuotedContent`), but
+	 * the *unescape* transform applied by the caller differs (see `parseNameToken`
+	 * below). */
 	function scanQuotedRaw(): string {
-		let j = i + 1;
-		let content = "";
-		while (j < n && query[j] !== '"') {
-			if (query[j] === "\\" && j + 1 < n) {
-				content += query[j] + query[j + 1];
-				j += 2;
-			} else {
-				content += query[j];
-				j++;
-			}
-		}
-		if (j >= n) {
-			throw new Error(`Unterminated quoted string in filter query: '${query}'`);
-		}
-		i = j + 1;
+		const { content, next } = scanQuotedContent(query, i, `Unterminated quoted string in filter query: '${query}'`);
+		i = next;
 		return content;
 	}
 
@@ -1047,14 +1054,20 @@ function compareValues(elementValue: unknown, comparison: FilterComparison, valu
 	let result: boolean;
 	if (typeof value === "string") {
 		try {
-			if (typeof elementValue === "number") {
+			if (typeof elementValue === "number" || typeof elementValue === "boolean") {
+				// Python: `isinstance(element_value, int)` is also true for `bool` (`bool`
+				// subclasses `int` in Python), so a boolean attribute/property compared
+				// against a numeric-style string value (e.g. `IsExternal=1`) takes the
+				// numeric branch there, not the `element_value == value` fallback --
+				// reproduced here by coercing `True`/`False` to `1`/`0` before comparing.
 				const numericValue = pythonFloat(value);
+				const numericElementValue = typeof elementValue === "boolean" ? (elementValue ? 1 : 0) : elementValue;
 				const operator = comparison.replace(/^!/, "");
-				if (operator === ">=") result = elementValue >= numericValue;
-				else if (operator === "<=") result = elementValue <= numericValue;
-				else if (operator === ">") result = elementValue > numericValue;
-				else if (operator === "<") result = elementValue < numericValue;
-				else result = elementValue === numericValue; // "=" or "*=" -- Python: "Tolerance?"
+				if (operator === ">=") result = numericElementValue >= numericValue;
+				else if (operator === "<=") result = numericElementValue <= numericValue;
+				else if (operator === ">") result = numericElementValue > numericValue;
+				else if (operator === "<") result = numericElementValue < numericValue;
+				else result = numericElementValue === numericValue; // "=" or "*=" -- Python: "Tolerance?"
 			} else if (typeof elementValue === "string") {
 				const operator = comparison.replace(/^!/, "");
 				result = operator === "*=" ? elementValue.includes(value) : elementValue === value;
@@ -1235,48 +1248,52 @@ class FacetRunner {
 		}
 	}
 
-	private applyAttribute(facet: Extract<FilterFacet, { kind: "attribute" }>): void {
+	/**
+	 * Shared skeleton for every facet type that narrows the working set by testing
+	 * each element with a predicate: `add_default_elements()` then keep only the
+	 * elements the predicate accepts (Python: `self.elements = set(filter(fn,
+	 * self.elements))`, repeated with a different `filter_function` per facet method).
+	 */
+	private narrow(predicate: (inst: EntityInstance) => boolean): void {
 		this.addDefaultElements();
 		const next = new Map<number, EntityInstance>();
 		for (const [id, inst] of this.elements) {
-			const elementValue = facet.name === "PredefinedType" ? getPredefinedType(inst) : attrOrNull(inst, facet.name);
-			if (compareValues(elementValue, facet.comparison, facet.value)) next.set(id, inst);
+			if (predicate(inst)) next.set(id, inst);
 		}
 		this.elements = next;
+	}
+
+	private applyAttribute(facet: Extract<FilterFacet, { kind: "attribute" }>): void {
+		this.narrow((inst) => {
+			const elementValue = facet.name === "PredefinedType" ? getPredefinedType(inst) : attrOrNull(inst, facet.name);
+			return compareValues(elementValue, facet.comparison, facet.value);
+		});
 	}
 
 	private applyType(facet: Extract<FilterFacet, { kind: "type" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
+		this.narrow((inst) => {
 			const elementType = getType(inst);
-			const matches =
+			return (
 				compareValues(attrOrNullOn(elementType, "Name"), facet.comparison, facet.value) ||
-				compareValues(attrOrNullOn(elementType, "GlobalId"), facet.comparison, facet.value);
-			if (matches) next.set(id, inst);
-		}
-		this.elements = next;
+				compareValues(attrOrNullOn(elementType, "GlobalId"), facet.comparison, facet.value)
+			);
+		});
 	}
 
 	private applyMaterial(facet: Extract<FilterFacet, { kind: "material" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
+		this.narrow((inst) => {
 			const materials = getMaterials(inst);
 			let result: boolean | null = materials.length > 0 ? false : null;
 			for (const material of materials) {
 				if (compareValues(attrOrNull(material, "Name"), facet.comparison, facet.value)) result = true;
 				if (compareValues(attrOrNull(material, "Category"), facet.comparison, facet.value)) result = true;
 			}
-			const matches =
-				result !== null
-					? facet.comparison === "="
-						? result
-						: !result
-					: compareValues(null, facet.comparison, facet.value);
-			if (matches) next.set(id, inst);
-		}
-		this.elements = next;
+			return result !== null
+				? facet.comparison === "="
+					? result
+					: !result
+				: compareValues(null, facet.comparison, facet.value);
+		});
 	}
 
 	private evaluateProperty(element: EntityInstance, facet: Extract<FilterFacet, { kind: "property" }>): boolean {
@@ -1309,18 +1326,11 @@ class FacetRunner {
 	}
 
 	private applyProperty(facet: Extract<FilterFacet, { kind: "property" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
-			if (this.evaluateProperty(inst, facet)) next.set(id, inst);
-		}
-		this.elements = next;
+		this.narrow((inst) => this.evaluateProperty(inst, facet));
 	}
 
 	private applyClassification(facet: Extract<FilterFacet, { kind: "classification" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
+		this.narrow((inst) => {
 			const references = getReferences(inst);
 			let result: boolean | null = references.size > 0 ? false : null;
 			for (const reference of references) {
@@ -1334,15 +1344,12 @@ class FacetRunner {
 						: attrOrNull(reference, "ItemReference");
 				if (compareValues(identificationOrItemReference, facet.comparison, facet.value)) result = true;
 			}
-			const matches =
-				result !== null
-					? facet.comparison === "="
-						? result
-						: !result
-					: compareValues(null, facet.comparison, facet.value);
-			if (matches) next.set(id, inst);
-		}
-		this.elements = next;
+			return result !== null
+				? facet.comparison === "="
+					? result
+					: !result
+				: compareValues(null, facet.comparison, facet.value);
+		});
 	}
 
 	private getContainerTree(container: EntityInstance | null): EntityInstance[] {
@@ -1370,9 +1377,7 @@ class FacetRunner {
 	}
 
 	private applyLocation(facet: Extract<FilterFacet, { kind: "location" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
+		this.narrow((inst) => {
 			const container = getContainer(inst) ?? getAggregate(inst);
 			const containers = this.getContainerTree(container);
 			let result: boolean | null = containers.length > 0 ? false : null;
@@ -1384,21 +1389,16 @@ class FacetRunner {
 					result = true;
 				}
 			}
-			const matches =
-				result !== null
-					? facet.comparison === "="
-						? result
-						: !result
-					: compareValues(null, facet.comparison, facet.value);
-			if (matches) next.set(id, inst);
-		}
-		this.elements = next;
+			return result !== null
+				? facet.comparison === "="
+					? result
+					: !result
+				: compareValues(null, facet.comparison, facet.value);
+		});
 	}
 
 	private applyGroup(facet: Extract<FilterFacet, { kind: "group" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
+		this.narrow((inst) => {
 			let result = false;
 			for (const rel of attrList(inst, "HasAssignments")) {
 				if (!rel.isA("IfcRelAssignsToGroup")) continue;
@@ -1410,9 +1410,8 @@ class FacetRunner {
 					result = true;
 				}
 			}
-			if (facet.comparison === "=" ? result : !result) next.set(id, inst);
-		}
-		this.elements = next;
+			return facet.comparison === "=" ? result : !result;
+		});
 	}
 
 	private applyParent(facet: Extract<FilterFacet, { kind: "parent" }>): void {
@@ -1451,13 +1450,7 @@ class FacetRunner {
 	}
 
 	private applyQuery(facet: Extract<FilterFacet, { kind: "query" }>): void {
-		this.addDefaultElements();
-		const next = new Map<number, EntityInstance>();
-		for (const [id, inst] of this.elements) {
-			const elementValue = getElementValue(inst, facet.keys);
-			if (compareValues(elementValue, facet.comparison, facet.value)) next.set(id, inst);
-		}
-		this.elements = next;
+		this.narrow((inst) => compareValues(getElementValue(inst, facet.keys), facet.comparison, facet.value));
 	}
 }
 
