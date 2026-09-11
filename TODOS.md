@@ -840,3 +840,46 @@ adding a new dependency" convention (not added speculatively here).
 
 **Depends on / blocked by:** Nothing -- no current caller anywhere in this port needs the fuzzy case.
 Pure "nice to have if a future caller (e.g. a UI layer) needs free-text date parsing" work.
+
+---
+
+### `spf_header` has no `file_description()` sub-entity accessor -- blocks wiring `MvdInfo` to a real `IfcFile.header()`
+
+**What:** Python's `ifcopenshell.file.mvd` property (`file.py`) constructs `MvdInfo(self.header)`
+directly off the live `ifcopenshell.file`'s own `spf_header` object, which exposes
+`.file_description.description` (a mutable tuple of strings) via SWIG-only glue
+(`IfcParseWrapper.i`'s `file_description_py`/etc., per `research/01-python-core-and-lowlevel.md`
+SS5). This TS port's own native binding (`src/native/ifcopenshell_native.ts`'s `spf_header` class)
+has `create`/`owner_file`/`assign` but no sub-entity accessor at all for `file_description`/
+`file_name`/`file_schema` -- a pre-existing, already-disclosed gap (`util/file.ts`'s own header
+comment, Phase 2: "the primitive layer exposes `file.header(): spf_header` but `spf_header` has no
+`file_description()`/`file_name()`/`file_schema()` sub-entity accessors ... and neither is in this
+chunk's required method list"). Phase 3's `util.mvd_info` chunk (`src/util/mvdInfo.ts`) ported
+`MvdInfo`/`DictionaryHandler`/`AutoCommitList` in full, but deliberately against a *structural*
+`MvdHeader` interface (`{ file_description: { description: string[] } }`) rather than this
+project's own `spf_header` binding, so it doesn't have to wait on this gap to exist and be usable
+today (exactly how `test_mvd_info.py`'s own `MockHeader` fixture works, and how
+`mvdInfo.test.ts` is written) -- confirmed, not assumed: `MvdInfo` has zero other native/`IfcFile`
+dependency (grep confirmed).
+
+**Why deferred rather than attempted:** Adding a real `file_description()`/`file_name()`/
+`file_schema()` sub-entity accessor means extending the N-API shim (a C++-side primitive addition,
+not a TS-only change) -- a different, bigger unit of work than a `util` module port, and not
+something a `util`-layer chunk should reach into `src/wrappergen`/`src/native` to add unilaterally.
+
+**Fix:** Add the sub-entity accessor(s) to the N-API shim + `native/ifcopenshell_native.ts`'s
+`spf_header` class (`file_description()`/`file_name()`/`file_schema()`, each returning a small
+wrapper exposing the STEP header entity's own attributes, `description` chief among them for
+`MvdInfo`'s purposes). Once that lands, `IfcFile` can gain a small `.mvd` convenience getter
+(`new MvdInfo(this.header().file_description())`-shaped, matching Python's own `file.mvd` property)
+as a follow-up -- `MvdInfo`'s own logic needs no changes, since it already only depends on the
+structural `MvdHeader` shape.
+
+**Context:** Surfaced during Phase 3's `util.mvd_info` chunk (2026-09-10) while confirming exactly
+what `MvdInfo(header)`'s `header` parameter needs to be wired to a real `ifcopenshell.file` in this
+port -- re-confirms `util/file.ts`'s own Phase 2 finding rather than duplicating a new one, and adds
+the concrete "what would landing this actually unblock" writeup that finding didn't yet have.
+
+**Depends on / blocked by:** Nothing blocking -- independent N-API shim work, not blocking any
+currently-planned Phase 3 `util` chunk (confirmed no other not-yet-ported `util` module needs
+`spf_header.file_description()` either, by the same reasoning `util/file.ts`'s own finding used).
