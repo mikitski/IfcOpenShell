@@ -26,13 +26,15 @@
 // `parseFilterQuery` unit tests (no Python counterpart -- Python's grammars are parsed by
 // `lark`, this port's hand-rolled scanners have their own edge cases worth covering
 // directly), the disclosed positional/geolocated-key blocker (`src/util/selector.ts`'s
-// finding #1 -- UPDATED by Phase 4's `util.placement` chunk: `x`/`y`/`z` are now real,
-// covered by a new test below reading an actual computed translation, not just the
-// blocker firing; `easting`/`northing`/`elevation`/`rotation_x`/`rotation_y`/`rotation_z`
-// remain blocked. Python's own suite has a `test_selecting_an_elements_rotation_using_a_query`
-// test that exercises the *still-unblocked* `rotation_*` computation, which this port
-// cannot yet reproduce; the blocker itself has no Python counterpart by definition), the
-// narrow `profiles`/`classification`/`system`/`zone`/spatial-parent key re-implementations
+// finding #1 -- UPDATED by Phase 4's `util.placement` chunk: `x`/`y`/`z` are now real;
+// UPDATED AGAIN by Phase 4's `util.geolocation` chunk, same day: `easting`/`northing`/
+// `elevation` are now ALSO real, covered by new tests below (both the no-georeferencing
+// passthrough case and a real `IfcMapConversion`-backed conversion) rather than just the
+// blocker firing. Only `rotation_x`/`rotation_y`/`rotation_z` remain blocked. Python's own
+// suite has a `test_selecting_an_elements_rotation_using_a_query` test that exercises the
+// *still-unblocked* `rotation_*` computation, which this port cannot yet reproduce; the
+// blocker itself has no Python counterpart by definition), the narrow
+// `profiles`/`classification`/`system`/`zone`/spatial-parent key re-implementations
 // (`selector.ts`'s finding #2), and the `int`-vs-`float`/`Decimal` numeric-comparison
 // findings (the `filter_elements` chunk's header comment, findings 1-2) -- none of which
 // have a dedicated Python test case, so these are original coverage of documented
@@ -541,33 +543,79 @@ describe("selector.getElementValue", () => {
 		expect(subject.getElementValue(element, "Qto_WallBaseQuantities.Count")).toBe(3);
 	});
 
-	describe("positional/geolocated keys -- x/y/z now real, easting/northing/elevation/rotation_* still a disclosed blocker (see src/util/selector.ts's header comment, finding #1)", () => {
+	describe("positional/geolocated keys -- x/y/z/easting/northing/elevation now real, rotation_* still a disclosed blocker (see src/util/selector.ts's header comment, finding #1)", () => {
 		// `x`/`y`/`z` are now fully computed via the real, landed `util.placement
 		// .getLocalPlacement` -- needs a real, fully-formed `RelativePlacement` (unlike
-		// the still-blocked keys below, which throw before ever touching the matrix).
-		test("x/y/z read the real translation off the element's world-space placement matrix", () => {
-			const file = newFile();
+		// the still-blocked `rotation_*` keys below, which throw only after computing
+		// this same matrix, matching Python's own `get_local_placement` call before its
+		// blocked `np_matrix_to_euler` step).
+		function wallWithPlacement(file: IfcFile, xyz: [number, number, number]): EntityInstance {
 			const element = file.createEntity("IfcWall");
-			const point = file.createEntity("IfcCartesianPoint", [1, 2, 3]);
+			const point = file.createEntity("IfcCartesianPoint", xyz);
 			const axis2Placement = file.createEntity("IfcAxis2Placement3D", point);
 			const localPlacement = file.createEntity("IfcLocalPlacement");
 			localPlacement.set("RelativePlacement", axis2Placement);
 			element.set("ObjectPlacement", localPlacement);
+			return element;
+		}
+
+		test("x/y/z read the real translation off the element's world-space placement matrix", () => {
+			const file = newFile();
+			const element = wallWithPlacement(file, [1, 2, 3]);
 
 			expect(subject.getElementValue(element, "x")).toBe(1);
 			expect(subject.getElementValue(element, "y")).toBe(2);
 			expect(subject.getElementValue(element, "z")).toBe(3);
 		});
 
-		test("easting/northing/elevation/rotation_x/y/z still throw a clear, descriptive error naming the missing Python module when ObjectPlacement is actually set", () => {
+		// `util.geolocation.autoXyz2enh` returns coordinates unchanged when the file has
+		// no georeferencing map conversion at all (matching Python's own
+		// `auto_xyz2enh` docstring) -- so with no `IfcMapConversion` present,
+		// `easting`/`northing`/`elevation` should read back identical to `x`/`y`/`z`.
+		test("easting/northing/elevation pass through unchanged when the file has no georeferencing", () => {
 			const file = newFile();
-			const element = file.createEntity("IfcWall");
-			const placement = file.createEntity("IfcLocalPlacement");
-			element.set("ObjectPlacement", placement);
+			const element = wallWithPlacement(file, [1, 2, 3]);
 
-			for (const key of ["easting", "northing", "elevation"]) {
-				expect(() => subject.getElementValue(element, key)).toThrow(/util\.geolocation/);
-			}
+			expect(subject.getElementValue(element, "easting")).toBe(1);
+			expect(subject.getElementValue(element, "northing")).toBe(2);
+			expect(subject.getElementValue(element, "elevation")).toBe(3);
+		});
+
+		// A real `IfcMapConversion`-backed georeferencing setup -- `easting`/`northing`/
+		// `elevation` should now reflect the real `autoXyz2enh` conversion (an eastings/
+		// northings/orthogonal-height offset applied on top of the element's local x/y/z),
+		// matching `test/util/geolocation.test.ts`'s own `autoXyz2enh` coverage.
+		test("easting/northing/elevation reflect a real IfcMapConversion", () => {
+			const file = newFile();
+			const element = wallWithPlacement(file, [1, 3, 5]);
+
+			// `newFile()`/`createTestFile("IFC4")` already bakes a single default
+			// `IfcGeometricRepresentationContext` (`ContextType="Model"`, identity
+			// `WorldCoordinateSystem`) into every file -- reused here rather than
+			// creating a second, ambiguous "Model" context (see
+			// `test/util/geolocation.test.ts`'s `addGeoreferencing` helper doc comment
+			// for the full story of why two same-`ContextType` contexts is a real
+			// `getWcs`/`getCrs` ambiguity hazard, even though it happens not to change
+			// this specific test's outcome since an identity WCS is a no-op either way).
+			const context = file.byType("IfcGeometricRepresentationContext", false)[0];
+			const crs = file.createEntity("IfcProjectedCRS");
+			crs.set("Name", "EPSG:7856");
+			const mapConversion = file.createEntity("IfcMapConversion");
+			mapConversion.set("SourceCRS", context);
+			mapConversion.set("TargetCRS", crs);
+			mapConversion.set("Eastings", 1);
+			mapConversion.set("Northings", 2);
+			mapConversion.set("OrthogonalHeight", 3);
+
+			expect(subject.getElementValue(element, "easting")).toBe(2);
+			expect(subject.getElementValue(element, "northing")).toBe(5);
+			expect(subject.getElementValue(element, "elevation")).toBe(8);
+		});
+
+		test("rotation_x/y/z still throw a clear, descriptive error naming the missing Python module when ObjectPlacement is actually set", () => {
+			const file = newFile();
+			const element = wallWithPlacement(file, [1, 2, 3]);
+
 			for (const key of ["rotation_x", "rotation_y", "rotation_z"]) {
 				expect(() => subject.getElementValue(element, key)).toThrow(/util\.shape_builder/);
 			}
@@ -582,6 +630,7 @@ describe("selector.getElementValue", () => {
 			const file = newFile();
 			const element = file.createEntity("IfcWall");
 			expect(subject.getElementValue(element, "x")).toBeNull();
+			expect(subject.getElementValue(element, "easting")).toBeNull();
 			expect(subject.getElementValue(element, "rotation_z")).toBeNull();
 		});
 
@@ -589,6 +638,7 @@ describe("selector.getElementValue", () => {
 			const file = newFile();
 			const material = file.createEntity("IfcMaterial");
 			expect(subject.getElementValue(material, "x")).toBeNull();
+			expect(subject.getElementValue(material, "easting")).toBeNull();
 		});
 	});
 });
