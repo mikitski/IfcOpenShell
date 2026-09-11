@@ -5,8 +5,8 @@
 // as `util.element.getPset` here, rather than flattening every util module's exports
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
 // port more `util` modules; `attribute`/`classification`/`constraint`/`date`/`element`/
-// `file`/`migrator`/`pset`/`schema`/`selector`/`system`/`type`/`unit` are ported so far
-// (planning/ifcopenshell-ts/20-roadmap.md Phase 3).
+// `file`/`migrator`/`mvdInfo`/`pset`/`schema`/`selector`/`system`/`type`/`unit` are
+// ported so far (planning/ifcopenshell-ts/20-roadmap.md Phase 3).
 export * as attribute from "./attribute";
 export * as classification from "./classification";
 export * as constraint from "./constraint";
@@ -14,6 +14,7 @@ export * as date from "./date";
 export * as element from "./element";
 export * as file from "./file";
 export * as migrator from "./migrator";
+export * as mvdInfo from "./mvdInfo";
 export * as pset from "./pset";
 export * as schema from "./schema";
 export * as selector from "./selector";
