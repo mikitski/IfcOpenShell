@@ -163,11 +163,31 @@ different chunk order. `util.doc` (1123 lines) remains unstarted; per the resear
 lookup functions are Tier A (trivial JSON lookups) but its `DocExtractor` scraper is Tier C / not a
 real porting target.
 
-**Next Phase 3/5 dispatch**: `util.doc`'s runtime lookups (unblocked), or continuing Lane C's
-`selector.py` (the `filter_elements` facet grammar or the `format()` expression grammar, both now
-unblocked by the key-path chunk above), or starting Lane B (`util` Tier B, now unblocked —
-`util.placement` is the research doc's own #3 near-term priority) — Phase 3 Tier A is otherwise essentially
-complete pending `util.cost` (Tier B) unblocking `util.resource`.
+✅ **`selector.py` is now fully ported** (all three grammars — key-path, `filter_elements`, `format()`
+— see the Phase 5 table below): this completes the research doc's own "single highest-leverage
+feature to port" item. ✅ **`util.placement` landed** (Phase 4's first chunk, see the Phase 4 table
+below), adding this project's first runtime npm dependency (`gl-matrix`) and unblocking `selector.ts`'s
+`x`/`y`/`z` key-path keys.
+
+**Real, resolved CI infra incident (2026-09-11), worth remembering**: `filter_elements`/`format()`/
+`util.placement` (PRs #43/#44/#45) were blocked for 8+ hours by a CI failure on
+`build-and-test (macos, x64, macos-14, true)` that was initially (wrongly) treated as a transient
+network flake and retried 8+ times, including a retry-loop CI fix — none of that worked because it
+wasn't transient: Homebrew's installer now permanently refuses to install under x86_64/Rosetta
+emulation on Apple Silicon, a real upstream restriction (root-caused only after the user pasted the
+actual Actions UI log, since this session's sandbox can't reach GitHub's log-blob-storage host
+directly). Fixed by retiring the `macos-x64` leg entirely (user-approved, PR #46) — `build_osx.yml`
+(the main C++ core CI) has the identical, now-equally-broken pattern, deliberately not touched,
+flagged in `TODOS.md` as a separate maintainer decision. **Lesson for future CI-failure diagnosis**: a
+failure that's *identical* on every retry (same step, same near-instant timing, zero variance) is a
+signal to suspect a deterministic cause before assuming "flaky infra," even when combined with "every
+other check stays green" (which just means the *cause* is narrow, not that it's *transient*) —
+pull the real log text (or ask for it) before spending many retries on an assumption.
+
+**Next Phase 3/4/5 dispatch**: `util.doc`'s runtime lookups (unblocked), continuing Lane B (`util`
+Tier B — `util.geolocation`/`util.representation` are natural next steps now `util.placement` has
+landed), or `util.cost` to unblock `util.resource` — Phase 3 Tier A and Phase 5 (`selector.py`) are
+both now complete; Phase 4 (`util` Tier B) has just started.
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -178,6 +198,24 @@ signal that the threshold (or the whole approach of measuring wall-clock timer-t
 shared, variably-loaded Windows CI runner) needs revisiting — worth prioritizing the next time
 someone's touching Phase 1's async-primitive tests, rather than continuing to treat each occurrence
 as a one-off.
+
+**New recurring CI infra flake, first seen 2026-09-11**: `build-and-test (macos, x64, macos-14,
+true)`'s "Install build dependencies (macOS, x64 cross-compile)" step (`ci-ifcopenshell-ts.yml`, an
+uncached `curl | bash` Homebrew install + `brew install boost eigen pkg-config` run fresh on every
+CI run, no caching) failed **4 times in a row** on PR #43 (`selector.py`'s `filter_elements` chunk)
+within ~1.5 hours, always with an identical signature: fails in under a minute, before any log
+output the diagnostic-comment step can capture ("no log files found" every time), while every other
+one of the 13 other checks stayed green across all 4 attempts. Confirmed NOT a permanent break: the
+same leg passed cleanly on PR #39 and PR #41 earlier the same day. `raw.githubusercontent.com`'s
+install script URL itself was reachable from the orchestrating session's own network at the time —
+points to a degraded/intermittent path specific to GitHub's macOS runner egress or Homebrew's bottle
+CDN during this window, not a code or CI-config problem in this repo. Retried 4 times with
+increasing gaps (immediate, immediate, ~45min, ~30min) per this project's flaky-shaped-failure
+retrigger discipline; if it keeps recurring, the real fix is caching the x64 Homebrew prefix (the
+same "vcpkg's GHA binary cache" pattern `ci-ifcopenshell-ts.yml` already uses for the Windows legs,
+just not yet applied to this one) so a transient network blip during dependency-install can't take
+the whole leg down — worth prioritizing if this keeps recurring on unrelated PRs, matching the
+Windows `event_loop.test.ts` flake's own "four independent occurrences is a real signal" bar above.
 
 **Resolved, no longer tracked**: the CI-caching PR's (`#8`) merge once looked untraceable to any
 action by the orchestrating session and was raised as an open trust/process concern. The user
@@ -274,7 +312,7 @@ binding could be built, since it decided generated-vs-hand-written.
 
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
-| `util.placement` (`gl-matrix`) | 🔲 | — | — |
+| `util.placement` (`gl-matrix`) | ✅ | [#45](https://github.com/mikitski/IfcOpenShell/pull/45) | Landed `a71dd6a8b`. `a2p`/`getAxis2placement`/`getLocalPlacement`/`getCartesiantransformationoperator3d`/`getMappeditemTransformation`/`getStoreyElevation`/`rotation`. First Phase 4 chunk, adds `gl-matrix@3.4.4` as this project's first runtime npm dependency (an already-made project decision, not this chunk's own call). numpy→gl-matrix mapping (composition order, row/column-major layout) empirically verified against the real library, cross-checked a second, independent way (a from-scratch pure-Python re-implementation, no numpy). Real findings: `gl-matrix`'s default `Float32Array` silently loses precision at UTM-scale coordinates (fixed via `setMatrixArrayType(Float64Array)`); `IfcAxis2PlacementLinear`'s non-Cartesian fallback needs the unported `ifcopenshell.geom` kernel, throws a disclosed error. A real bug (`rotation(0,"X")`'s test comparing `-0` vs `0` too strictly) found by independent review and fixed. Bonus: unblocked `selector.ts`'s `x`/`y`/`z` key-path keys. |
 | `util.geolocation` | 🔲 | — | — |
 | `util.representation` | 🔲 | — | — |
 | `util.cost` (hand-rolled formula parser) | 🔲 | — | — |
@@ -287,8 +325,8 @@ binding could be built, since it decided generated-vs-hand-written.
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
 | Key-path grammar / `get_element_value` (shared dependency of the other 2 grammars) | ✅ | [#32](https://github.com/mikitski/IfcOpenShell/pull/32) | Landed `dba7cc445`. `parseKeyPath` + `getElementValueForKeys`. 2 disclosed blockers (positional/geolocated keys, `"profiles"`'s extrusion fallback) — see "Current focus" above / `TODOS.md`. |
-| `filter_elements` facet grammar | 🔲 | — | Now unblocked (depends on `get_element_value`, landed above). |
-| `format()` expression grammar | 🔲 | — | Now unblocked (depends on `get_element_value`, landed above). |
+| `filter_elements` facet grammar | ✅ | [#43](https://github.com/mikitski/IfcOpenShell/pull/43) | Landed `2bd2986e7`. Instance/entity/attribute/type/material/property/classification/location/group/parent filters, `query:` facet reusing `getElementValue`, comparisons (incl. regex/contains), `,`/`+` OR/AND combinators via a dedicated `FacetRunner` class. Disclosed `int`-vs-`float` numeric-comparison gap (cross-referenced with the pre-existing `EntityInstance.getByIndex` INTEGER/REAL-collapse `TODOS.md` entry, not a new one). Independently re-reviewed against the real Python source before merge; no bugs found. Blocked 8+ hours by the now-fixed `macos-x64` CI flake (see #46 below). |
+| `format()` expression grammar | ✅ | [#44](https://github.com/mikitski/IfcOpenShell/pull/44) | Landed `a1ae5f27b`. Completes all three `selector.py` grammars. Hand-rolled recursive-descent expression parser (operator precedence), every `FormatTransformer` function (`round`/`number`/`int`/`metric_length`/`imperial_length`/`lower`/`upper`/`title`/`concat`/`substr`/`sort`/`reverse`/`join`/`{{...}}` interpolation). `/code-review` found+fixed 4 real bugs (`round(x,0)` division-by-zero, `sort()` over booleans, a duplicated `pythonRound` helper, an under-scoped disclosure). Hit and resolved 2 real merge conflicts with concurrently-landing `filter_elements`/`util.placement` (overlapping extracted helpers, shared test-file header comment). |
 
 ## Phase 6 — `api` Tier 1 [Lane A]
 
