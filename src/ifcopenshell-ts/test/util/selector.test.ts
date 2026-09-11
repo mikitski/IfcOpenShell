@@ -1143,3 +1143,208 @@ describe("selector.filterElements", () => {
 		expect(() => subject.filterElements(file, "IfcWall, Qty.Count=/5/")).toThrow(TypeError);
 	});
 });
+
+// --- `format` -- port of `test_selector.py`'s `TestFormat`, plus original coverage of
+// the hand-rolled parser's own structure (operator precedence, nested calls, malformed
+// input) and every disclosed Python/JS semantic divergence noted in `src/util/
+// selector.ts`'s own "format()" section header comment. ---
+
+describe("selector.format", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	// Python: `test_no_formatting`.
+	test("bare literals pass through unchanged", () => {
+		expect(subject.format("123")).toBe("123");
+		expect(subject.format('"123"')).toBe("123");
+		expect(subject.format('"foo"')).toBe("foo");
+	});
+
+	// Python: `test_string_formatting`.
+	test("string functions: upper, lower, title, concat, substr", () => {
+		expect(subject.format('upper("fOo")')).toBe("FOO");
+		expect(subject.format('lower("fOo")')).toBe("foo");
+		expect(subject.format('title("fOo")')).toBe("Foo");
+		expect(subject.format('concat("fOo", "bar")')).toBe("fOobar");
+		expect(subject.format('upper(concat("fOo", "bar"))')).toBe("FOOBAR");
+		expect(subject.format('substr("foobar", 3)')).toBe("bar");
+		expect(subject.format('substr("foobar", 1, 2)')).toBe("o");
+		expect(subject.format('substr("foobar", 1, -1)')).toBe("ooba");
+	});
+
+	// Python: `test_number_formatting`.
+	test("numeric functions: round, int, number, metric_length, imperial_length", () => {
+		expect(subject.format("round(123, 5)")).toBe("125");
+		expect(subject.format('round("123", 5)')).toBe("125");
+		expect(subject.format("round(-123, 5)")).toBe("-125");
+		// Non-numeric values must pass through unchanged instead of crashing (#6776).
+		expect(subject.format('round("Level 1", 0.01)')).toBe("Level 1");
+		expect(subject.format('round("12.5 m", 0.01)')).toBe("12.5 m");
+		expect(subject.format("int(123.123)")).toBe("123");
+		expect(subject.format("int(123)")).toBe("123");
+		expect(subject.format("number(123)")).toBe("123");
+		expect(subject.format("number(1234.56)")).toBe("1,234.56");
+		expect(subject.format('number(123, ".")')).toBe("123");
+		expect(subject.format('number("123", ".")')).toBe("123");
+		expect(subject.format('number(123.12, ".")')).toBe("123.12");
+		expect(subject.format('number(123.12, ",")')).toBe("123,12");
+		expect(subject.format('number(1234.12, ",", ".")')).toBe("1.234,12");
+		expect(subject.format("metric_length(123, 5, 2)")).toBe("125.00");
+		expect(subject.format("metric_length(123.123, 0.1, 2)")).toBe("123.10");
+		expect(subject.format('metric_length("123", 5, 2)')).toBe("125.00");
+		expect(subject.format("imperial_length(1, 1)")).toBe("1'");
+		expect(subject.format("imperial_length(3.123, 1)")).toBe("3' - 1\"");
+		expect(subject.format("imperial_length(3.123, 2)")).toBe("3' - 1 1/2\"");
+		expect(subject.format('imperial_length("3.123", 2)')).toBe("3' - 1 1/2\"");
+		expect(subject.format('imperial_length("123.123", 2, "inch", "foot")')).toBe("10' - 3\"");
+		expect(subject.format('imperial_length("123.123", 2, "inch", "inch")')).toBe('123"');
+		expect(subject.format('imperial_length(3.0, 4, "foot", "foot", true)')).toBe("3'");
+		expect(subject.format('imperial_length(3.0, 4, "foot", "foot", True)')).toBe("3'");
+		expect(subject.format('imperial_length(3.0, 4, "foot", "foot", false)')).toBe("3' - 0\"");
+		expect(subject.format('imperial_length(3.0, 4, "foot", "foot", False)')).toBe("3' - 0\"");
+	});
+
+	// Python: `test_variable_formatting`.
+	test("{{query_path}} variable interpolation", () => {
+		expect(subject.format("{{undefined}}")).toBeNull();
+		expect(subject.format("upper({{undefined}})")).toBe("NONE");
+		expect(subject.format("int({{undefined}})")).toBe("0");
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		expect(subject.format("{{undefined}}", element)).toBeNull();
+		expect(subject.format("{{class}}", element)).toBe("IfcWall");
+		expect(subject.format("{{ class }}", element)).toBe("IfcWall");
+		expect(subject.format("upper({{ class }})", element)).toBe("IFCWALL");
+	});
+
+	// Python: `test_list_formatting`.
+	test("list functions over a {{...}} result: sort, reverse, join, and bare auto-join", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const material = file.createEntity("IfcMaterial");
+		material.set("Name", "CON01");
+		const material2 = file.createEntity("IfcMaterial");
+		material2.set("Name", "CON03");
+		const material3 = file.createEntity("IfcMaterial");
+		material3.set("Name", "CON02");
+		const materialSet = buildMaterialLayerSet(file, "FOO", [
+			{ material, name: "L1" },
+			{ material: material2, name: "L2" },
+			{ material: material3, name: "L3" },
+		]);
+		assignMaterial(file, [element], materialSet);
+
+		expect(subject.format("{{materials.Name}}", element)).toBe("CON01, CON03, CON02");
+		expect(subject.format("sort({{materials.Name}})", element)).toBe("CON01, CON02, CON03");
+		expect(subject.format("reverse({{materials.Name}})", element)).toBe("CON02, CON03, CON01");
+		expect(subject.format('join("-", {{materials.Name}})', element)).toBe("CON01-CON03-CON02");
+	});
+
+	// Python: `test_expressions`.
+	test("arithmetic expressions with operator precedence", () => {
+		expect(subject.format("2+3")).toBe("5");
+		expect(subject.format("-2+3")).toBe("1");
+		expect(subject.format("2-3")).toBe("-1");
+		expect(subject.format("3*2")).toBe("6");
+		expect(subject.format("3/2")).toBe("1.5");
+	});
+
+	// Original coverage: operator precedence (`*`/`/` bind tighter than `+`/`-`) and
+	// parenthesized grouping -- no dedicated Python test for this specific shape, but
+	// directly implied by the grammar (`?mul_div` nests inside `?add_sub`).
+	describe("operator precedence and grouping (no direct Python counterpart)", () => {
+		test("multiplication/division bind tighter than addition/subtraction", () => {
+			expect(subject.format("2+3*2")).toBe("8");
+			expect(subject.format("2*3+2")).toBe("8");
+			expect(subject.format("10-4/2")).toBe("8");
+		});
+
+		test("parentheses override precedence", () => {
+			expect(subject.format("(2+3)*2")).toBe("10");
+			expect(subject.format("2*(3+2)")).toBe("10");
+		});
+
+		test("left-associativity of subtraction and division", () => {
+			expect(subject.format("10-3-2")).toBe("5");
+			expect(subject.format("100/10/2")).toBe("5");
+		});
+
+		test("nested function calls with arithmetic sub-expressions", () => {
+			expect(subject.format('concat(upper("a"), lower("B"), "c")')).toBe("Abc");
+			expect(subject.format("round(2+3*4, 1)")).toBe("14");
+		});
+	});
+
+	// Original coverage: divide()'s two divergences from the other three arithmetic ops
+	// (right-operand default of 1.0, and the "inf" short-circuit for a zero divisor) --
+	// no direct Python test exercises these specifically, but both are explicit branches
+	// in `FormatTransformer.divide`'s own source.
+	test("divide()'s zero-divisor short-circuit returns the literal string 'inf'", () => {
+		expect(subject.format("5/0")).toBe("inf");
+	});
+
+	// Regression tests for two real bugs found by this chunk's own adversarial
+	// `/code-review` (fixed, not shipped and deferred) -- see `src/util/selector.ts`'s
+	// "format()" section header comment for the full writeup of each.
+	describe("real bugs found by /code-review (regression coverage)", () => {
+		test("round() with a zero rounding increment throws instead of silently returning the string 'NaN'", () => {
+			expect(() => subject.format("round(5, 0)")).toThrow();
+			expect(() => subject.format('round("123", 0)')).toThrow();
+		});
+
+		test("sort()/reverse() handle a list of booleans (Python's bool is an int subtype)", () => {
+			// `join`/the top-level auto-join both require every element to already be a
+			// `string` (matching Python's own `str.join()`), so a raw boolean list can't
+			// be observed through those -- routed through `concat()` instead, whose
+			// `pyStr` rendering of a list falls back to a bracketed `repr()`-style
+			// rendering (see `pyStr`'s own doc comment), which is enough to observe both
+			// that `sort()`/`reverse()` didn't throw and that the ordering is correct.
+			//
+			// Three separate `IfcPropertySingleValue` booleans (not an
+			// `IfcPropertyListValue.ListValues` aggregate -- that path coerces a raw JS
+			// `boolean` to a `0`/`1` number somewhere in this port's native attribute
+			// serialization, an unrelated, pre-existing quirk this test isn't about)
+			// collected into an array via a regex property-name key, matching how
+			// `getElementValueForKeys`'s own regex-over-a-pset-dict path already works
+			// (see that function's `isPlainRecord` branch above).
+			const file = newFile();
+			const element = file.createEntity("IfcWall");
+			addPset(file, element, "Custom_Flags", { Flag1: true, Flag2: false, Flag3: true });
+
+			expect(subject.format("concat(sort({{Custom_Flags./Flag.*/}}))", element)).toBe("[False, True, True]");
+			expect(subject.format("concat(reverse({{Custom_Flags./Flag.*/}}))", element)).toBe("[True, False, True]");
+		});
+	});
+
+	// Original coverage: malformed expressions should throw, not silently produce a
+	// wrong answer -- exercises the hand-rolled parser's own error paths (no Python
+	// counterpart; Python's `lark` grammar rejects the same inputs with its own parser
+	// errors, but `test_selector.py` doesn't specifically assert on malformed input).
+	describe("malformed input throws (no direct Python counterpart)", () => {
+		test("unterminated function call", () => {
+			expect(() => subject.format('upper("foo"')).toThrow();
+		});
+
+		test("unterminated quoted string", () => {
+			expect(() => subject.format('"unterminated')).toThrow();
+		});
+
+		test("unterminated variable interpolation", () => {
+			expect(() => subject.format("{{foo")).toThrow();
+			expect(() => subject.format("{{foo}")).toThrow();
+		});
+
+		test("empty variable interpolation", () => {
+			expect(() => subject.format("{{}}")).toThrow();
+		});
+
+		test("trailing garbage after a complete expression", () => {
+			expect(() => subject.format("123 456")).toThrow();
+		});
+
+		test("a fractional imperial_length precision (grammar types it as plain NUMBER, not usable with int())", () => {
+			expect(() => subject.format('imperial_length(3.0, 2.5, "foot", "foot")')).toThrow();
+		});
+	});
+});
