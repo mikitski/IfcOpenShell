@@ -745,6 +745,19 @@ disclosure and the two exact call sites using the lossy heuristic.
 currently depend on this distinction, and only for whole-number REAL literals specifically), but worth
 fixing at the root before a second caller reinvents the same lossy heuristic.
 
+**Update (Phase 3, `util.selector`'s `filter_elements` chunk, 2026-09-10):** a second caller now hits
+this exact same gap, predicted by this entry's own last line. `FacetTransformer.compare()`
+(`src/util/selector.ts`'s `compareValues`) branches on Python `isinstance(element_value, int)` vs.
+`isinstance(element_value, float)` to decide strict-`int`-string-parsing vs. permissive-`float`-string-
+parsing for a query's numeric comparison value (e.g. `Foobar.Baz>"100.5"`). Unlike `util.migrator`'s
+two narrow, specific retyping checks, this is a *general-purpose* numeric-comparison path exercised by
+every `attribute`/`property`/`query:` facet -- a broader, more visible surface for the same root gap.
+`compareValues` resolves it the same way this entry recommends avoiding (a caller-local heuristic,
+here "always parse permissively via `pythonFloat`, regardless of source EXPRESS type"), disclosed in
+`src/util/selector.ts`'s header comment (finding 2) and `test/util/selector.test.ts`'s dedicated test.
+Reinforces (doesn't change) this entry's fix/priority -- now two independent, disclosed call sites
+would benefit from the same root-level fix.
+
 ---
 
 ### `util.selector.get_element_value`'s positional/geolocated keys and `"profiles"`'s extrusion

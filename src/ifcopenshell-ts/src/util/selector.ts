@@ -1,22 +1,27 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// Port of `ifcopenshell/util/selector.py`'s **key-path mini-language** only (src/
-// ifcopenshell-python) -- planning/ifcopenshell-ts/research/03-python-util-inventory.md's
-// dedicated "`selector.py` -- the IFC Query Selector Syntax" section, sub-section "2.
-// Key-path grammar (`get_element_grammar`) -> `get_element_value(element, query)`". This
-// is the shared dependency both `filter_elements`'s `query:` facet and `format()`'s
-// `{{...}}` interpolation call into (both confirmed, by reading the real Python source,
-// to call `get_element_value(element, query_string)` directly -- selector.py lines 215
-// and 1180) -- so porting it first, standalone, unblocks both of those later chunks
-// without needing to guess at their own scope.
+// **Chunk 1** ported `ifcopenshell/util/selector.py`'s (src/ifcopenshell-python) **key-
+// path mini-language** only -- planning/ifcopenshell-ts/research/03-python-util-
+// inventory.md's dedicated "`selector.py` -- the IFC Query Selector Syntax" section,
+// sub-section "2. Key-path grammar (`get_element_grammar`) -> `get_element_value(element,
+// query)`". This is the shared dependency both `filter_elements`'s `query:` facet and
+// `format()`'s `{{...}}` interpolation call into (both confirmed, by reading the real
+// Python source, to call `get_element_value(element, query_string)` directly --
+// selector.py lines 215 and 1180) -- so porting it first, standalone, unblocked both of
+// those later chunks without needing to guess at their own scope.
 //
-// Explicitly NOT in this chunk's scope: `filter_elements` (the `filter_elements_grammar`
-// facet-based element-filtering language) and `format`/`FormatTransformer` (the
-// `format_grammar` Excel-formula-like expression language) -- both separate, later
-// chunks. `set_element_value` (selector.py's `get_element_value` inverse, which crosses
-// into `ifcopenshell.api.pset`/`ifcopenshell.api.geometry` territory) is also out of
-// scope here, for the same reason `util.unit`'s `convert_file_length_units` is
-// (`TODOS.md`): it needs the not-yet-ported `api` layer (Phase 6+).
+// **Chunk 2** (this update, see that section's own header comment further down this
+// file for the full scope/findings writeup) ports `filter_elements` (the
+// `filter_elements_grammar` facet-based element-filtering language) -- the `query:`
+// facet it adds reuses chunk 1's `getElementValue` directly, confirming the dependency
+// note above.
+//
+// Explicitly NOT in this repo's scope yet: `format`/`FormatTransformer` (the
+// `format_grammar` Excel-formula-like expression language) -- a separate, later chunk.
+// `set_element_value` (selector.py's `get_element_value` inverse, which crosses into
+// `ifcopenshell.api.pset`/`ifcopenshell.api.geometry` territory) is also out of scope
+// here, for the same reason `util.unit`'s `convert_file_length_units` is (`TODOS.md`):
+// it needs the not-yet-ported `api` layer (Phase 6+).
 //
 // Ported in full: the `get_element_grammar` key-path grammar (hand-rolled as
 // `parseKeyPath` below, a small recursive-descent-ish scanner -- no new npm dependency,
@@ -125,9 +130,12 @@
 // above are narrowly scoped, not an excuse to under-scope the rest.
 
 import { EntityInstance } from "../entityInstance";
+import type { IfcFile } from "../file";
 import { getReferences } from "./classification";
 import {
+	getAggregate,
 	getContainer,
+	getDecomposition,
 	getGroups,
 	getMaterial,
 	getMaterials,
@@ -532,4 +540,952 @@ function getElementValueForKeys(initialValue: unknown, keys: readonly (string | 
 export function getElementValue(element: EntityInstance, query: string): unknown {
 	const keys = parseKeyPath(query);
 	return getElementValueForKeys(element, keys);
+}
+
+// ============================================================================
+// Chunk 2: `filter_elements` -- the facet-based element-filtering language
+// (`filter_elements_grammar`/`FacetTransformer`, selector.py lines 43-116 and
+// 912-1298) -> `filter_elements(file, query, elements=None, edit_in_place=False)`
+// (selector.py lines 570-610).
+//
+// Ported in full: every facet type (`instance`/`entity`/`attribute`/`type`/
+// `material`/`property`/`classification`/`location`/`group`/`parent`/`query`), both
+// combinators (`,` within a `facet_list`, `+` between `facet_list`s -- see
+// `FacetRunner.run` below for why "OR within a group, AND across groups" is a
+// simplification of what the real Python source does: entity/instance facets union
+// elements *into* the current working set while every other facet type *narrows* it,
+// so within one comma-separated group the actual semantics are "sequential
+// union-then-filter in parse order", not a symmetric OR), block-comment stripping
+// (`/* ... */`, correctly *not* recognized inside quoted-string content -- verified
+// against `test_block_comments_are_ignored`'s own `Name="a/*b"` case), and `/regex/`
+// support for pset/prop names and attribute/property values. Every filter facet reuses
+// the real, already-ported `util.element`/`util.classification` functions the real
+// Python source calls into (`getType`, `getMaterials`, `getPset`/`getPsets`,
+// `getContainer`/`getAggregate`, `getDecomposition`, `getPredefinedType`, `classification
+// .getReferences`) -- nothing reimplemented.
+//
+// *** Findings disclosed here (verified against the real Python source, not the task
+// brief's own speculation -- see each point for what was confirmed and what changed): ***
+//
+// 1. **`decimal.Decimal` does NOT apply to this chunk.** The task brief (echoing this
+//    project's own research doc) flagged `Decimal`-vs-`Number` as a porting concern for
+//    numeric comparisons. Direct source verification (`grep -n "Decimal"
+//    selector.py`) shows `Decimal`/`InvalidOperation` are imported and used *only* by
+//    `FormatTransformer.round()` (the `format()` grammar's numeric rounding function --
+//    a separate, later, explicitly out-of-scope chunk). `FacetTransformer.compare()` --
+//    the only numeric-comparison logic in `filter_elements`'s actual scope -- uses plain
+//    Python `int`/`float` throughout, with no `Decimal` anywhere. Plain JS `number` is
+//    therefore an exact behavioral match for *this* chunk, not a "likely fine" fallback.
+//
+// 2. **A real, narrower, genuinely-JS-specific divergence exists instead: `int` vs.
+//    `float`.** Python's `compare()` branches on `isinstance(element_value, int)` vs.
+//    `isinstance(element_value, float)` to decide whether the query's string `value` is
+//    parsed strictly (`int(value)`, rejecting any decimal point) or permissively
+//    (`float(value)`). JS has no equivalent runtime type split -- every IFC INTEGER and
+//    REAL attribute value (and every unwrapped pset/qto property value, via
+//    `util/element.ts`'s `unwrapSelectValue`) surfaces as the same JS `number`, so this
+//    port cannot recover which EXPRESS primitive type produced a given whole-number
+//    value at the point `compare()` runs (the type tag `unwrapSelectValue`/`selectValueType`
+//    track is only carried in `getProperty`/`getProperties`'s `verbose=true` mode, never
+//    used by `get_pset(element, pset, prop)`'s plain unwrap that `property()`/`attribute()`
+//    facets actually call). `compareValues` below (see its own comment) resolves this by
+//    always using the permissive `float`-style parser (`pythonFloat`) for any numeric
+//    `element_value`, regardless of whether it happens to be a whole number. This is
+//    observably identical to Python in every case this module's own tests (and this
+//    chunk's own tests, ported from `test_selector.py`) exercise, and only diverges in
+//    one specific, narrow scenario: a *quoted, non-integer* value string (e.g.
+//    `Foobar.Baz>"100.5"` -- note the grammar's own `unquoted_string` production
+//    excludes `.`, so an unquoted decimal literal isn't even parseable in the first
+//    place) compared against an attribute/property whose underlying EXPRESS type is
+//    declared INTEGER (not REAL) -- Python's `int("100.5")` raises `ValueError` there
+//    (caught, `result = False`), while this port's permissive float parse succeeds and
+//    produces a real (mathematically correct) comparison instead of Python's blanket
+//    exclusion. Disclosed, not silently smoothed over; no test in `test_selector.py`
+//    exercises this specific combination. This is the *same* root-cause architectural
+//    gap `TODOS.md`'s "`EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER
+//    vs. REAL into one JS `number`" entry already tracks (found independently by an
+//    earlier `util.migrator` chunk) -- that entry has been updated to note this file as
+//    a second affected caller, rather than duplicating a new entry for the same gap.
+//
+// 3. **The task brief's "a trailing `+` allows continued mutation via `edit_in_place`"
+//    claim (from the research doc's own summary) does not hold up against the real
+//    grammar/transformer.** `filter_group: facet_list ("+" facet_list)* "+"?` -- the
+//    trailing `"+"?` is pure grammar plumbing allowing a dangling `+` with nothing
+//    (meaningful) after it, unrelated to `edit_in_place` entirely; it exists so a query
+//    like `"IfcWall + /* IfcSlab */"` (a block comment "commenting out" everything after
+//    the `+`) parses cleanly instead of erroring on the dangling operator (verified
+//    directly against `test_block_comments_are_ignored`, which exercises exactly this).
+//    `parseFilterQuery`'s `"+"`-loop below reproduces this (breaks out cleanly once
+//    nothing but whitespace/comments remains after a `+`), independent of anything
+//    `edit_in_place`-related.
+//
+// 4. **`edit_in_place` itself has no observable effect on `filter_elements`'s current
+//    behavior**, confirmed by direct reading of `filter_elements`'s own body
+//    (selector.py lines 604-610): `if elements and not edit_in_place: elements =
+//    elements.copy()` only decides whether the *local* `elements` variable is a
+//    defensive copy before being handed to `FacetTransformer(ifc_file, elements)` --
+//    but `FacetTransformer.__init__` *unconditionally* does `self.base_elements =
+//    elements.copy()` regardless, and `get_results()` always builds a brand-new `set`
+//    from scratch (`results: set[...] = set(); for r in self.results: results |= r`),
+//    never returning `elements`/`self.base_elements` by reference either way. So this
+//    parameter is currently vestigial in the real Python source -- not the "complex
+//    `ifcopenshell.api` mutation" scenario the task brief's "OUT of scope" caveat
+//    anticipated (there is no such mutation at all in this function). `filterElements`
+//    below still accepts and documents the parameter for API-shape fidelity (a future
+//    Python change could make it meaningful again), but its value doesn't change this
+//    port's output, matching upstream exactly. Not deferred/out-of-scope -- included,
+//    because real investigation showed it was trivial, per the task brief's own
+//    instruction to investigate before deferring.
+//
+// 5. **One genuine, faithfully-reproduced Python quirk, not "fixed":** `add_default_elements`
+//    checks `if self.base_elements:` (*truthiness*, matching Python's "empty set is
+//    falsy"), while `instance`/`entity` facets check `self.base_elements is None`
+//    (*identity*). This means an explicitly-passed **empty** seed `Set` (as opposed to
+//    `undefined`/no seed at all) behaves asymmetrically: `instance`/`entity` facets see
+//    a real (empty) seed and match nothing from it, while every other facet type's
+//    `add_default_elements()` call falls back to the *full* `IfcProduct`/`IfcTypeProduct`
+//    default set anyway, since an empty JS `Map`'s `.size` is `0` just as an empty
+//    Python `set()` is falsy. `FacetRunner` below reproduces this exactly (`baseElements
+//    !== null` for the identity check, `baseElements.size > 0` for the truthiness
+//    check) rather than "normalizing" the two to agree with each other. No test in
+//    `test_selector.py` exercises this edge case; disclosed for completeness.
+//
+// 6. **A second genuine, faithfully-reproduced Python quirk, found by this chunk's own
+//    adversarial test-writing (not by reading alone):** `get_container_tree`'s
+//    memoization (selector.py ~line 1185) caches, for each node visited while walking
+//    *up* from some starting container, that node's *remaining* upward tree --
+//    deliberately excluding the node itself (`tree_copy.pop(0)` before caching
+//    `tree_copy.copy()`). A subsequent *direct* `get_container_tree` call for that same
+//    node (now a cache *hit*, since Python's `if tree: return tree` only short-circuits
+//    on a non-empty cached value) therefore returns a tree **missing that node itself**
+//    -- silently excluding it from any `location=<that node's own Name/GlobalId>`
+//    match, even though it genuinely is its own container's (or another element's)
+//    ancestor. This is order-dependent on `self.elements`' Python `set` iteration order
+//    (unspecified) or, in this port, `Map` insertion order (deterministic, following
+//    `file.byType(...)`'s creation-order result) -- see `getContainerTree`'s own
+//    comment (verbatim, "if tree: return tree") and `test/util/selector.test.ts`'s
+//    dedicated regression test (`"getContainerTree's cache quirk: ..."`) for a
+//    concrete, deterministic reproduction. Reproduced verbatim, not "fixed" -- this is
+//    a real upstream Python bug, not a porting error, and "fixing" it here would make
+//    this port observably diverge from `filter_elements`'s actual (if surprising)
+//    current behavior.
+//
+// Not a byte-for-byte reproduction of lark's Earley parser (same disclosed
+// simplification as `parseKeyPath` above): most notably, (a) `NULL`/`TRUE`/`FALSE` are
+// recognized as the `special` value tokens only when the literal keyword is followed by
+// a facet/value delimiter (whitespace/comment then `,`/`+`/end) -- lark's real
+// longest-match-wins-with-literal-priority disambiguation against the competing
+// `unquoted_string` alternative is approximated this way rather than fully replicated,
+// and (b) an `Ifc`-prefixed token immediately followed by a comparison operator (e.g. a
+// literal IFC attribute somehow named `IfcFoo`, which no real schema has) falls through
+// to `attribute` parsing via a one-token lookahead rather than full Earley backtracking.
+// Both approximations produce identical results to lark for every query this module's
+// own tests (ported from `test_selector.py`, covering every facet type and both
+// combinators) exercise.
+
+// --- filter-grammar AST types ---
+
+/** `comparison` (selector.py's `comparison` rule, transformed to one of these eight
+ * strings by `FacetTransformer.comparison`). */
+export type FilterComparison = "=" | "!=" | ">=" | "<=" | ">" | "<" | "*=" | "!*=";
+
+/** `value`/`special` (selector.py's `value` rule, transformed by `FacetTransformer.value`). */
+export type FilterValue = string | RegExp | boolean | null;
+
+export type FilterFacet =
+	| { kind: "instance"; negate: boolean; globalId: string }
+	| { kind: "entity"; negate: boolean; ifcClass: string }
+	| { kind: "attribute"; name: string; comparison: FilterComparison; value: FilterValue }
+	| {
+			kind: "type" | "material" | "classification" | "location" | "group" | "parent";
+			comparison: FilterComparison;
+			value: FilterValue;
+	  }
+	| {
+			kind: "property";
+			pset: string | RegExp;
+			prop: string | RegExp;
+			comparison: FilterComparison;
+			value: FilterValue;
+	  }
+	| { kind: "query"; keys: string; comparison: FilterComparison; value: FilterValue };
+
+/** `facet_list` (comma-separated facets). */
+export type FilterFacetList = FilterFacet[];
+/** `filter_group` (`+`-separated `facet_list`s). */
+export type FilterGroup = FilterFacetList[];
+
+const KEYWORD_FACET_KINDS = new Set(["type", "material", "classification", "location", "group", "parent"]);
+const GLOBALID_RE = /^[0-3][a-zA-Z0-9_$]{21}/;
+const IFC_CLASS_RE = /^Ifc\w+/;
+const ATTRIBUTE_NAME_RE = /^[A-Z]\w+$/;
+const SPECIAL_VALUE_LITERALS: readonly (readonly [string, FilterValue])[] = [
+	["NULL", null],
+	["TRUE", true],
+	["FALSE", false],
+];
+
+/**
+ * Hand-rolled recursive-descent parser for `filter_elements_grammar` -- no new npm
+ * dependency, matching `parseKeyPath`'s own precedent above. See this section's header
+ * comment for the disclosed simplifications relative to lark's real Earley parser.
+ */
+export function parseFilterQuery(query: string): FilterGroup {
+	const n = query.length;
+	let i = 0;
+
+	function skipWsAndComments(): void {
+		while (true) {
+			const before = i;
+			while (i < n && /[ \t\f\r\n]/.test(query[i])) i++;
+			if (query.startsWith("/*", i)) {
+				const end = query.indexOf("*/", i + 2);
+				if (end === -1) {
+					throw new Error(`Unterminated block comment in filter query: '${query}'`);
+				}
+				i = end + 2;
+			}
+			if (i === before) break;
+		}
+	}
+
+	/** Whether, after skipping whitespace/comments starting at `pos`, the next
+	 * non-ignorable character is a facet/value-list delimiter (`,`, `+`) or end of
+	 * input -- used to decide whether a candidate GlobalId/IFC-class/keyword token
+	 * should actually be treated as such (see this section's header comment, point on
+	 * lark-approximation). Doesn't mutate `i`. */
+	function isDelimiterAhead(pos: number): boolean {
+		let p = pos;
+		while (true) {
+			const before = p;
+			while (p < n && /[ \t\f\r\n]/.test(query[p])) p++;
+			if (query.startsWith("/*", p)) {
+				const end = query.indexOf("*/", p + 2);
+				if (end === -1) return true; // Let the real scan surface the "unterminated" error.
+				p = end + 2;
+			}
+			if (p === before) break;
+		}
+		return p >= n || query[p] === "," || query[p] === "+";
+	}
+
+	/** Assumes `query[i] === '"'`. Returns the raw inner content (escape sequences
+	 * un-collapsed), advancing `i` past the closing quote -- same scanning logic as
+	 * `parseKeyPath`'s quoted-string branch above, but the *unescape* transform applied
+	 * by the caller differs (see `parseNameToken` below). */
+	function scanQuotedRaw(): string {
+		let j = i + 1;
+		let content = "";
+		while (j < n && query[j] !== '"') {
+			if (query[j] === "\\" && j + 1 < n) {
+				content += query[j] + query[j + 1];
+				j += 2;
+			} else {
+				content += query[j];
+				j++;
+			}
+		}
+		if (j >= n) {
+			throw new Error(`Unterminated quoted string in filter query: '${query}'`);
+		}
+		i = j + 1;
+		return content;
+	}
+
+	/** Assumes `query[i] === '/'`. Same one-or-more-inner-char rule (and the same
+	 * empty-`//`-is-a-parse-error bugfix) as `parseKeyPath`'s regex branch above. */
+	function scanFilterRegex(): RegExp {
+		let j = i + 1;
+		while (j < n && query[j] !== "/") j++;
+		if (j >= n) {
+			throw new Error(`Unterminated regex in filter query: '${query}'`);
+		}
+		if (j === i + 1) {
+			throw new Error(`Invalid filter query (empty regex '//' is not allowed): '${query}'`);
+		}
+		const pattern = query.slice(i + 1, j);
+		i = j + 1;
+		// Same JS-`RegExp`-vs-Python-`re` caveat as `parseKeyPath`'s regex branch above.
+		return new RegExp(pattern);
+	}
+
+	/** A scanned `quoted_string | regex_string | unquoted_string` token. `bare` is
+	 * false for quoted/regex tokens -- such a token can never be a `type`/`material`/…
+	 * keyword literal or match `attribute_name`'s bare regex pattern (neither
+	 * production has a quoted/regex alternative in the real grammar), only ever a
+	 * `pset`/`prop` name. Callers that need to distinguish keyword/attribute-name
+	 * tokens from `pset`/`prop` tokens check `.bare` before matching against either. */
+	function parseNameToken(allowRegex: boolean): { value: string | RegExp; bare: boolean } {
+		skipWsAndComments();
+		if (i >= n) {
+			throw new Error(`Invalid filter query (expected a name): '${query}'`);
+		}
+		const ch = query[i];
+		if (ch === '"') {
+			const raw = scanQuotedRaw();
+			// `FacetTransformer.value`'s quoted_string handling (selector.py ~line 1236):
+			// `args[0].children[0].value[1:-1].replace('\\"', '"')` -- only escaped
+			// double-quotes are unescaped, every other backslash is left untouched. This
+			// is a *different* rule from `parseKeyPath`'s get_element_grammar quoted
+			// strings above (`.replace("\\", "")`, a blunt "strip every backslash") --
+			// the two grammars' `GetElementTransformer`/`FacetTransformer` genuinely
+			// disagree on this in the real Python source; both are ported faithfully to
+			// their own grammar, not conflated.
+			return { value: raw.replace(/\\"/g, '"'), bare: false };
+		}
+		if (ch === "/") {
+			if (!allowRegex) {
+				throw new Error(`Invalid filter query (a regex is not allowed here): '${query}'`);
+			}
+			return { value: scanFilterRegex(), bare: false };
+		}
+		// unquoted_string: /[^,.=><*!\s]+/
+		let j = i;
+		while (j < n && !/[,.=><*!\s]/.test(query[j])) j++;
+		if (j === i) {
+			throw new Error(`Invalid filter query (unexpected character '${ch}' at position ${i}): '${query}'`);
+		}
+		const token = query.slice(i, j);
+		i = j;
+		return { value: token, bare: true };
+	}
+
+	function parseComparison(): FilterComparison {
+		skipWsAndComments();
+		if (query[i] === "!") {
+			if (query.startsWith("!=", i)) {
+				i += 2;
+				return "!=";
+			}
+			if (query.startsWith("!*=", i)) {
+				i += 3;
+				return "!*=";
+			}
+			throw new Error(`Invalid filter query ('!' is only valid before '=' or '*=') at position ${i}: '${query}'`);
+		}
+		if (query.startsWith(">=", i)) {
+			i += 2;
+			return ">=";
+		}
+		if (query.startsWith("<=", i)) {
+			i += 2;
+			return "<=";
+		}
+		if (query.startsWith("*=", i)) {
+			i += 2;
+			return "*=";
+		}
+		if (query[i] === ">") {
+			i++;
+			return ">";
+		}
+		if (query[i] === "<") {
+			i++;
+			return "<";
+		}
+		if (query[i] === "=") {
+			i++;
+			return "=";
+		}
+		throw new Error(`Invalid filter query (expected a comparison operator) at position ${i}: '${query}'`);
+	}
+
+	function parseFacetValue(): FilterValue {
+		skipWsAndComments();
+		if (i < n && query[i] !== '"' && query[i] !== "/") {
+			for (const [literal, result] of SPECIAL_VALUE_LITERALS) {
+				if (query.startsWith(literal, i) && isDelimiterAhead(i + literal.length)) {
+					i += literal.length;
+					return result;
+				}
+			}
+		}
+		return parseNameToken(true).value;
+	}
+
+	function parseFacet(): FilterFacet {
+		skipWsAndComments();
+		let negate = false;
+		if (query[i] === "!") {
+			negate = true;
+			i++;
+			skipWsAndComments();
+		}
+
+		const globalIdMatch = GLOBALID_RE.exec(query.slice(i));
+		if (globalIdMatch && isDelimiterAhead(i + globalIdMatch[0].length)) {
+			const globalId = globalIdMatch[0];
+			i += globalId.length;
+			return { kind: "instance", negate, globalId };
+		}
+
+		const ifcClassMatch = IFC_CLASS_RE.exec(query.slice(i));
+		if (ifcClassMatch && isDelimiterAhead(i + ifcClassMatch[0].length)) {
+			const ifcClass = ifcClassMatch[0];
+			i += ifcClass.length;
+			return { kind: "entity", negate, ifcClass };
+		}
+
+		if (negate) {
+			throw new Error(
+				`Invalid filter query ('!' is only valid before a GlobalId or IFC class name) at position ${i}: '${query}'`,
+			);
+		}
+
+		if (query.startsWith("query:", i)) {
+			i += "query:".length;
+			const keysToken = parseNameToken(false); // `keys: quoted_string | unquoted_string` -- no regex_string.
+			if (typeof keysToken.value !== "string") {
+				throw new Error(`Invalid filter query (a regex is not allowed as a 'query:' key path): '${query}'`);
+			}
+			const comparison = parseComparison();
+			const value = parseFacetValue();
+			return { kind: "query", keys: keysToken.value, comparison, value };
+		}
+
+		const nameToken = parseNameToken(true);
+		skipWsAndComments();
+		if (query[i] === ".") {
+			i++;
+			const propToken = parseNameToken(true);
+			const comparison = parseComparison();
+			const value = parseFacetValue();
+			return { kind: "property", pset: nameToken.value, prop: propToken.value, comparison, value };
+		}
+
+		if (nameToken.bare && typeof nameToken.value === "string" && KEYWORD_FACET_KINDS.has(nameToken.value)) {
+			const kind = nameToken.value as "type" | "material" | "classification" | "location" | "group" | "parent";
+			const comparison = parseComparison();
+			const value = parseFacetValue();
+			return { kind, comparison, value };
+		}
+
+		if (nameToken.bare && typeof nameToken.value === "string" && ATTRIBUTE_NAME_RE.test(nameToken.value)) {
+			const comparison = parseComparison();
+			const value = parseFacetValue();
+			return { kind: "attribute", name: nameToken.value, comparison, value };
+		}
+
+		throw new Error(
+			`Invalid filter query (expected an IFC class, GlobalId, attribute name, 'type'/'material'/'classification'/'location'/'group'/'parent' keyword, 'query:' prefix, or 'pset.prop' property filter) at position ${i}: '${query}'`,
+		);
+	}
+
+	function parseFacetList(): FilterFacetList {
+		const facets: FilterFacetList = [parseFacet()];
+		skipWsAndComments();
+		while (query[i] === ",") {
+			i++;
+			skipWsAndComments();
+			facets.push(parseFacet());
+			skipWsAndComments();
+		}
+		return facets;
+	}
+
+	function parseFilterGroup(): FilterGroup {
+		const groups: FilterGroup = [parseFacetList()];
+		skipWsAndComments();
+		while (query[i] === "+") {
+			i++;
+			skipWsAndComments();
+			// Grammar: `filter_group: facet_list ("+" facet_list)* "+"?` -- a trailing
+			// "+" with nothing (meaningful) after it is valid (see this section's
+			// header comment, point 3).
+			if (i >= n) break;
+			groups.push(parseFacetList());
+			skipWsAndComments();
+		}
+		if (i < n) {
+			throw new Error(`Unexpected trailing content in filter query at position ${i}: '${query}'`);
+		}
+		return groups;
+	}
+
+	return parseFilterGroup();
+}
+
+/** Python: `float(value)` -- permissive numeric-string parsing (accepts optional
+ * leading/trailing whitespace, sign, decimal point, scientific-notation exponent, and
+ * `inf`/`infinity`/`nan`, case-insensitively), used by `compareValues` below for
+ * *every* numeric `element_value` comparison, not just ones that came from a
+ * Python-`float`-typed source -- see this section's header comment, finding 2, for why. */
+function pythonFloat(raw: string): number {
+	const s = raw.trim();
+	if (/^[+-]?(inf|infinity)$/i.test(s)) return s.startsWith("-") ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+	if (/^[+-]?nan$/i.test(s)) return Number.NaN;
+	if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(s)) {
+		throw new Error(`invalid literal for float(): '${raw}'`);
+	}
+	return Number(s);
+}
+
+/** Python: `getattr(entity, name, None)` where `entity` may itself be `None` (e.g.
+ * `getattr(element_type, "Name", None)` when `element_type` is `None`) -- `attrOrNull`
+ * above assumes a real `EntityInstance`, so this adds the null-safe outer check every
+ * `type`/`material`/`classification`/`group`/`parent` facet below needs. */
+function attrOrNullOn(entity: EntityInstance | null, name: string): unknown {
+	return entity === null ? null : attrOrNull(entity, name);
+}
+
+/**
+ * Python: `FacetTransformer.compare(element_value, comparison, value) -> bool`
+ * (selector.py ~line 1248). See this section's header comment (findings 1-2) for the
+ * `Decimal`-doesn't-apply-here / `int`-vs-`float` disclosures.
+ */
+function compareValues(elementValue: unknown, comparison: FilterComparison, value: FilterValue): boolean {
+	if (Array.isArray(elementValue)) {
+		// Python: `isinstance(element_value, (list, tuple))` -- match if *any* item
+		// does, negating the aggregate rather than each item, so `!=` stays the
+		// complement of `=` for multi-valued properties (#8129, reproduced verbatim).
+		const stripped = (comparison.startsWith("!") ? comparison.slice(1) : comparison) as FilterComparison;
+		const result = elementValue.some((item) => compareValues(item, stripped, value));
+		return comparison.startsWith("!") ? !result : result;
+	}
+
+	let result: boolean;
+	if (typeof value === "string") {
+		try {
+			if (typeof elementValue === "number") {
+				const numericValue = pythonFloat(value);
+				const operator = comparison.replace(/^!/, "");
+				if (operator === ">=") result = elementValue >= numericValue;
+				else if (operator === "<=") result = elementValue <= numericValue;
+				else if (operator === ">") result = elementValue > numericValue;
+				else if (operator === "<") result = elementValue < numericValue;
+				else result = elementValue === numericValue; // "=" or "*=" -- Python: "Tolerance?"
+			} else if (typeof elementValue === "string") {
+				const operator = comparison.replace(/^!/, "");
+				result = operator === "*=" ? elementValue.includes(value) : elementValue === value;
+			} else {
+				result = (elementValue as unknown) === value;
+			}
+		} catch {
+			// Python: bare `except:` around the whole `int(value)`/`float(value)`/
+			// comparison block -- an unparseable numeric `value` string, or any other
+			// comparison failure, means "no match", not a propagated error.
+			result = false;
+		}
+	} else if (value instanceof RegExp) {
+		if (elementValue === null || elementValue === undefined) {
+			result = false;
+		} else if (typeof elementValue !== "string") {
+			// Python: `value.match(element_value)` raises `TypeError` here, uncaught --
+			// a genuine Python crash for e.g. a numeric attribute compared against a
+			// `/regex/` value, reproduced verbatim rather than silently smoothed over.
+			throw new TypeError(
+				`filterElements: cannot match a regex facet value against a non-string element value (${JSON.stringify(elementValue)})`,
+			);
+		} else {
+			result = matchesFromStart(value, elementValue);
+		}
+	} else if (value === null || value === true || value === false) {
+		// Python: `element_value is value` -- real identity, not `==` (so e.g. `1` is
+		// never "is True"). JS `===` between a `number`/`string`/`EntityInstance` and a
+		// literal `boolean`/`null` mirrors this exactly (no `1 == true`-style coercion).
+		result = elementValue === value;
+	} else {
+		throw new Error(`filterElements: unexpected facet value: ${JSON.stringify(value)}`);
+	}
+
+	return comparison.startsWith("!") ? !result : result;
+}
+
+/**
+ * Python: `FacetTransformer` (selector.py ~line 912) -- the stateful, imperative
+ * facet-application engine `filter_elements` drives. See this section's header comment
+ * for why this can't be a pure declarative filter tree: entity/instance facets
+ * *additively union* into the working set while every other facet type *narrows* it,
+ * and which behavior happens when is order-dependent within a `facet_list`.
+ */
+class FacetRunner {
+	private elements = new Map<number, EntityInstance>();
+	private readonly results: Map<number, EntityInstance>[] = [];
+	private hasAdditiveFacetInCurrentList = false;
+	/** Python: `self.container_trees` (`get_container_tree`'s memoization cache),
+	 * keyed by container identity (matching this file's own identity-based `EntityInstance`
+	 * dedup convention, e.g. `EntityInstanceSet` in `util/element.ts`). */
+	private readonly containerTrees = new Map<number, EntityInstance[]>();
+
+	constructor(
+		private readonly file: IfcFile,
+		/** `null` = no seed provided (Python's `elements=None`); a non-null `Map` here
+		 * (possibly empty) is Python's `elements.copy()` -- see this section's header
+		 * comment, finding 5, for the real, faithfully-reproduced Python quirk this
+		 * `null`-vs-`Map` distinction (checked by `is None` for `instance`/`entity`
+		 * facets) exists to support, separately from `addDefaultElements`'s own
+		 * `.size > 0` *truthiness* check below. */
+		private readonly baseElements: Map<number, EntityInstance> | null,
+	) {}
+
+	run(group: FilterGroup): void {
+		for (const facetList of group) {
+			for (const facet of facetList) this.applyFacet(facet);
+			this.pushFacetListResult();
+		}
+	}
+
+	getResults(): Set<EntityInstance> {
+		const merged = new Map<number, EntityInstance>();
+		for (const r of this.results) {
+			for (const [id, inst] of r) merged.set(id, inst);
+		}
+		return new Set(merged.values());
+	}
+
+	private pushFacetListResult(): void {
+		// Python: `if self.elements: self.results.append(self.elements); self.elements
+		// = set()` -- appends by reference then rebinds to a fresh set, so the pushed
+		// snapshot is never mutated by later facet_lists.
+		if (this.elements.size > 0) {
+			this.results.push(this.elements);
+			this.elements = new Map();
+		}
+		this.hasAdditiveFacetInCurrentList = false;
+	}
+
+	private addDefaultElements(): void {
+		if (this.hasAdditiveFacetInCurrentList) return;
+		this.hasAdditiveFacetInCurrentList = true;
+		if (this.baseElements !== null && this.baseElements.size > 0) {
+			for (const [id, inst] of this.baseElements) this.elements.set(id, inst);
+		} else {
+			for (const inst of this.file.byType("IfcProduct")) this.elements.set(inst.identity(), inst);
+			for (const inst of this.file.byType("IfcTypeProduct")) this.elements.set(inst.identity(), inst);
+		}
+	}
+
+	private applyFacet(facet: FilterFacet): void {
+		switch (facet.kind) {
+			case "instance":
+				this.applyInstance(facet);
+				return;
+			case "entity":
+				this.applyEntity(facet);
+				return;
+			case "attribute":
+				this.applyAttribute(facet);
+				return;
+			case "type":
+				this.applyType(facet);
+				return;
+			case "material":
+				this.applyMaterial(facet);
+				return;
+			case "property":
+				this.applyProperty(facet);
+				return;
+			case "classification":
+				this.applyClassification(facet);
+				return;
+			case "location":
+				this.applyLocation(facet);
+				return;
+			case "group":
+				this.applyGroup(facet);
+				return;
+			case "parent":
+				this.applyParent(facet);
+				return;
+			case "query":
+				this.applyQuery(facet);
+				return;
+		}
+	}
+
+	private applyInstance(facet: Extract<FilterFacet, { kind: "instance" }>): void {
+		this.hasAdditiveFacetInCurrentList = true;
+		if (this.baseElements === null) {
+			try {
+				const inst = this.file.byGuid(facet.globalId);
+				if (!facet.negate) this.elements.set(inst.identity(), inst);
+				else this.elements.delete(inst.identity());
+			} catch {
+				// Python: bare `except: pass` around `self.file.by_guid(...)` (also
+				// swallows a `.remove()`-on-non-member `KeyError` for the negated case).
+			}
+		} else {
+			for (const inst of this.baseElements.values()) {
+				if (attrOrNull(inst, "GlobalId") !== facet.globalId) continue;
+				if (!facet.negate) this.elements.set(inst.identity(), inst);
+				else this.elements.delete(inst.identity());
+			}
+		}
+	}
+
+	private applyEntity(facet: Extract<FilterFacet, { kind: "entity" }>): void {
+		this.hasAdditiveFacetInCurrentList = true;
+		if (this.baseElements === null) {
+			try {
+				const matches = this.file.byType(facet.ifcClass);
+				for (const inst of matches) {
+					if (!facet.negate) this.elements.set(inst.identity(), inst);
+					else this.elements.delete(inst.identity());
+				}
+			} catch {
+				// Python: bare `except: pass` around `self.file.by_type(...)`.
+			}
+		} else {
+			for (const inst of this.baseElements.values()) {
+				if (!inst.isA(facet.ifcClass)) continue;
+				if (!facet.negate) this.elements.set(inst.identity(), inst);
+				else this.elements.delete(inst.identity());
+			}
+		}
+	}
+
+	private applyAttribute(facet: Extract<FilterFacet, { kind: "attribute" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const elementValue = facet.name === "PredefinedType" ? getPredefinedType(inst) : attrOrNull(inst, facet.name);
+			if (compareValues(elementValue, facet.comparison, facet.value)) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private applyType(facet: Extract<FilterFacet, { kind: "type" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const elementType = getType(inst);
+			const matches =
+				compareValues(attrOrNullOn(elementType, "Name"), facet.comparison, facet.value) ||
+				compareValues(attrOrNullOn(elementType, "GlobalId"), facet.comparison, facet.value);
+			if (matches) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private applyMaterial(facet: Extract<FilterFacet, { kind: "material" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const materials = getMaterials(inst);
+			let result: boolean | null = materials.length > 0 ? false : null;
+			for (const material of materials) {
+				if (compareValues(attrOrNull(material, "Name"), facet.comparison, facet.value)) result = true;
+				if (compareValues(attrOrNull(material, "Category"), facet.comparison, facet.value)) result = true;
+			}
+			const matches =
+				result !== null
+					? facet.comparison === "="
+						? result
+						: !result
+					: compareValues(null, facet.comparison, facet.value);
+			if (matches) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private evaluateProperty(element: EntityInstance, facet: Extract<FilterFacet, { kind: "property" }>): boolean {
+		const { pset, prop, comparison, value } = facet;
+		if (typeof pset === "string" && typeof prop === "string") {
+			return compareValues(getPset(element, pset, prop), comparison, value);
+		}
+		if (typeof pset === "string" && prop instanceof RegExp) {
+			const elementProps = (getPset(element, pset) as Record<string, unknown> | null) ?? {};
+			for (const [propName, propValue] of Object.entries(elementProps)) {
+				if (matchesFromStart(prop, propName)) return compareValues(propValue, comparison, value);
+			}
+		} else if (pset instanceof RegExp) {
+			const elementPsets = getPsets(element);
+			for (const [psetName, elementProps] of Object.entries(elementPsets)) {
+				if (!matchesFromStart(pset, psetName)) continue;
+				if (typeof prop === "string") {
+					const elementValue = elementProps[prop] ?? null;
+					if (elementValue !== null) return compareValues(elementValue, comparison, value);
+				} else {
+					for (const [propName, propValue] of Object.entries(elementProps)) {
+						if (matchesFromStart(prop, propName)) return compareValues(propValue, comparison, value);
+					}
+				}
+			}
+		}
+		// Python: falls through to `self.compare(None, comparison, value)` when no
+		// pset/prop combination matched at all (or `pset` didn't exist).
+		return compareValues(null, comparison, value);
+	}
+
+	private applyProperty(facet: Extract<FilterFacet, { kind: "property" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			if (this.evaluateProperty(inst, facet)) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private applyClassification(facet: Extract<FilterFacet, { kind: "classification" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const references = getReferences(inst);
+			let result: boolean | null = references.size > 0 ? false : null;
+			for (const reference of references) {
+				if (compareValues(attrOrNull(reference, "Name"), facet.comparison, facet.value)) result = true;
+				// Python: `getattr(reference, "Identification", getattr(reference,
+				// "ItemReference", None))` -- falls back to `ItemReference` only when
+				// `Identification` isn't *declared at all* (not merely unset).
+				const identificationOrItemReference =
+					attrOrMissing(reference, "Identification") !== MISSING
+						? attrOrNull(reference, "Identification")
+						: attrOrNull(reference, "ItemReference");
+				if (compareValues(identificationOrItemReference, facet.comparison, facet.value)) result = true;
+			}
+			const matches =
+				result !== null
+					? facet.comparison === "="
+						? result
+						: !result
+					: compareValues(null, facet.comparison, facet.value);
+			if (matches) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private getContainerTree(container: EntityInstance | null): EntityInstance[] {
+		if (container === null) return [];
+		const cached = this.containerTrees.get(container.identity());
+		// Python: `if tree: return tree` -- only a *non-empty* cached tree short-
+		// circuits; an empty one (a container directly under `IfcProject`) recomputes
+		// every time. Reproduced verbatim, not "fixed".
+		if (cached && cached.length > 0) return cached;
+
+		const tree: EntityInstance[] = [];
+		let current: EntityInstance | null = container;
+		while (current) {
+			if (current.isA("IfcProject")) break;
+			tree.push(current);
+			current = getAggregate(current);
+		}
+
+		const rest = [...tree];
+		while (rest.length > 0) {
+			const node = rest.shift() as EntityInstance;
+			this.containerTrees.set(node.identity(), [...rest]);
+		}
+		return tree;
+	}
+
+	private applyLocation(facet: Extract<FilterFacet, { kind: "location" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const container = getContainer(inst) ?? getAggregate(inst);
+			const containers = this.getContainerTree(container);
+			let result: boolean | null = containers.length > 0 ? false : null;
+			for (const c of containers) {
+				if (
+					compareValues(attrOrNull(c, "Name"), "=", facet.value) ||
+					compareValues(attrOrNull(c, "GlobalId"), "=", facet.value)
+				) {
+					result = true;
+				}
+			}
+			const matches =
+				result !== null
+					? facet.comparison === "="
+						? result
+						: !result
+					: compareValues(null, facet.comparison, facet.value);
+			if (matches) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private applyGroup(facet: Extract<FilterFacet, { kind: "group" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			let result = false;
+			for (const rel of attrList(inst, "HasAssignments")) {
+				if (!rel.isA("IfcRelAssignsToGroup")) continue;
+				const relatingGroup = attrOrNull(rel, "RelatingGroup") as EntityInstance | null;
+				if (!relatingGroup) continue;
+				if (compareValues(attrOrNull(relatingGroup, "Name"), "=", facet.value)) {
+					result = true;
+				} else if (compareValues(attrOrNull(relatingGroup, "GlobalId"), "=", facet.value)) {
+					result = true;
+				}
+			}
+			if (facet.comparison === "=" ? result : !result) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+
+	private applyParent(facet: Extract<FilterFacet, { kind: "parent" }>): void {
+		const parents = new Map<number, EntityInstance>();
+		const collect = (relType: string, relatingAttrName: string): void => {
+			for (const rel of this.file.byType(relType)) {
+				const parent = attrOrNull(rel, relatingAttrName) as EntityInstance | null;
+				if (
+					parent &&
+					(compareValues(attrOrNull(parent, "Name"), facet.comparison, facet.value) ||
+						compareValues(attrOrNull(parent, "GlobalId"), facet.comparison, facet.value))
+				) {
+					parents.set(parent.identity(), parent);
+				}
+			}
+		};
+		collect("IfcRelAggregates", "RelatingObject");
+		collect("IfcRelContainedInSpatialStructure", "RelatingStructure");
+		collect("IfcRelNests", "RelatingObject");
+		collect("IfcRelVoidsElement", "RelatingBuildingElement");
+		collect("IfcRelFillsElement", "RelatingOpeningElement");
+
+		const result = new Map(parents);
+		for (const parent of parents.values()) {
+			for (const child of getDecomposition(parent)) result.set(child.identity(), child);
+		}
+
+		this.addDefaultElements();
+		if (facet.comparison === "=") {
+			for (const id of [...this.elements.keys()]) {
+				if (!result.has(id)) this.elements.delete(id);
+			}
+		} else {
+			for (const id of result.keys()) this.elements.delete(id);
+		}
+	}
+
+	private applyQuery(facet: Extract<FilterFacet, { kind: "query" }>): void {
+		this.addDefaultElements();
+		const next = new Map<number, EntityInstance>();
+		for (const [id, inst] of this.elements) {
+			const elementValue = getElementValue(inst, facet.keys);
+			if (compareValues(elementValue, facet.comparison, facet.value)) next.set(id, inst);
+		}
+		this.elements = next;
+	}
+}
+
+/**
+ * Python: `filter_elements(ifc_file, query, elements=None, edit_in_place=False) ->
+ * set[entity_instance]` (selector.py lines 570-610).
+ *
+ * Filter elements based on the provided `query`. If `elements` is omitted, all
+ * `IfcProduct`/`IfcTypeProduct` elements in the file are queried; if provided, the
+ * query is applied to (a subset of) that seed set instead.
+ *
+ * `editInPlace` is accepted and documented for API-shape fidelity but currently has no
+ * observable effect on the result -- see this section's header comment, finding 4, for
+ * why (confirmed against the real Python source, not assumed).
+ */
+export function filterElements(
+	ifcFile: IfcFile,
+	query: string,
+	elements?: Set<EntityInstance> | null,
+	editInPlace = false,
+): Set<EntityInstance> {
+	// Python: `if not query: return elements or set()`.
+	if (!query) return elements ?? new Set<EntityInstance>();
+
+	const baseElements =
+		elements === undefined || elements === null
+			? null
+			: new Map(Array.from(elements, (inst) => [inst.identity(), inst] as const));
+	const runner = new FacetRunner(ifcFile, baseElements);
+	runner.run(parseFilterQuery(query));
+	return runner.getResults();
 }
