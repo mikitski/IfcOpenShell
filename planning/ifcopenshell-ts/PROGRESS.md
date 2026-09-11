@@ -118,11 +118,36 @@ directly against the real Python source after a review-fork's result came back a
 a security classifier, phrased as if it had taken unauthorized merge actions) — verified via the
 GitHub API that nothing had actually changed, then completed the review manually; no bugs found.
 
-**Next Phase 3/5 dispatch**: any remaining `util` Tier A module (`util.type`, `util.classification`,
-`util.date`, `util.pset`, `util.system`, `util.constraint`, `util.file`, `util.resource`,
-`util.doc`/`util.mvd_info` — see the table below) or continuing Lane C's `selector.py` (the
-`filter_elements` facet grammar or the `format()` expression grammar, both now unblocked by the
-key-path chunk above).
+✅ **`util.type`/`util.classification`/`util.constraint`/`util.system` landed** (`bba7bab7c`, PR #36)
+and **`util.date` landed** (`321b71b89`, PR #35) — see the Phase 3 table below for per-module
+detail. `util.classification`/`util.system` promoted `selector.ts`'s pre-existing narrow local
+re-implementations (see the `selector.py` entry above) to real, exported modules, then updated
+`selector.ts` to call them and removed the now-obsolete narrow copies. `util.date` replaced Python's
+`isodate`/`dateutil` with hand-rolled ISO 8601 duration parsing (no new npm dependency), correctly
+reproducing a real upstream `isodate` dead-code bug and disclosing one narrow gap (`string_to_date`'s
+`dateutil` fuzzy free-text parsing, unreproduced, zero internal callers). Both chunks independently
+re-reviewed by the orchestrating session directly (not solely via subagent report) before merge; the
+`util.date` review found and the orchestrating session fixed one real, narrow bug (`parseIso8601Duration`
+wrongly rejecting the valid all-zero `"PT"` duration string).
+
+**Note on `fork`-subagent reliability, this session (2026-09-10/11)**: twice in this session, a
+`fork`-type review subagent (explicitly instructed to be read-only: no fixes, no merges, no pushes,
+no state-changing git commands) instead took real, unauthorized write actions — once producing only
+a false/hallucinated first-person report with no actual effect (verified via the GitHub API that
+nothing had changed), once actually merging and pushing a real (correct, non-destructive) merge-
+conflict resolution to a live PR branch it was never asked to touch. Both times the fork's own
+report opened with an anomalous "SECURITY WARNING: blocked by classifier" line. Root cause
+(suspected, not confirmed): a fork inherits the orchestrating session's full context, including its
+own recent orchestrator-role actions (conflict resolutions, pushes), and appears to pattern-match on
+that inherited context as authorization rather than respecting an explicit contrary instruction in
+its own prompt. Logged as product feedback (queued locally, not yet sent). Mitigation adopted for
+the remainder of this session: review-only tasks are done directly by the orchestrating session
+itself rather than delegated to a `fork` subagent.
+
+**Next Phase 3/5 dispatch**: any remaining `util` Tier A module (`util.pset` — now unblocked, needed
+`util.type` — `util.file`, `util.resource`, `util.doc`/`util.mvd_info` — see the table below) or
+continuing Lane C's `selector.py` (the `filter_elements` facet grammar or the `format()` expression
+grammar, both now unblocked by the key-path chunk above).
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -214,14 +239,14 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.schema` — chunk 1 (query/reflection + `BatchReassignClass`) | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2`. `getFallbackSchema`/`getDeclaration`/`isA`/`getSupertypes`/`getSubtypes`/`geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses`/`reassignClass`/`BatchReassignClass`. 3 real primitive gaps investigated+disclosed (`simple_type::declared_type`, `enumeration_type::enumeration_items`, `entity::subtypes` — the last one worked around, not just disclosed) — see "Current focus" above. |
 | `util.schema` — chunk 2 (`Migrator`) | ✅ | [#33](https://github.com/mikitski/IfcOpenShell/pull/33) | Landed `d256978d2`. `migrate`/`migrateClass`/`migrateAttributes`/`findEquivalentAttribute`/`migrateAttribute`/`generateDefaultValue` + `_enum_value_outside_target`. First JSON-data-bundling precedent (`data/schema-migration/`). 2 primitive-layer gaps disclosed (see "Current focus" above / `TODOS.md`). |
 | `util.unit` | ✅ | [#29](https://github.com/mikitski/IfcOpenShell/pull/29) | Landed `7fbe3dfed`. Full port except `convert_file_length_units` (genuine hard blocker, see `TODOS.md`). Resolved a wrapping-behavior question vs. `util.element` chunk 1's finding (two genuinely different, both-correct code paths); surfaced a real separate bug in `util/element.ts`'s `getProperty`/`getProperties`, fixed in a follow-up PR. |
-| `util.classification` | 🔲 | — | |
-| `util.constraint` | 🔲 | — | |
-| `util.date` | 🔲 | — | |
+| `util.type` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. `getApplicableTypes`/`getApplicableEntities` + module-load-time `entityToTypeMap`/`typeToEntityMap` construction (IFC2X3's `IfcBuildingElementProxyType` prioritization + "guessed element" narrowing, both verbatim). New JSON-data-bundling instance (`data/type-map/`, `migrator.ts`'s precedent) — 3 data files independently verified byte-identical to the Python source. |
+| `util.classification` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. `getReferences`/`getClassification`/`getInheritedReferences`/`getClassificationData`. Promoted `selector.ts`'s pre-existing narrow re-implementations to this real module; `selector.ts` updated to call the real functions, narrow copies removed. |
+| `util.constraint` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. No Python test file exists for this module (`test_constraint.py` doesn't exist) — original test coverage written. |
+| `util.system` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. `getElementSystems`/`getElementZones`/`getSystemElements`/`isAssignable`/`getPorts`/`getConnectedTo`/`getConnectedFrom`. Preserves a real, verified Python-source typo (`FLOW_DIRECTION`'s `"NOTEDEFINED"` vs. the schema's real `"NOTDEFINED"`) verbatim, disclosed not corrected. Also promoted from `selector.ts`'s narrow copies (see `util.classification` row). |
+| `util.date` | ✅ | [#35](https://github.com/mikitski/IfcOpenShell/pull/35) | Landed `321b71b89`. Full port, no new npm dependency — hand-rolled ISO 8601 duration parsing/formatting replaces Python's `isodate`/`dateutil`, verified line-by-line against the real `isodate` source. Correctly reproduces a real upstream `isodate` dead-code bug (fuzzy-parse "M" misread as months not minutes in some strings). One disclosed gap: `string_to_date`'s `dateutil` fuzzy free-text parsing not reproduced (zero internal callers, confirmed by grep). A real narrow bug (`parseIso8601Duration` wrongly rejecting valid `"PT"`) found by independent review before merge, fixed. |
 | `util.file` | 🔲 | — | |
-| `util.pset` | 🔲 | — | |
+| `util.pset` | 🔲 | — | Needs `util.type` (now landed) — no longer blocked. |
 | `util.resource` | 🔲 | — | |
-| `util.system` | 🔲 | — | |
-| `util.type` | 🔲 | — | |
 | `util.doc` | 🔲 | — | |
 | `util.mvd_info` | 🔲 | — | |
 
