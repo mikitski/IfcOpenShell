@@ -1,41 +1,44 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// TS counterpart to `test_selector.py`'s `TestGetElementValue` *and* `TestFormat`
-// classes (src/ifcopenshell-python's `test/util/test_selector.py`, grep for
-// `class TestGetElementValue(test.bootstrap.IFC4)` / `class TestFormat`) -- covers
-// `get_element_value` (the key-path mini-language) and `format` (the Excel-formula-like
-// expression/formatting grammar), matching `src/util/selector.ts`'s own scope (see that
-// file's header comment). `TestFilterElements`/`TestSetElementValue*` have no
-// counterpart here -- `filter_elements`/`set_element_value` are separate, later chunks.
+// TS counterpart to `test_selector.py`'s `TestGetElementValue` **and** `TestFilterElements`
+// classes (src/ifcopenshell-python's `test/util/test_selector.py`) -- `TestGetElementValue`
+// covers `get_element_value` (the key-path mini-language), matching chunk 1's scope (see
+// `src/util/selector.ts`'s header comment); `TestFilterElements` covers `filter_elements`
+// (the facet-based element-filtering language), matching chunk 2's scope (see that same
+// file's "Chunk 2" header comment further down). `TestFormat`/`TestSetElementValue*` have
+// no counterpart here -- `format`/`set_element_value` are separate, later chunks.
 //
 // Python's own fixtures go through `ifcopenshell.api.*` (`api.root.create_entity`,
 // `api.material.add_material`/`add_material_set`/`add_layer`/`assign_material`,
-// `api.pset.add_pset`/`edit_pset`), none of which exist yet in this TS port (`api` is
-// Phase 6+, planning/ifcopenshell-ts/20-roadmap.md). This file's local fixture helpers
-// below build the same underlying entity graphs directly (`file.createEntity(...)` +
-// `.set(...)`), matching `test/util/element.test.ts`'s own established pattern for this
-// exact same gap (`buildProperties`/`addPset`/`addQto`/`assignType`/`assignMaterial`/
-// `containElement`/`assignAggregate`/`assignGroup` below are the same shapes as that
-// file's, trimmed to what this file's own tests need -- not imported from there since
-// that file doesn't export them).
+// `api.pset.add_pset`/`edit_pset`, `api.classification.add_classification`/`add_reference`,
+// `api.group.add_group`/`assign_group`, `api.spatial.assign_container`,
+// `api.aggregate.assign_object`, `api.type.assign_type`), none of which exist yet in this
+// TS port (`api` is Phase 6+, planning/ifcopenshell-ts/20-roadmap.md). This file's local
+// fixture helpers below build the same underlying entity graphs directly
+// (`file.createEntity(...)` + `.set(...)`), matching `test/util/element.test.ts`'s own
+// established pattern for this exact same gap (`buildProperties`/`addPset`/`addQto`/
+// `assignType`/`assignMaterial`/`containElement`/`assignAggregate`/`assignGroup`/
+// `assignClassification` below are the same shapes as that file's/`test/util/
+// classification.test.ts`'s, trimmed to what this file's own tests need -- not imported
+// from there since neither file exports them).
 //
-// Additional coverage beyond a direct `test_selector.py` port: `parseKeyPath` unit
-// tests (no Python counterpart -- Python's grammar is parsed by `lark`, this port's
-// hand-rolled scanner has its own edge cases worth covering directly), the disclosed
-// positional/geolocated-key blocker (`src/util/selector.ts`'s finding #1 -- Python's own
-// suite has a `test_selecting_an_elements_rotation_using_a_query` test that exercises
-// the *unblocked* real computation, which this port cannot reproduce; the blocker itself
-// has no Python counterpart by definition), and the narrow `profiles`/`classification`/
-// `system`/`zone`/spatial-parent key re-implementations (`selector.ts`'s finding #2) --
-// none of which have a dedicated `TestGetElementValue` case in the real Python source
-// either (that class only exercises `class`/`id`/`Name`/`rotation_*`/material-set
-// item/indexing/pset/nested-complex-quantity paths), so these are original coverage of
-// documented Python behavior (`_get_element_value`'s own source), not ports of existing
+// Additional coverage beyond a direct `test_selector.py` port: `parseKeyPath`/
+// `parseFilterQuery` unit tests (no Python counterpart -- Python's grammars are parsed by
+// `lark`, this port's hand-rolled scanners have their own edge cases worth covering
+// directly), the disclosed positional/geolocated-key blocker (`src/util/selector.ts`'s
+// finding #1 -- Python's own suite has a `test_selecting_an_elements_rotation_using_a_query`
+// test that exercises the *unblocked* real computation, which this port cannot reproduce;
+// the blocker itself has no Python counterpart by definition), the narrow `profiles`/
+// `classification`/`system`/`zone`/spatial-parent key re-implementations (`selector.ts`'s
+// finding #2), and the `int`-vs-`float`/`Decimal` numeric-comparison findings (chunk 2's
+// header comment, findings 1-2) -- none of which have a dedicated Python test case, so
+// these are original coverage of documented Python/port behavior, not ports of existing
 // Python tests.
 
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../src/entityInstance";
 import type { IfcFile } from "../../src/file";
+import * as guid from "../../src/guid";
 import * as subject from "../../src/util/selector";
 import { createTestFile } from "../bootstrap";
 
@@ -569,6 +572,557 @@ describe("selector.getElementValue", () => {
 			const material = file.createEntity("IfcMaterial");
 			expect(subject.getElementValue(material, "x")).toBeNull();
 		});
+	});
+});
+
+// --- `parseFilterQuery` -- no Python counterpart (see this file's header comment) ---
+
+describe("selector.parseFilterQuery", () => {
+	test("instance/entity facets, negation, and comparisons parse as expected", () => {
+		expect(subject.parseFilterQuery("IfcWall")).toEqual([[{ kind: "entity", negate: false, ifcClass: "IfcWall" }]]);
+		expect(subject.parseFilterQuery("! IfcWall")).toEqual([[{ kind: "entity", negate: true, ifcClass: "IfcWall" }]]);
+		expect(subject.parseFilterQuery("Name=Foo")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: "Foo" }],
+		]);
+		expect(subject.parseFilterQuery("Name!=Foo")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "!=", value: "Foo" }],
+		]);
+		expect(subject.parseFilterQuery("Name*=Foo")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "*=", value: "Foo" }],
+		]);
+		expect(subject.parseFilterQuery("Name!*=Foo")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "!*=", value: "Foo" }],
+		]);
+		expect(subject.parseFilterQuery("OverallHeight>=3000")).toEqual([
+			[{ kind: "attribute", name: "OverallHeight", comparison: ">=", value: "3000" }],
+		]);
+	});
+
+	test("special values NULL/TRUE/FALSE, quoted string, and regex", () => {
+		expect(subject.parseFilterQuery("Name=NULL")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: null }],
+		]);
+		expect(subject.parseFilterQuery("Name=TRUE")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: true }],
+		]);
+		expect(subject.parseFilterQuery("Name=FALSE")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: false }],
+		]);
+		// A keyword-looking prefix that isn't an exact, delimited match is just a
+		// bare unquoted string, not the `special` token (see this file's own
+		// disclosed lark-approximation, `parseFilterQuery`'s header comment).
+		expect(subject.parseFilterQuery("Name=NULLABLE")).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: "NULLABLE" }],
+		]);
+
+		const quoted = subject.parseFilterQuery('Name="Foo\\"Bar"');
+		expect(quoted).toEqual([[{ kind: "attribute", name: "Name", comparison: "=", value: 'Foo"Bar' }]]);
+
+		const regex = subject.parseFilterQuery("Name=/Fo.*/");
+		const value = (regex[0][0] as { kind: "attribute"; value: unknown }).value;
+		expect(value).toBeInstanceOf(RegExp);
+		expect((value as RegExp).source).toBe("Fo.*");
+	});
+
+	test("property facet: pset.prop, quoted/regex pset and prop names", () => {
+		expect(subject.parseFilterQuery("Pset_WallCommon.FireRating=120")).toEqual([
+			[{ kind: "property", pset: "Pset_WallCommon", prop: "FireRating", comparison: "=", value: "120" }],
+		]);
+		expect(subject.parseFilterQuery('Foobar."Foo"=Bar')).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Foo", comparison: "=", value: "Bar" }],
+		]);
+		const parsed = subject.parseFilterQuery("Foobar./Fo.*/=Bar")[0][0] as { kind: "property"; prop: unknown };
+		expect(parsed.prop).toBeInstanceOf(RegExp);
+	});
+
+	test("keyword facets (type/material/classification/location/group/parent) and query:", () => {
+		for (const kind of ["type", "material", "classification", "location", "group", "parent"] as const) {
+			expect(subject.parseFilterQuery(`${kind}=Foo`)).toEqual([[{ kind, comparison: "=", value: "Foo" }]]);
+		}
+		// `query:`'s `keys` production is `quoted_string | unquoted_string` (no
+		// `regex_string`), and `unquoted_string` itself excludes `.` -- so a *dotted*
+		// key path (as this port's own `parseKeyPath`/`getElementValue` would then
+		// re-parse) must be quoted here; an unquoted `query:type.Name=Foo` cannot
+		// express a dotted path at all in the real grammar (verified directly against
+		// the grammar text, not assumed).
+		expect(subject.parseFilterQuery('query:"type.Name"=Foo')).toEqual([
+			[{ kind: "query", keys: "type.Name", comparison: "=", value: "Foo" }],
+		]);
+		expect(subject.parseFilterQuery("query:Name=Foo")).toEqual([
+			[{ kind: "query", keys: "Name", comparison: "=", value: "Foo" }],
+		]);
+	});
+
+	test("',' (OR/union within a group) and '+' (AND across groups)", () => {
+		expect(subject.parseFilterQuery("IfcWall, IfcSlab")).toEqual([
+			[
+				{ kind: "entity", negate: false, ifcClass: "IfcWall" },
+				{ kind: "entity", negate: false, ifcClass: "IfcSlab" },
+			],
+		]);
+		expect(subject.parseFilterQuery("IfcWall + IfcSlab")).toEqual([
+			[{ kind: "entity", negate: false, ifcClass: "IfcWall" }],
+			[{ kind: "entity", negate: false, ifcClass: "IfcSlab" }],
+		]);
+	});
+
+	test("block comments are stripped between tokens but not inside quoted strings", () => {
+		expect(subject.parseFilterQuery("IfcWall /* comment */")).toEqual([
+			[{ kind: "entity", negate: false, ifcClass: "IfcWall" }],
+		]);
+		expect(subject.parseFilterQuery('Name="a/*b"')).toEqual([
+			[{ kind: "attribute", name: "Name", comparison: "=", value: "a/*b" }],
+		]);
+	});
+
+	test("a dangling trailing '+' (e.g. left by a stripped comment) is valid", () => {
+		expect(subject.parseFilterQuery("IfcWall + /* IfcSlab */")).toEqual([
+			[{ kind: "entity", negate: false, ifcClass: "IfcWall" }],
+		]);
+	});
+
+	test("throws on malformed input", () => {
+		expect(() => subject.parseFilterQuery("!")).toThrow();
+		expect(() => subject.parseFilterQuery("lowercase=Foo")).toThrow();
+		expect(() => subject.parseFilterQuery("IfcWall +")).not.toThrow();
+		expect(() => subject.parseFilterQuery("IfcWall ,")).toThrow();
+		expect(() => subject.parseFilterQuery('Name="unterminated')).toThrow();
+		expect(() => subject.parseFilterQuery("Name=/unterminated")).toThrow();
+		expect(() => subject.parseFilterQuery("Name=//")).toThrow();
+		expect(() => subject.parseFilterQuery("IfcWall /* unterminated")).toThrow();
+	});
+});
+
+// --- `filterElements` -- port of `test_selector.py`'s `TestFilterElements` class ---
+
+describe("selector.filterElements", () => {
+	function newFile(): IfcFile {
+		return createTestFile("IFC4");
+	}
+
+	function ids(instances: Iterable<EntityInstance>): number[] {
+		return [...instances].map((i) => i.id()).sort((a, b) => a - b);
+	}
+
+	function expectElements(actual: Set<EntityInstance>, expected: readonly EntityInstance[]): void {
+		expect(ids(actual)).toEqual(ids(expected));
+	}
+
+	/** Local fixture helper (no Python/api counterpart): replaces (rather than
+	 * `addListProperty`'s append) any existing same-named property on `pset`, letting
+	 * a test simulate the effect of Python's `api.pset.edit_pset` without needing that
+	 * not-yet-ported `api` layer. */
+	function setListProperty(file: IfcFile, pset: EntityInstance, name: string, values: unknown[]): void {
+		const prop = file.createEntity("IfcPropertyListValue");
+		prop.set("Name", name);
+		prop.set("ListValues", values);
+		const existing = ((pset.get("HasProperties") as EntityInstance[] | null) ?? []).filter(
+			(p) => (p.get("Name") as string | null) !== name,
+		);
+		pset.set("HasProperties", [...existing, prop]);
+	}
+
+	// Python: `test_selecting_by_globalid`.
+	test("selecting by GlobalId: union and negation", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("GlobalId", guid.new());
+		const element2 = file.createEntity("IfcSlab");
+		element2.set("GlobalId", guid.new());
+		const guid1 = element.get("GlobalId") as string;
+		const guid2 = element2.get("GlobalId") as string;
+		expectElements(subject.filterElements(file, guid1), [element]);
+		expectElements(subject.filterElements(file, `${guid1}, ${guid2}`), [element, element2]);
+		expectElements(subject.filterElements(file, `${guid1}, ${guid2}, ! ${guid2}`), [element]);
+		expectElements(subject.filterElements(file, `IfcElement, ! ${guid2}`), [element]);
+	});
+
+	// Python: `test_selecting_by_class`.
+	test("selecting by class: literal and negation", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Foo");
+		const element2 = file.createEntity("IfcSlab");
+		expectElements(subject.filterElements(file, "IfcWall"), [element]);
+		expectElements(subject.filterElements(file, "IfcElement, ! IfcWall"), [element2]);
+	});
+
+	// Python: `test_select_without_elements_token`.
+	test("an attribute filter with no leading class defaults to all IfcProduct/IfcTypeProduct", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Foo");
+		const element2 = file.createEntity("IfcWall");
+		element2.set("Name", "Bar");
+		file.createEntity("IfcSlab");
+		expectElements(subject.filterElements(file, "Name=Foo"), [element]);
+	});
+
+	// Python: `test_selecting_by_attribute`.
+	test("selecting by attribute: literal, quoted, regex, NULL, multiple attributes, PredefinedType", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Foo");
+		const element2 = file.createEntity("IfcWall");
+		element2.set("Name", "Bar");
+		file.createEntity("IfcSlab");
+		expectElements(subject.filterElements(file, "IfcWall, Name=Foo"), [element]);
+
+		element.set("Name", 'Foo\'s "quoted" name...');
+		expectElements(subject.filterElements(file, 'IfcWall, Name="Foo\'s \\"quoted\\" name..."'), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Name=/Fo.*/"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Description=NULL"), [element, element2]);
+
+		element.set("Name", "Foo");
+		element.set("Description", "Foobar");
+		expectElements(subject.filterElements(file, "IfcWall, Name=Foo, Description=Foobar"), [element]);
+
+		const elementType = file.createEntity("IfcWallType");
+		elementType.set("PredefinedType", "SOLIDWALL");
+		assignType(file, element, elementType);
+		expectElements(subject.filterElements(file, "IfcWall, PredefinedType=SOLIDWALL"), [element]);
+	});
+
+	// Python: `test_selecting_by_type`.
+	test("selecting by type facet: Name, quoted, regex, GlobalId", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const elementType = file.createEntity("IfcWallType");
+		assignType(file, element, elementType);
+		expectElements(subject.filterElements(file, "IfcWall, type=Foo"), []);
+		elementType.set("Name", "Foo");
+		expectElements(subject.filterElements(file, "IfcWall, type=Foo"), [element]);
+		expectElements(subject.filterElements(file, 'IfcWall, type="Foo"'), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, type=/Fo.*/"), [element]);
+		elementType.set("GlobalId", guid.new());
+		expectElements(subject.filterElements(file, `IfcWall, type=${elementType.get("GlobalId")}`), [element]);
+	});
+
+	// Python: `test_selecting_by_material`.
+	test("selecting by material: NULL, Name, negation", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		expectElements(subject.filterElements(file, "IfcWall, material=NULL"), [element, element2]);
+		const material = file.createEntity("IfcMaterial");
+		material.set("Name", "CON01");
+		assignMaterial(file, [element], material);
+		expectElements(subject.filterElements(file, "IfcWall, material=CON01"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, material!=CON01"), [element2]);
+	});
+
+	// Python: `test_selecting_by_property`.
+	test("selecting by property: literal/quoted/regex prop names, boolean, numeric, enum list", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		addPset(file, element, "Foobar", { Foo: "Bar", Bar: false, Baz: 123 });
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo=Bar"), [element]);
+		expectElements(subject.filterElements(file, 'IfcWall, Foobar."Foo"=Bar'), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar./Fo.*/=Bar"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar./Fo.*/!=Bar"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar=FALSE"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz=123"), [element]);
+
+		const wallCommon = addPset(file, element, "Pset_WallCommon");
+		setListProperty(file, wallCommon, "Status", ["New"]);
+		expectElements(subject.filterElements(file, "IfcWall, Pset_WallCommon.Status=New"), [element]);
+
+		// On multi-valued properties, != means "no value equals" and stays the
+		// complement of = (#8129).
+		setListProperty(file, wallCommon, "Status", ["New", "Demolish"]);
+		expectElements(subject.filterElements(file, "IfcWall, Pset_WallCommon.Status=New"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Pset_WallCommon.Status!=New"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Pset_WallCommon.Status!=Temporary"), [element, element2]);
+	});
+
+	// Python: `test_selecting_by_property_with_comparisons`.
+	test("selecting by property with comparisons: >, <, >=, <=, *=, !*=", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		addPset(file, element, "Foobar", { Baz: 123, Foo: "Bar" });
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>100"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz<100"), []);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>=100"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz<=100"), []);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo*=ar"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo!*=ar"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo*=Foo"), []);
+	});
+
+	// Python: `test_selecting_by_classification`.
+	test("selecting by classification: NULL, Identification, Name, negation", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		expectElements(subject.filterElements(file, "IfcWall, classification=NULL"), [element, element2]);
+		const classification = file.createEntity("IfcClassification");
+		classification.set("Name", "Name");
+		const reference = file.createEntity("IfcClassificationReference");
+		reference.set("Identification", "X");
+		reference.set("Name", "Foobar");
+		reference.set("ReferencedSource", classification);
+		assignClassification(file, [element], reference);
+		expectElements(subject.filterElements(file, "IfcWall, classification=NULL"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, classification=X"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, classification=Foobar"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, classification!=X"), [element2]);
+	});
+
+	// Python: `test_selecting_by_location`.
+	test("selecting by location: spatial container ancestry, NULL, negation, GlobalId", () => {
+		const file = newFile();
+		// `element2` (whose *direct* container, `storey`, is also an *ancestor* of
+		// `element`'s direct container `space`) is created -- and therefore, via
+		// `file.byType("IfcWall")`'s creation-order result, processed by
+		// `FacetRunner.applyLocation` -- *before* `element`. See
+		// `FacetRunner.getContainerTree`'s own comment and this module's "Chunk 2"
+		// header comment (finding 6) for why this order matters: querying `storey`
+		// directly first (a cache miss, freshly walking and including `storey` itself)
+		// before it's ever visited as a *mid-walk ancestor* of `space`'s own query
+		// avoids a real, faithfully-reproduced Python caching quirk where a cache *hit*
+		// excludes the queried node from its own result.
+		const element2 = file.createEntity("IfcWall");
+		const element = file.createEntity("IfcWall");
+		const space = file.createEntity("IfcSpace");
+		space.set("Name", "Space");
+		space.set("GlobalId", guid.new());
+		const storey = file.createEntity("IfcBuildingStorey");
+		storey.set("Name", "G");
+		// GlobalId must be a real, non-null value on every container in the ancestry
+		// chain here -- an unset `GlobalId` is `null`, which would otherwise spuriously
+		// match `location=NULL` below (Python's fixtures always get one, via
+		// `ifcopenshell.api.root.create_entity`'s auto-generation; this file's own
+		// bare `file.createEntity(...)` doesn't, per this file's header comment).
+		storey.set("GlobalId", guid.new());
+		const building = file.createEntity("IfcBuilding");
+		building.set("Name", "Building");
+		building.set("GlobalId", guid.new());
+		const project = file.createEntity("IfcProject");
+		project.set("Name", "Project");
+		containElement(file, space, [element]);
+		containElement(file, storey, [element2]);
+		assignAggregate(file, storey, [space]);
+		assignAggregate(file, building, [storey]);
+		assignAggregate(file, project, [building]);
+		expectElements(subject.filterElements(file, "IfcWall, location=NULL"), []);
+		expectElements(subject.filterElements(file, "IfcWall, location=Space"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, location=G"), [element, element2]);
+		expectElements(subject.filterElements(file, "IfcWall, location=Building"), [element, element2]);
+		expectElements(subject.filterElements(file, "IfcWall, location!=Space"), [element2]);
+		expectElements(subject.filterElements(file, `IfcWall, location=${space.get("GlobalId")}`), [element]);
+	});
+
+	// No Python counterpart -- a regression/documentation test for a real,
+	// faithfully-reproduced Python quirk found by this chunk's own adversarial review
+	// (this module's "Chunk 2" header comment, finding 6, and `getContainerTree`'s own
+	// comment): `get_container_tree`'s memoization caches each visited ancestor's
+	// *remaining* tree (excluding the node itself), so a later direct query for that
+	// same node (a cache *hit*) silently omits it from its own result -- here,
+	// processing `space` (whose ancestry walk passes through `storey` and caches
+	// `storey`'s entry) *before* `storey` is ever queried directly makes the *later*
+	// direct `location=G` query against `storey`'s own element wrongly exclude
+	// `storey`/"G" itself. Deliberately reproduced (not "fixed") to match upstream; the
+	// test above avoids it by choosing a safe creation order, this test demonstrates it.
+	test("getContainerTree's cache quirk: a node visited as a mid-walk ancestor before being queried directly loses itself from its own cached tree", () => {
+		const file = newFile();
+		// Creation order here matters: `element` (space-direct) is processed first,
+		// populating `storey`'s cache entry (`[building]`, excluding `storey` itself)
+		// as a side effect of walking `space`'s full ancestry -- then `element2`
+		// (storey-direct) hits that same, now-incomplete cache entry.
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		const space = file.createEntity("IfcSpace");
+		space.set("Name", "Space");
+		const storey = file.createEntity("IfcBuildingStorey");
+		storey.set("Name", "G");
+		const building = file.createEntity("IfcBuilding");
+		building.set("Name", "Building");
+		const project = file.createEntity("IfcProject");
+		containElement(file, space, [element]);
+		containElement(file, storey, [element2]);
+		assignAggregate(file, storey, [space]);
+		assignAggregate(file, building, [storey]);
+		assignAggregate(file, project, [building]);
+
+		// `element` (queried via a fresh walk starting at `space`) correctly matches.
+		// `element2` (queried directly against the now-cached, self-excluding `storey`
+		// entry) does *not* -- even though `storey` genuinely is its direct container.
+		expectElements(subject.filterElements(file, "IfcWall, location=G"), [element]);
+		// A second call reuses the (still-incomplete) cache identically -- this isn't a
+		// one-off transient effect, it persists on the `FacetRunner` for the query's
+		// lifetime (a fresh `filter_elements` call gets a fresh `FacetTransformer`/
+		// `FacetRunner`, so it doesn't leak across separate top-level calls).
+		expectElements(subject.filterElements(file, "IfcWall, location=G"), [element]);
+	});
+
+	// Python: `test_selecting_by_group`.
+	test("selecting by group: Name, negation, GlobalId", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		const group = file.createEntity("IfcGroup");
+		group.set("Name", "Foo");
+		group.set("GlobalId", guid.new());
+		assignGroup(file, group, [element]);
+		expectElements(subject.filterElements(file, "IfcWall, group=Foo"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, group!=Foo"), [element2]);
+		expectElements(subject.filterElements(file, `IfcWall, group=${group.get("GlobalId")}`), [element]);
+	});
+
+	// Python: `test_selecting_by_parent`.
+	test("selecting by parent: aggregation ancestry, containment, decomposition children", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Element1");
+		const element2 = file.createEntity("IfcWall");
+		element2.set("Name", "Element2");
+		const element3 = file.createEntity("IfcWall");
+		element3.set("Name", "Element3");
+		const space = file.createEntity("IfcSpace");
+		space.set("Name", "Space");
+		const storey = file.createEntity("IfcBuildingStorey");
+		storey.set("Name", "G");
+		const building = file.createEntity("IfcBuilding");
+		building.set("Name", "Building");
+		const project = file.createEntity("IfcProject");
+		project.set("Name", "Project");
+		containElement(file, space, [element]);
+		containElement(file, storey, [element2]);
+		assignAggregate(file, element2, [element3]);
+		assignAggregate(file, storey, [space]);
+		assignAggregate(file, building, [storey]);
+		assignAggregate(file, project, [building]);
+		expectElements(subject.filterElements(file, "IfcWall, parent=Project"), [element, element2, element3]);
+		expectElements(subject.filterElements(file, "IfcWall, parent=Space"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, parent=G"), [element, element2, element3]);
+		expectElements(subject.filterElements(file, "IfcWall, parent=Element2"), [element2, element3]);
+	});
+
+	// Python: `test_selecting_multiple_filter_groups`.
+	test("multiple filter groups joined by '+' union together, each internally narrowed", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Foo");
+		const element2 = file.createEntity("IfcSlab");
+		element2.set("Name", "Bar");
+		expectElements(subject.filterElements(file, "IfcWall + IfcSlab"), [element, element2]);
+		expectElements(subject.filterElements(file, "IfcWall, IfcSlab, Name=Foo"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Name=Foo + IfcSlab"), [element, element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Name=Foo + IfcSlab, Name=Bar"), [element, element2]);
+	});
+
+	// Python: `test_block_comments_are_ignored`.
+	test("block comments are ignored, including one that leaves a dangling trailing '+'", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		element.set("Name", "Foo");
+		const element2 = file.createEntity("IfcSlab");
+		element2.set("Name", "Bar");
+		expectElements(subject.filterElements(file, "IfcWall /* + IfcSlab */"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall + /* IfcSlab */"), [element]);
+		expectElements(subject.filterElements(file, "/* IfcWall + */ IfcSlab"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall /* commented */ + IfcSlab"), [element, element2]);
+		expectElements(subject.filterElements(file, "IfcWall + /* multi\nline\ncomment */ IfcSlab"), [element, element2]);
+		element.set("Name", "a/*b");
+		expectElements(subject.filterElements(file, 'IfcWall, Name="a/*b"'), [element]);
+	});
+
+	// Python: `test_using_elements_argument`.
+	test("a seeded `elements` set narrows/unions within that set only, not the whole file", () => {
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+		const slab = file.createEntity("IfcSlab");
+		const door = file.createEntity("IfcDoor");
+		const seed = new Set([wall, slab]);
+		const results = subject.filterElements(file, "IfcWall", seed);
+		expect(ids(results)).not.toEqual(ids(seed));
+		expectElements(results, [wall]);
+		const seed2 = new Set([wall, slab, door]);
+		expectElements(subject.filterElements(file, "IfcWall, IfcSlab", seed2), [wall, slab]);
+	});
+
+	// Python: `test_editing_in_place`. `editInPlace` currently has no observable effect
+	// on the result -- see this module's "Chunk 2" header comment, finding 4 -- so this
+	// only re-confirms content equality, matching what the real Python test itself
+	// actually asserts (`==`, not `is`).
+	test("editInPlace=true produces an equivalent-content result", () => {
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+		const originalSet = new Set([wall]);
+		const newSet = subject.filterElements(file, "IfcWall", originalSet, true);
+		expectElements(newSet, [wall]);
+	});
+
+	// No Python counterpart in `test_selector.py`'s `TestFilterElements` (the `query:`
+	// facet has no dedicated test there), but confirms it reuses `getElementValue`
+	// directly (this module's "Chunk 2" header comment says so, and this exercises
+	// that end-to-end via a dotted key path, which -- per the `query:` grammar's own
+	// `keys` production -- must be quoted to include a `.`).
+	test("selecting via the query: facet reuses the key-path mini-language", () => {
+		const file = newFile();
+		const wallType = file.createEntity("IfcWallType");
+		wallType.set("Name", "Foo");
+		const element = file.createEntity("IfcWall");
+		assignType(file, element, wallType);
+		const element2 = file.createEntity("IfcWall");
+		expectElements(subject.filterElements(file, 'IfcWall, query:"type.Name"=Foo'), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, query:class=IfcWall"), [element, element2]);
+	});
+
+	// No Python counterpart -- `filter_elements(file, "")` returns `elements` (or a
+	// fresh empty set) directly, without invoking the grammar at all.
+	test("an empty query returns the seed elements unchanged, or an empty set with no seed", () => {
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+		expect(subject.filterElements(file, "").size).toBe(0);
+		const seed = new Set([wall]);
+		expect(subject.filterElements(file, "", seed)).toBe(seed);
+	});
+
+	// No Python counterpart -- documents this port's disclosed `int`-vs-`float`
+	// divergence (this module's "Chunk 2" header comment, finding 2): plain numeric
+	// comparisons behave identically to Python either way.
+	test("numeric attribute/property comparisons work the same whether the value looks like an int or a float", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		addPset(file, element, "Qty", { Count: 5 });
+		expectElements(subject.filterElements(file, "IfcWall, Qty.Count=5"), [element]);
+		expectElements(subject.filterElements(file, 'IfcWall, Qty.Count="5.0"'), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Qty.Count>4"), [element]);
+		expectElements(subject.filterElements(file, 'IfcWall, Qty.Count>"4.5"'), [element]);
+	});
+
+	// No Python counterpart -- regression test for a bug found and fixed during code
+	// review of this port: Python's `isinstance(element_value, int)` in `compare()` is
+	// also true for `bool` (`bool` subclasses `int` in Python), so a boolean property
+	// compared against a numeric-style string value takes the *numeric* comparison
+	// branch there (`True == int("1")`), not the final `element_value == value`
+	// fallback. `compareValues` must coerce `true`/`false` to `1`/`0` before the
+	// numeric branch to match.
+	test("boolean property/attribute values compare correctly against numeric-style string values (Python bool-is-int)", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		addPset(file, element, "Foobar", { Bar: true });
+		addPset(file, element2, "Foobar", { Bar: false });
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar=1"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar=0"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar!=1"), [element2]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar>=1"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Bar<1"), [element2]);
+	});
+
+	// No Python counterpart -- documents `compareValues`'s faithfully-reproduced
+	// `TypeError` crash for a `/regex/` value compared against a non-string element
+	// value (selector.py's own `compare()` has no `try`/`except` around this specific
+	// branch, unlike the numeric-parsing branch).
+	test("a regex value against a non-string element value throws (matches Python's uncaught TypeError)", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		addPset(file, element, "Qty", { Count: 5 });
+		expect(() => subject.filterElements(file, "IfcWall, Qty.Count=/5/")).toThrow(TypeError);
 	});
 });
 
