@@ -1,21 +1,29 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// Port of `ifcopenshell/util/selector.py`'s **key-path mini-language** only (src/
-// ifcopenshell-python) -- planning/ifcopenshell-ts/research/03-python-util-inventory.md's
-// dedicated "`selector.py` -- the IFC Query Selector Syntax" section, sub-section "2.
-// Key-path grammar (`get_element_grammar`) -> `get_element_value(element, query)`". This
-// is the shared dependency both `filter_elements`'s `query:` facet and `format()`'s
-// `{{...}}` interpolation call into (both confirmed, by reading the real Python source,
-// to call `get_element_value(element, query_string)` directly -- selector.py lines 215
-// and 1180) -- so porting it first, standalone, unblocks both of those later chunks
-// without needing to guess at their own scope.
+// Port of `ifcopenshell/util/selector.py` (src/ifcopenshell-python) --
+// planning/ifcopenshell-ts/research/03-python-util-inventory.md's dedicated "`selector.py`
+// -- the IFC Query Selector Syntax" section. `selector.py` has three separate lark
+// grammars; this file currently hosts two of them, ported as two separate chunks (see
+// each grammar's own section header comment below for its own scope/findings):
 //
-// Explicitly NOT in this chunk's scope: `filter_elements` (the `filter_elements_grammar`
-// facet-based element-filtering language) and `format`/`FormatTransformer` (the
-// `format_grammar` Excel-formula-like expression language) -- both separate, later
-// chunks. `set_element_value` (selector.py's `get_element_value` inverse, which crosses
-// into `ifcopenshell.api.pset`/`ifcopenshell.api.geometry` territory) is also out of
-// scope here, for the same reason `util.unit`'s `convert_file_length_units` is
+// 1. **The key-path mini-language** (sub-section "2. Key-path grammar
+//    (`get_element_grammar`) -> `get_element_value(element, query)`", the first chunk,
+//    `parseKeyPath`/`getElementValue` below). This is the shared dependency both
+//    `filter_elements`'s `query:` facet and `format()`'s `{{...}}` interpolation call
+//    into (both confirmed, by reading the real Python source, to call
+//    `get_element_value(element, query_string)` directly -- selector.py lines 215 and
+//    1180) -- porting it first, standalone, unblocked both of those later chunks without
+//    needing to guess at their own scope.
+// 2. **`format()`** (the `format_grammar` Excel-formula-like expression/formatting
+//    language, a later chunk -- see "`format()`" section header comment below, near the
+//    end of this file, for its own full scope/findings writeup).
+//
+// Explicitly NOT in this file (yet): `filter_elements` (the `filter_elements_grammar`
+// facet-based element-filtering language) -- a separate, concurrently-developed chunk
+// (`ts/phase-5-filter-elements`) expected to add its own similarly-structured section to
+// this same file. `set_element_value` (selector.py's `get_element_value` inverse, which
+// crosses into `ifcopenshell.api.pset`/`ifcopenshell.api.geometry` territory) is also out
+// of scope here, for the same reason `util.unit`'s `convert_file_length_units` is
 // (`TODOS.md`): it needs the not-yet-ported `api` layer (Phase 6+).
 //
 // Ported in full: the `get_element_grammar` key-path grammar (hand-rolled as
@@ -140,6 +148,52 @@ import {
 	getTypes,
 } from "./element";
 import { getElementSystems, getElementZones } from "./system";
+import { formatLength, pythonRound } from "./unit";
+
+// --- shared lexer helpers (used by both this file's mini-grammars -- `get_element_grammar`'s
+// `quoted_string` and `format_grammar`'s `ESCAPED_STRING` compile to the exact same
+// common.lark `ESCAPED_STRING` rule, and both grammars `%ignore` the same `WS` pattern) ---
+
+// Shared by `parseKeyPath`'s `skipWs` and `format`'s `skipFormatWs` -- both grammars
+// `%ignore` the exact same lark `WS: /[ \t\f\r\n]/+` pattern.
+const SELECTOR_WS_RE = /[ \t\f\r\n]/;
+
+/**
+ * Scans a lark common.lark `ESCAPED_STRING` (`"..."`) starting at `query[start]` (which
+ * must be a `"`), returning the raw (still-escaped) content between the quotes and the
+ * index just past the closing quote. Both `parseKeyPath`'s `quoted_string` and
+ * `format`'s `ESCAPED_STRING` parsing call this, then apply their own grammar's
+ * unescaping afterward (both currently the same blunt "strip quotes, remove every
+ * backslash" transform -- see `unescapeQuoted` below -- but each grammar's real Python
+ * source defines its own `Transformer` method for this, so the two call sites are kept
+ * distinct rather than baking the unescape into this shared scanner).
+ */
+function scanEscapedStringBody(query: string, start: number): { content: string; end: number } {
+	const n = query.length;
+	let j = start + 1;
+	let content = "";
+	while (j < n && query[j] !== '"') {
+		if (query[j] === "\\" && j + 1 < n) {
+			content += query[j] + query[j + 1];
+			j += 2;
+		} else {
+			content += query[j];
+			j++;
+		}
+	}
+	if (j >= n) {
+		throw new Error(`Unterminated quoted string starting at position ${start}: '${query}'`);
+	}
+	return { content, end: j + 1 };
+}
+
+/** Python: `args[1:-1].replace("\\", "")` -- strip the quotes (already done by
+ * `scanEscapedStringBody`), then remove every backslash character, not just ones that
+ * formed an escape sequence. Not a proper escape-sequence unescape; reproduced verbatim,
+ * matching both grammars' real `ESCAPED_STRING`/`quoted_string` transformer methods. */
+function unescapeQuoted(content: string): string {
+	return content.replace(/\\/g, "");
+}
 
 // --- internal helpers (mirroring `util/element.ts`'s own `attrOrMissing`/`attrOrNull`/
 // `attrList` -- not exported from that file, so re-declared here rather than reaching
@@ -229,7 +283,7 @@ export function parseKeyPath(query: string): (string | RegExp)[] {
 	let i = 0;
 
 	function skipWs(): void {
-		while (i < n && /[ \t\f\r\n]/.test(query[i])) i++;
+		while (i < n && SELECTOR_WS_RE.test(query[i])) i++;
 	}
 
 	function parseKey(): string | RegExp {
@@ -239,24 +293,9 @@ export function parseKeyPath(query: string): (string | RegExp)[] {
 		}
 		const ch = query[i];
 		if (ch === '"') {
-			let j = i + 1;
-			let content = "";
-			while (j < n && query[j] !== '"') {
-				if (query[j] === "\\" && j + 1 < n) {
-					content += query[j] + query[j + 1];
-					j += 2;
-				} else {
-					content += query[j];
-					j++;
-				}
-			}
-			if (j >= n) {
-				throw new Error(`Unterminated quoted key in key-path query: '${query}'`);
-			}
-			i = j + 1;
-			// Python: `args[1:-1].replace("\\", "")` -- strip the quotes, then remove
-			// every backslash character, not just ones that formed an escape sequence.
-			return content.replace(/\\/g, "");
+			const { content, end } = scanEscapedStringBody(query, i);
+			i = end;
+			return unescapeQuoted(content);
 		}
 		if (ch === "/") {
 			let j = i + 1;
@@ -532,4 +571,982 @@ function getElementValueForKeys(initialValue: unknown, keys: readonly (string | 
 export function getElementValue(element: EntityInstance, query: string): unknown {
 	const keys = parseKeyPath(query);
 	return getElementValueForKeys(element, keys);
+}
+
+// =====================================================================================
+// --- `format()` (selector.py's third and final grammar: `format_grammar` /
+// `FormatTransformer` / `format(query, element=None)`, selector.py lines 135-419) ---
+// =====================================================================================
+//
+// Port of the Excel-formula-like expression/formatting mini-language: arithmetic
+// (`+`/`-` lowest precedence, `*`/`/` next, function calls/atoms tightest, `(...)`
+// grouping) over a function set (`round`, `number`, `int`, `metric_length`/
+// `imperial_length`, `lower`/`upper`/`title`, `concat`, `substr`, `sort`/`reverse`/
+// `join`, and `{{query_path}}` variable interpolation).
+//
+// Hand-rolled as a single-pass recursive-descent *interpreter* below (`parseExpression`/
+// `parseAddSub`/`parseMulDiv`/`parseAtom`, one function per precedence level, matching a
+// textbook precedence-climbing expression parser's shape) -- no new npm dependency, same
+// rationale as `parseKeyPath` above. Unlike `parseKeyPath` (parse-then-resolve, two
+// separate passes), this parser evaluates as it goes (no intermediate AST/tree), since
+// `element` (needed for `variable`'s `{{...}}` interpolation) must be threaded through
+// every recursive call anyway and Python's own two-stage `lark.Lark.parse()` +
+// `FormatTransformer.transform()` pipeline has no independent behavior worth preserving
+// as a separate pass in a hand-rolled port.
+//
+// `variable`'s `{{query_path}}` interpolation calls this file's own already-ported
+// `getElementValue` directly (`evalVariable` below), never reimplemented, exactly
+// matching Python's own `FormatTransformer.variable` (selector.py line ~215, confirmed
+// against the real source per this chunk's own task brief).
+//
+// *** Real Python/JS semantic divergences investigated and either matched or disclosed
+// below (not assumed) -- see each helper's own comment for the specific case: ***
+//
+// 1. **`substr`'s slicing (verified, not assumed a 1:1 `.slice()` match):** JS's
+//    `String.prototype.slice(start, end)` (no third "step" argument) was checked against
+//    Python's `str[start:end]` two-index slicing for every combination this chunk could
+//    think of -- negative start/end, out-of-range positive/negative indices on both
+//    sides, `end` omitted entirely -- and both languages clamp negative-out-of-range
+//    indices to `0` and positive-out-of-range indices to the string length identically,
+//    and both return `""` (not a swapped/wrapped range) when the effective start is at or
+//    past the effective end. The one real, disclosed divergence found: JS `.slice()`
+//    indexes by UTF-16 code unit, Python indexes by Unicode code point -- identical for
+//    every character in the Basic Multilingual Plane, diverging only for astral
+//    characters (e.g. most emoji) that Python counts as one index position but JS's
+//    `.slice()` (unlike this file's own `Array.from(string)` used elsewhere for
+//    codepoint-correct iteration, see `toPySequence` below) counts as two. Not fixed --
+//    no test in `test_selector.py` exercises non-BMP `substr` input, and `.slice()`'s
+//    UTF-16 behavior is what the rest of the JS ecosystem expects by default.
+//
+// 2. **Python's `int`/`float`-type-dependent `str()` rendering, for any value sourced
+//    from `{{...}}` rather than a literal -- broader than just `number()`:** Python's
+//    `str()`/format-spec rendering of a Python `int` (`str(5) == "5"`) differs from a
+//    `float` of the identical numeric value (`str(5.0) == "5.0"`) -- confirmed against
+//    the real Python package (`/code-review`'s finding on this chunk's own PR): e.g.
+//    `format('concat({{material.item.LayerThickness.0}})', wall)` renders `"5.0"` in
+//    real Python for a whole-number REAL attribute, but this port's equivalent call
+//    renders `"5"`. `number()`'s own Python source explicitly re-derives this
+//    distinction for a *literal string* argument (`float(x) if "." in x else int(x)`,
+//    ported faithfully below in `resolveNumberArgVal`), but for a value that arrives
+//    already-typed via `{{query_path}}` (i.e. through `getElementValue` ->
+//    `EntityInstance.getByIndex`), this port's `EntityInstance.getByIndex` collapses
+//    EXPRESS INTEGER vs. REAL into one JS `number` (a genuine, already-tracked gap --
+//    `TODOS.md`'s "`EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs.
+//    REAL" entry) -- there is no way for this port to recover which Python type a raw
+//    JS `number` came from at the point `pyStr`/`pyFloatRepr` render it. This isn't
+//    narrowly `number()`'s problem: `pyStr` (and therefore `concat`/`lower`/`upper`/
+//    `title`/`substr`, plus `opAdd`'s string-concatenation fallback) shares the exact
+//    same gap for any raw numeric `{{...}}` result, not just `resolveNumberArgVal`
+//    (`number()`'s own dedicated int-vs-float resolution, which at least gets the
+//    *literal*-argument case exactly right, unlike a bare `{{...}}` value flowing
+//    through `pyStr`, which has no int/float signal available at all and always renders
+//    via plain `Number.prototype.toString()` -- indistinguishable from Python's own
+//    `int` rendering, silently wrong for a whole-number Python `float`). Cross-referenced
+//    as a second occurrence in `TODOS.md`'s "`EntityInstance.getByIndex`/`wrapValue`
+//    collapse EXPRESS INTEGER vs. REAL" entry rather than filed as a new one, per that
+//    entry's own "worth fixing at the root before a second caller reinvents the same
+//    lossy heuristic" note -- not fixable here without that root-layer fix.
+//
+// 3. **`number`'s thousands-grouped formatting for very large/small magnitudes:** this
+//    port's `pyFloatRepr` (JS `Number.prototype.toString()`) switches to exponential
+//    notation at a different magnitude threshold than Python's `str(float)`/format-spec
+//    default rendering does (JS: roughly `>=1e21` or `<1e-6`; Python: roughly `>=1e16` or
+//    `<1e-4`) -- for a value in the (large, disclosed-not-fixed) gap between those two
+//    thresholds, this port's `number()`/arithmetic-result formatting would emit plain
+//    decimal digits where Python already switched to `"1.23e+17"`-style notation, or vice
+//    versa near the JS threshold. No test in `test_selector.py` approaches these
+//    magnitudes; matches this project's "don't add robustness beyond what's needed"
+//    convention (`unit.ts`'s own disclosed `%`-with-negative-operands divergence is the
+//    same kind of call).
+//
+// 4. **`round`'s `Decimal`-based rounding:** Python's `round()` here goes through
+//    `decimal.Decimal` (arbitrary-precision, `ROUND_HALF_EVEN`/banker's-rounding ties by
+//    default) rather than plain floats. This port uses ordinary JS `number` (IEEE-754
+//    double) arithmetic plus `unit.ts`'s own `pythonRound` (exported from there and
+//    reused directly here, not duplicated -- see that function's own doc comment) to
+//    replicate the half-even tie-break specifically, rather than pulling in an
+//    arbitrary-precision decimal library (no new npm dependency, same rationale as
+//    everywhere else in this file) -- exact for every value `test_selector.py`
+//    exercises, but not bit-exact `Decimal`-precision for pathological cases (e.g. a
+//    `nearest` requiring more significant digits than a `double` can represent exactly).
+//
+// A real Python behavior faithfully preserved, not "fixed": `imperial_length`'s Python
+// source has an `elif len(args) == 3` branch (`value, precision, suppress_zero_inches =
+// args`), but the real `imperial_length_grammar` production
+// (`"imperial_length(" expression "," NUMBER ["," ESCAPED_STRING "," ESCAPED_STRING
+// ["," boolean]] ")"`) makes a 3-argument call syntactically unreachable -- the boolean
+// can only appear in source text *after* both unit strings, never in their place -- so
+// this branch is dead code in the real Python source too (verified by working through
+// the grammar's nesting, not assumed). `opImperialLength` below keeps the equivalent
+// branch anyway, for near-verbatim fidelity with the Python source text, documented
+// in-place as unreachable via this file's own parser for the same structural reason.
+//
+// `format()`'s own Python return type hint (`-> str`) is inaccurate to its actual runtime
+// behavior (confirmed against `test_selector.py`'s own
+// `assert subject.format("{{undefined}}") is None`) -- `format` can genuinely return
+// `None` (a bare `{{...}}` variable that resolves to nothing, with no further string-
+// producing function wrapped around it) or, in principle, a raw Python `set` (excluded
+// from `start()`'s `isinstance(..., (list, tuple))` auto-join check). This port's
+// `format` is typed `unknown` to stay honest about that, rather than overclaiming `string`.
+//
+// Two real bugs found by this chunk's own adversarial `/code-review` (fixed, not shipped
+// and deferred):
+//
+// - `opRound` computed `value / nearest` unconditionally, so `round(x, 0)` (a zero
+//   rounding increment) silently produced the *string* `"NaN"` (`Infinity * 0`, then
+//   stringified) instead of erroring. Python's real `Decimal` division here raises
+//   `decimal.DivisionByZero` uncaught (`round`'s own `except InvalidOperation:` doesn't
+//   catch it either) -- verified against the real Python package. Fixed to throw the
+//   same way, rather than silently emitting a wrong-looking-but-plausible string.
+// - `opSort`'s comparator only recognized `number`/`string` elements, so `sort()` over a
+//   list of JS `boolean`s (e.g. `sort({{someBooleanListAttr}})`) threw, where Python's
+//   real `sorted([True, False, True])` succeeds (`bool` is an `int` subtype in Python, so
+//   it sorts as `0`/`1`) -- verified against the real Python package. Fixed by mapping
+//   `boolean` to `0`/`1` alongside `number` in the comparator, matching Python's bool-as-int
+//   ordering (and, as a side effect, now also handles a mixed number/boolean list the same
+//   way Python would, not just a homogeneous boolean list).
+
+/** Python's dynamic truthiness for the small set of shapes `round`/`int` apply it to
+ * (`args[0] or 0.0`) -- `null`/`undefined` (Python `None`), `false`, `0`, `""`, and an
+ * empty array/`Set` are falsy; everything else (including a non-empty string like
+ * `"0"`) is truthy, exactly like Python. */
+function pyFalsy(value: unknown): boolean {
+	if (value === null || value === undefined || value === false || value === "") return true;
+	if (typeof value === "number" && value === 0) return true;
+	if (Array.isArray(value) && value.length === 0) return true;
+	if (value instanceof Set && value.size === 0) return true;
+	return false;
+}
+
+/**
+ * Python's `str()` for the value shapes this expression interpreter actually surfaces
+ * (`None`/booleans/numbers/strings/arrays/`Set`/`EntityInstance`) -- not a fully general
+ * `repr()`/`str()` port of arbitrary Python object graphs (verified against every
+ * function `FormatTransformer` implements: none of them surface a plain dict/object at
+ * this layer, only `getElementValue`'s own already-documented shapes).
+ *
+ * The `number` branch (`pyFloatRepr`) cannot distinguish a Python `int` from a `float`
+ * of the same value for a raw JS `number` sourced via `{{...}}` -- see this section's
+ * header comment, divergence 2, for the full disclosure (this is the actual call site
+ * that gap lives at; `concat`/`lower`/`upper`/`title`/`substr`/`opAdd`'s fallback all
+ * inherit it by calling this function, not just `number()`).
+ */
+function pyStr(value: unknown): string {
+	if (value === null || value === undefined) return "None";
+	if (value === true) return "True";
+	if (value === false) return "False";
+	if (typeof value === "number") return pyFloatRepr(value);
+	if (typeof value === "string") return value;
+	if (Array.isArray(value)) return `[${value.map(pyRepr).join(", ")}]`;
+	if (value instanceof Set) return `{${[...value].map(pyRepr).join(", ")}}`;
+	if (value instanceof EntityInstance) {
+		// Narrow, disclosed approximation of Python's real `entity_instance.__str__`
+		// (a full STEP-record-style rendering) -- no test exercises a raw entity
+		// surfacing directly through `format()` (real usage always drills into an
+		// attribute/pset value first via `{{...}}`), so this is a best-effort fallback,
+		// not a verified port of `entity_instance::toString`.
+		return `#${value.id()}=${value.isA()}`;
+	}
+	return String(value);
+}
+
+/** Python's `repr()`, narrowly scoped to what can appear as an *element* of a
+ * list/`Set` that `pyStr` renders (see `pyStr`'s own disclosure) -- quotes strings
+ * Python-`repr`-style, otherwise defers to `pyStr`. Not exhaustively verified against
+ * Python's real `repr()` escaping rules (untested code path, see `pyStr`'s comment). */
+function pyRepr(value: unknown): string {
+	if (typeof value === "string") {
+		return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+	}
+	return pyStr(value);
+}
+
+/**
+ * Python's `str(float)`/`str(int)` rendering for a genuinely non-whole-number result
+ * (every caller below only reaches this for a value already known to have a fractional
+ * part -- the whole-number case is always separately formatted as `str(int(result))`,
+ * matching each Python function's own explicit int-conversion for that branch). JS's
+ * `Number.prototype.toString()` uses the same "shortest string that round-trips"
+ * algorithm as Python's `repr(float)` for ordinary-magnitude values, so this matches
+ * directly for everything `test_selector.py` exercises -- see this section's header
+ * comment, divergence 3, for the disclosed exponential-notation-threshold gap at extreme
+ * magnitudes.
+ */
+function pyFloatRepr(n: number): string {
+	return n.toString();
+}
+
+/**
+ * Python's `float(x)` constructor for the value shapes this interpreter surfaces
+ * (already-a-number, boolean -- Python's `bool` is an `int` subtype, so `float(True) ==
+ * 1.0` -- or a numeric-looking string, with the same leading/trailing-whitespace and
+ * `inf`/`nan` tolerance Python's real `float(str)` has). Throws for anything else,
+ * matching Python's own `float(x)` raising `ValueError`/`TypeError` uncaught in
+ * `subtract`/`multiply`/`divide`/`int` (only `add` catches it, see `opAdd` below).
+ */
+function pyFloat(x: unknown): number {
+	if (typeof x === "number") return x;
+	if (typeof x === "boolean") return x ? 1 : 0;
+	if (typeof x === "string") {
+		const s = x.trim();
+		if (/^[+-]?inf(inity)?$/i.test(s)) return s.startsWith("-") ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+		if (/^[+-]?nan$/i.test(s)) return Number.NaN;
+		if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) {
+			throw new Error(`format(): could not convert string to float: '${x}'`);
+		}
+		return Number(s);
+	}
+	throw new TypeError(`format(): float() argument must be a string or a number, not '${typeof x}'`);
+}
+
+/** Python's `int(str)` constructor (base 10, digits only -- no decimal point, unlike
+ * `pyFloat` above) -- used for the two spots where Python calls `int(...)` directly on a
+ * raw NUMBER-grammar token that could syntactically contain a decimal point
+ * (`imperial_length`'s `precision`, `metric_length`'s `decimal_places`), which Python's
+ * real `int("2.5")` rejects with `ValueError` -- reproduced as a thrown error here too,
+ * not smoothed over (matches this project's "faithfully preserve even crash-inducing
+ * edge cases" convention, e.g. `getElementValueForKeys`'s numeric-key-against-a-`Set`
+ * `TypeError` above). */
+function pyIntFromString(text: string): number {
+	const trimmed = text.trim();
+	if (!/^[+-]?\d+$/.test(trimmed)) {
+		throw new Error(`format(): invalid literal for int() with base 10: '${text}'`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
+/** Python's Unicode-codepoint iteration over a `str` (vs. a JS `string`'s native
+ * UTF-16-code-unit iteration) -- used by `sort`/`reverse`/`join` below, which Python's
+ * own `sorted()`/`reversed()`/`str.join()` apply to *any* iterable, including a plain
+ * `str` (iterating its characters) as well as the `list`/`set` that `{{query_path}}`
+ * interpolation actually returns in every tested case. `Array.from(string)` iterates by
+ * Unicode code point (correctly pairing surrogate pairs), matching Python's iteration
+ * unit for the vast majority of real text. */
+function toPySequence(value: unknown): unknown[] {
+	if (Array.isArray(value)) return value;
+	if (value instanceof Set) return [...value];
+	if (typeof value === "string") return Array.from(value);
+	throw new TypeError(
+		`format(): expected a list/string/set-like value here, got ${typeof value} (matches Python's own TypeError for a non-iterable argument to sorted()/reversed()/str.join())`,
+	);
+}
+
+// --- `FormatTransformer`'s individual function implementations ---
+
+function opLower(value: unknown): string {
+	return pyStr(value).toLowerCase();
+}
+
+function opUpper(value: unknown): string {
+	return pyStr(value).toUpperCase();
+}
+
+/** Python's `str.title()` -- capitalizes the first letter of each maximal run of
+ * alphabetic characters and lowercases the rest, including the well-known quirk that an
+ * apostrophe inside a word resets the "start of word" state (`"they're".title() ==
+ * "They'Re"`, not `"They're"`) -- reproduced by mirroring CPython's actual
+ * previous-character-is-alphabetic state machine, not approximated with a
+ * whitespace-only word-boundary split. */
+function pyTitle(s: string): string {
+	let result = "";
+	let prevIsAlpha = false;
+	for (const ch of s) {
+		const isAlpha = /\p{L}/u.test(ch);
+		result += isAlpha ? (prevIsAlpha ? ch.toLowerCase() : ch.toUpperCase()) : ch;
+		prevIsAlpha = isAlpha;
+	}
+	return result;
+}
+
+function opTitle(value: unknown): string {
+	return pyTitle(pyStr(value));
+}
+
+function opConcat(values: readonly unknown[]): string {
+	return values.map(pyStr).join("");
+}
+
+/**
+ * Python: `str(args[0])[int(args[1]):]` / `str(args[0])[int(args[1]):int(args[2])]` --
+ * see this section's header comment, divergence 1, for why a direct two-argument JS
+ * `.slice()` call is a verified match (not an assumption) for every case except
+ * non-BMP/astral characters.
+ */
+function opSubstr(value: unknown, start: number, end: number | null): string {
+	const s = pyStr(value);
+	return end === null ? s.slice(start) : s.slice(start, end);
+}
+
+/** Python: `sorted(args[0])`. Homogeneous numeric/string comparison, plus `boolean`
+ * treated as a number (`0`/`1`) -- matching Python's own `bool` being an `int` subtype
+ * (`sorted([True, False, True]) == [False, True, True]`, and a mixed `bool`/`int` list
+ * sorts the same way too, not just a homogeneous `bool` list) -- otherwise throws,
+ * matching Python's own `<` requiring mutually-comparable operands (same
+ * TypeError-preserving philosophy as `toPySequence`). A real bug this chunk's own
+ * `/code-review` caught: an earlier version of this comparator only recognized `number`/
+ * `string`, so `sort()` over a `boolean` list threw where Python's real `sorted()`
+ * succeeds -- fixed here, not shipped and deferred. */
+function opSort(value: unknown): unknown[] {
+	const items = toPySequence(value);
+	const asSortableNumber = (x: unknown): number | null => {
+		if (typeof x === "number") return x;
+		if (typeof x === "boolean") return x ? 1 : 0;
+		return null;
+	};
+	return [...items].sort((a, b) => {
+		const an = asSortableNumber(a);
+		const bn = asSortableNumber(b);
+		if (an !== null && bn !== null) return an - bn;
+		if (typeof a === "string" && typeof b === "string") return a < b ? -1 : a > b ? 1 : 0;
+		throw new TypeError(
+			"format(): sort() requires a list of mutually comparable strings or numbers/booleans (matches Python's sorted() TypeError for mixed/uncomparable element types)",
+		);
+	});
+}
+
+/** Python: `list(reversed(args[0]))`. */
+function opReverse(value: unknown): unknown[] {
+	return [...toPySequence(value)].reverse();
+}
+
+/** Python: `args[0].join(args[1])` -- `str.join` requires every element already be a
+ * `str`, raising `TypeError` otherwise; reproduced as an explicit check rather than
+ * silently stringifying non-string elements the way JS's own `Array.prototype.join`
+ * would. */
+function opJoin(separator: string, value: unknown): string {
+	const items = toPySequence(value);
+	for (const item of items) {
+		if (typeof item !== "string") {
+			throw new TypeError(
+				`format(): join() requires every item to be a string (matches Python's str.join() TypeError) -- got ${typeof item}`,
+			);
+		}
+	}
+	return items.join(separator);
+}
+
+function opInt(rawValue: unknown): string {
+	const input = rawValue === "None" || pyFalsy(rawValue) ? 0 : rawValue;
+	return String(Math.trunc(pyFloat(input)));
+}
+
+class DecimalInvalidOperation extends Error {}
+
+/** Python's `decimal.Decimal(x)` constructor, narrowly for `round`'s own use --
+ * throws `DecimalInvalidOperation` for a non-numeric *string* (Python's real
+ * `decimal.InvalidOperation`, which `round`'s own `except InvalidOperation:` catches and
+ * falls back to returning the value unchanged), but a plain (uncaught, propagating)
+ * `TypeError` for a value of a type Python's real `Decimal(...)` would reject outright
+ * (e.g. a list/`EntityInstance`) -- `round`'s Python source only catches
+ * `InvalidOperation`, not `TypeError`, so that second case is a genuine, faithfully
+ * preserved crash, not smoothed over. */
+function pyDecimalFromValue(x: unknown): number {
+	if (typeof x === "number") return x;
+	if (typeof x === "boolean") return x ? 1 : 0;
+	if (typeof x === "string") {
+		const s = x.trim();
+		if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) {
+			throw new DecimalInvalidOperation(`format(): could not convert string to Decimal: '${x}'`);
+		}
+		return Number(s);
+	}
+	throw new TypeError(
+		`format(): round()'s expression evaluated to a non-numeric, non-string value (${typeof x}) that Python's real Decimal(...) constructor would reject with an uncaught TypeError here, not the InvalidOperation round() specifically catches. Not stubbed or smoothed over.`,
+	);
+}
+
+/**
+ * Python: `round(value, nearest)` -- rounds `value` to the nearest multiple of
+ * `nearest`, half-even ties, via `Decimal`. Non-numeric input (e.g. a text property, or
+ * a value with a unit suffix like `"12.5 m"`) is meaningless to round, so it's returned
+ * unchanged rather than crashing the whole expression (`#6776`, ported verbatim from the
+ * Python source's own comment to that effect).
+ *
+ * A real bug this chunk's own `/code-review` caught: an earlier version of this function
+ * always divided by `nearest` unconditionally, so `round(x, 0)` (a zero rounding
+ * increment) silently produced the *string* `"NaN"` (`value / 0` -> `Infinity`, times
+ * `nearest` (`0`) -> `NaN`, then stringified) instead of erroring. Python's real
+ * `Decimal` division by a zero `nearest` raises `decimal.DivisionByZero` uncaught
+ * (`round`'s own `except InvalidOperation:` doesn't catch it either, only its sibling
+ * `pyDecimalFromValue`-equivalent parse failure) -- verified against the real Python
+ * package. Fixed below to throw the same way, rather than silently emitting a
+ * wrong-looking-but-plausible string.
+ */
+function opRound(rawValue: unknown, nearestText: string): unknown {
+	const input = rawValue === "None" || pyFalsy(rawValue) ? 0 : rawValue;
+	let value: number;
+	try {
+		value = pyDecimalFromValue(input);
+	} catch (e) {
+		if (e instanceof DecimalInvalidOperation) return rawValue;
+		throw e;
+	}
+	const nearest = Number(nearestText);
+	if (nearest === 0) {
+		throw new Error(
+			"format(): round()'s second argument (the rounding increment) is 0 -- Python's real Decimal division here raises decimal.DivisionByZero uncaught, not smoothed over into a silent \"NaN\" string.",
+		);
+	}
+	const result = pythonRound(value / nearest) * nearest;
+	return Number.isInteger(nearest) ? String(Math.trunc(result)) : pyFloatRepr(result);
+}
+
+/** Python: `float(left) if left != "None" and left is not None else <default>` -- the
+ * shared operand-resolution rule every one of `add`/`subtract`/`multiply`/`divide` opens
+ * with (only the fallback default differs: `0.0` for every operand except `divide`'s
+ * right-hand side, which defaults to `1.0`). */
+function toArithmeticOperand(v: unknown, defaultVal: number): number {
+	if (v === null || v === undefined || v === "None") return defaultVal;
+	return pyFloat(v);
+}
+
+function formatArithmeticResult(result: number): string {
+	return result % 1 === 0 ? String(Math.trunc(result)) : pyFloatRepr(result);
+}
+
+/** Python: `add` -- the only one of the four arithmetic ops with a `try`/`except`
+ * fallback: if either operand can't convert to `float` (and isn't `None`/`"None"`),
+ * falls back to plain string concatenation (`str(left) + str(right)`) instead of
+ * crashing -- `subtract`/`multiply`/`divide` have no such fallback in the real Python
+ * source, so `opSubtract`/`opMultiply`/`opDivide` below let a bad operand throw
+ * uncaught, matching that asymmetry exactly (not "fixed" to be consistent). */
+function opAdd(left: unknown, right: unknown): string {
+	try {
+		const l = toArithmeticOperand(left, 0);
+		const r = toArithmeticOperand(right, 0);
+		return formatArithmeticResult(l + r);
+	} catch {
+		return pyStr(left) + pyStr(right);
+	}
+}
+
+function opSubtract(left: unknown, right: unknown): string {
+	return formatArithmeticResult(toArithmeticOperand(left, 0) - toArithmeticOperand(right, 0));
+}
+
+function opMultiply(left: unknown, right: unknown): string {
+	return formatArithmeticResult(toArithmeticOperand(left, 0) * toArithmeticOperand(right, 0));
+}
+
+/** Python: `divide` -- `right`'s missing/`None`/`"None"` default is `1.0` (not `0.0`,
+ * unlike every other arithmetic op), and an actual-zero divisor short-circuits to the
+ * literal string `"inf"` rather than computing (and formatting) a real `Infinity`. */
+function opDivide(left: unknown, right: unknown): string {
+	const l = toArithmeticOperand(left, 0);
+	const r = toArithmeticOperand(right, 1);
+	if (r === 0) return "inf";
+	return formatArithmeticResult(l / r);
+}
+
+/** Python's `"{:,}".format(x)` thousands-grouping of an already-rendered number's
+ * *text* (inserts `,` every 3 digits of the integer part, from the right, leaving any
+ * decimal-point-and-fraction suffix untouched) -- operates on text, not the numeric
+ * value, since `number()` below needs to apply this to text that's already had its
+ * decimal-point rendering fixed up (see `formatNumber`). */
+function groupThousands(numText: string): string {
+	const negative = numText.startsWith("-");
+	const body = negative ? numText.slice(1) : numText;
+	const dotIdx = body.indexOf(".");
+	const intPart = dotIdx === -1 ? body : body.slice(0, dotIdx);
+	const fracPart = dotIdx === -1 ? "" : body.slice(dotIdx);
+	const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+	return (negative ? "-" : "") + grouped + fracPart;
+}
+
+/**
+ * Python: `arg_val = float(x) if "." in x else int(x)` (when `x` is a `str`) -- resolves
+ * `number()`'s first argument to a numeric value plus whether Python would treat it as
+ * an `int` (no trailing `.0`, no decimal point in `"{:,}".format(...)`'s output) or a
+ * `float`. For a non-string input (i.e. sourced from `{{query_path}}` rather than a
+ * literal), see this section's header comment, divergence 2, for the disclosed
+ * `Number.isInteger` heuristic and its cross-reference to `TODOS.md`.
+ */
+function resolveNumberArgVal(raw: unknown): { value: number; isInt: boolean } {
+	if (typeof raw === "string") {
+		return raw.includes(".") ? { value: pyFloat(raw), isInt: false } : { value: pyIntFromString(raw), isInt: true };
+	}
+	if (typeof raw === "boolean") return { value: raw ? 1 : 0, isInt: true };
+	if (typeof raw === "number") return { value: raw, isInt: Number.isInteger(raw) };
+	throw new TypeError(`format(): number() requires a numeric value, got ${typeof raw}`);
+}
+
+function pyFormatComma(value: number, isInt: boolean): string {
+	return groupThousands(isInt ? String(Math.trunc(value)) : pyFloatRepr(value));
+}
+
+/**
+ * Python: `number(value[, decimal_separator[, thousands_separator]])`. With neither
+ * separator, behaves like `"{:,}".format(arg_val)` (Python's default thousands-grouped
+ * rendering). With only a decimal separator, behaves like `"{}".format(arg_val).replace(
+ * ".", decimal_separator)` (no thousands grouping at all in this form). With both,
+ * builds the thousands-grouped form and remaps `.`/`,` to the given separators via a
+ * `"*"` placeholder swap (ported verbatim from the Python source's own three-step
+ * `.replace` chain, not simplified, since simplifying it risks silently changing
+ * behavior for an edge case like a `decimal_separator` that's itself `","` or a
+ * `thousands_separator` that's itself `"."`).
+ */
+function formatNumber(rawValue: unknown, decimalSep: string | undefined, thousandsSep: string | undefined): string {
+	const { value, isInt } = resolveNumberArgVal(rawValue);
+	if (thousandsSep) {
+		const grouped = pyFormatComma(value, isInt);
+		return grouped
+			.replace(/\./g, "*")
+			.replace(/,/g, thousandsSep)
+			.replace(/\*/g, decimalSep as string);
+	}
+	if (decimalSep) {
+		const plain = isInt ? String(Math.trunc(value)) : pyFloatRepr(value);
+		return plain.replace(/\./g, decimalSep);
+	}
+	return pyFormatComma(value, isInt);
+}
+
+/** Python: `metric_length(value, precision, decimal_places)` -> `ifcopenshell.util.unit
+ * .format_length(float(value), float(precision), int(decimal_places), unit_system=
+ * "metric")` -- direct passthrough to this file's already-ported `formatLength`
+ * (`util/unit.ts`), which implements the real rounding/formatting logic; this function
+ * only resolves the three raw arguments the same way Python does. */
+function opMetricLength(value: unknown, precisionText: string, decimalPlacesText: string): string {
+	return formatLength(pyFloat(value), Number(precisionText), pyIntFromString(decimalPlacesText), true, "metric");
+}
+
+/**
+ * Python: `imperial_length(value, precision[, input_unit, output_unit[,
+ * suppress_zero_inches]])` -- see this section's header comment for the dead
+ * `len(args) == 3` branch note (kept here for near-verbatim fidelity with the Python
+ * source, unreachable via this file's own parser for the same grammar-structural reason
+ * it's unreachable in Python). `rawArgsIn` is the parser's raw, already-filtered
+ * (no placeholders) argument list in source order, mirroring Python's own `args =
+ * list(filter(lambda x: x is not None, args))` line.
+ */
+function opImperialLength(rawArgsIn: readonly unknown[]): string {
+	const rawArgs = rawArgsIn.filter((a) => a !== null && a !== undefined);
+	let value: unknown;
+	let precisionText: unknown;
+	let inputUnitRaw: unknown;
+	let outputUnitRaw: unknown;
+	let suppressRaw: unknown;
+	let inputUnit: "foot" | "inch";
+	let outputUnit: "foot" | "inch";
+	let suppressZeroInches: boolean;
+
+	if (rawArgs.length === 2) {
+		[value, precisionText] = rawArgs;
+		inputUnit = "foot";
+		outputUnit = "foot";
+		suppressZeroInches = true;
+	} else if (rawArgs.length === 3) {
+		[value, precisionText, suppressRaw] = rawArgs;
+		inputUnit = "foot";
+		outputUnit = "foot";
+		suppressZeroInches = Boolean(suppressRaw);
+	} else if (rawArgs.length === 4) {
+		[value, precisionText, inputUnitRaw, outputUnitRaw] = rawArgs;
+		inputUnit = inputUnitRaw === "inch" ? "inch" : "foot";
+		outputUnit = outputUnitRaw === "inch" ? "inch" : "foot";
+		suppressZeroInches = true;
+	} else {
+		[value, precisionText, inputUnitRaw, outputUnitRaw, suppressRaw] = rawArgs;
+		inputUnit = inputUnitRaw === "inch" ? "inch" : "foot";
+		outputUnit = outputUnitRaw === "inch" ? "inch" : "foot";
+		suppressZeroInches = suppressRaw === null || suppressRaw === undefined ? false : Boolean(suppressRaw);
+	}
+
+	return formatLength(
+		pyFloat(value),
+		pyIntFromString(precisionText as string),
+		2,
+		suppressZeroInches,
+		"imperial",
+		inputUnit,
+		outputUnit,
+	);
+}
+
+/** Python: `FormatTransformer.variable`/`query_path`. Calls this file's own
+ * already-ported `getElementValue` directly (never reimplemented) -- if `element` is
+ * falsy (no element context given to `format()`) or `getElementValue` throws for any
+ * reason, silently returns `null` (Python: an *implicit* `None` return from both the
+ * "no element" early-out and the bare `except: pass`), matching Python's own
+ * bare-except swallow-everything behavior verbatim, not narrowed to a specific error
+ * type. */
+function evalVariable(element: EntityInstance | null, queryPath: string): unknown {
+	if (!element) return null;
+	try {
+		return getElementValue(element, queryPath);
+	} catch {
+		return null;
+	}
+}
+
+// --- the hand-rolled recursive-descent expression parser/interpreter ---
+
+interface FormatParseState {
+	readonly query: string;
+	i: number;
+	readonly element: EntityInstance | null;
+}
+
+function skipFormatWs(state: FormatParseState): void {
+	const { query } = state;
+	while (state.i < query.length && SELECTOR_WS_RE.test(query[state.i])) state.i++;
+}
+
+function expectChar(state: FormatParseState, ch: string): void {
+	skipFormatWs(state);
+	if (state.query[state.i] !== ch) {
+		throw new Error(`format(): expected '${ch}' at position ${state.i} in expression: '${state.query}'`);
+	}
+	state.i++;
+}
+
+function expectComma(state: FormatParseState): void {
+	expectChar(state, ",");
+}
+
+function peekChar(state: FormatParseState): string | undefined {
+	skipFormatWs(state);
+	return state.query[state.i];
+}
+
+/** `NUMBER` (unsigned -- no leading `+`/`-`, unlike `SIGNED_NUMBER`): used for
+ * `round`/`metric_length`/`imperial_length`'s NUMBER-typed slots, which the real grammar
+ * types as plain `NUMBER`, not `SIGNED_NUMBER` -- a leading sign there is a genuine parse
+ * error in Python too (not tested, but a faithful grammar-structural distinction, kept
+ * rather than loosened to accept a sign "just in case"). */
+function parseUnsignedNumberLiteral(state: FormatParseState): string {
+	skipFormatWs(state);
+	const m = /^(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?/.exec(state.query.slice(state.i));
+	if (!m) {
+		throw new Error(`format(): expected a number at position ${state.i} in expression: '${state.query}'`);
+	}
+	state.i += m[0].length;
+	return m[0];
+}
+
+/** `SIGNED_INT` (`substr`'s two slots) -- digits only, no decimal point, optional
+ * leading sign. */
+function parseSignedIntLiteral(state: FormatParseState): number {
+	skipFormatWs(state);
+	const m = /^[+-]?\d+/.exec(state.query.slice(state.i));
+	if (!m) {
+		throw new Error(`format(): expected a signed integer at position ${state.i} in expression: '${state.query}'`);
+	}
+	state.i += m[0].length;
+	return Number.parseInt(m[0], 10);
+}
+
+/** `TRUE`/`FALSE` (`imperial_length`'s optional 5th argument) -- exactly the six real
+ * grammar alternatives (`"true"|"True"|"TRUE"`/`"false"|"False"|"FALSE"`), not a generic
+ * case-insensitive match. */
+function parseBooleanLiteral(state: FormatParseState): boolean {
+	skipFormatWs(state);
+	const literals: readonly [string, boolean][] = [
+		["true", true],
+		["True", true],
+		["TRUE", true],
+		["false", false],
+		["False", false],
+		["FALSE", false],
+	];
+	for (const [text, value] of literals) {
+		if (state.query.startsWith(text, state.i)) {
+			state.i += text.length;
+			return value;
+		}
+	}
+	throw new Error(
+		`format(): expected a boolean literal (true/True/TRUE/false/False/FALSE) at position ${state.i}: '${state.query}'`,
+	);
+}
+
+function parseEscapedStringAtom(state: FormatParseState): string {
+	skipFormatWs(state);
+	if (state.query[state.i] !== '"') {
+		throw new Error(`format(): expected a quoted string at position ${state.i} in expression: '${state.query}'`);
+	}
+	const { content, end } = scanEscapedStringBody(state.query, state.i);
+	state.i = end;
+	return unescapeQuoted(content);
+}
+
+/** `"{{" query_path "}}"` -- `query_path: /[^}]+/` (one-or-more, so an empty `{{}}` is a
+ * real grammar parse error, not an empty-string variable, mirrored below the same way
+ * `parseKeyPath`'s empty-regex-key check mirrors the key-path grammar's own `+`). */
+function parseVariableAtom(state: FormatParseState): unknown {
+	state.i += 2; // consume "{{"
+	const { query } = state;
+	const n = query.length;
+	const contentStart = state.i;
+	while (state.i < n && query[state.i] !== "}") state.i++;
+	if (state.i === contentStart) {
+		throw new Error(`format(): empty variable interpolation '{{}}' is not allowed: '${query}'`);
+	}
+	if (state.i >= n || query[state.i + 1] !== "}") {
+		throw new Error(`format(): unterminated variable interpolation (expected '}}') at position ${state.i}: '${query}'`);
+	}
+	const queryPath = query.slice(contentStart, state.i).trim();
+	state.i += 2; // consume "}}"
+	return evalVariable(state.element, queryPath);
+}
+
+/** `function: ... | "(" expression ")"` plus every zero/one-`expression`-argument
+ * function (`lower`/`upper`/`title`/`sort`/`reverse`/`int`) -- the `"name("` prefix is
+ * already consumed by `parseAtom`'s dispatch table before calling this. */
+function parseSingleExprCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	expectChar(state, ")");
+	return value;
+}
+
+function parseRoundCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	expectComma(state);
+	const nearestText = parseUnsignedNumberLiteral(state);
+	expectChar(state, ")");
+	return opRound(value, nearestText);
+}
+
+function parseNumberCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	let decimalSep: string | undefined;
+	let thousandsSep: string | undefined;
+	if (peekChar(state) === ",") {
+		state.i++;
+		decimalSep = parseEscapedStringAtom(state);
+		if (peekChar(state) === ",") {
+			state.i++;
+			thousandsSep = parseEscapedStringAtom(state);
+		}
+	}
+	expectChar(state, ")");
+	return formatNumber(value, decimalSep, thousandsSep);
+}
+
+function parseMetricLengthCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	expectComma(state);
+	const precisionText = parseUnsignedNumberLiteral(state);
+	expectComma(state);
+	const decimalPlacesText = parseUnsignedNumberLiteral(state);
+	expectChar(state, ")");
+	return opMetricLength(value, precisionText, decimalPlacesText);
+}
+
+function parseImperialLengthCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	expectComma(state);
+	const precisionText = parseUnsignedNumberLiteral(state);
+	const rawArgs: unknown[] = [value, precisionText];
+	if (peekChar(state) === ",") {
+		state.i++;
+		const inputUnit = parseEscapedStringAtom(state);
+		expectComma(state);
+		const outputUnit = parseEscapedStringAtom(state);
+		rawArgs.push(inputUnit, outputUnit);
+		if (peekChar(state) === ",") {
+			state.i++;
+			rawArgs.push(parseBooleanLiteral(state));
+		}
+	}
+	expectChar(state, ")");
+	return opImperialLength(rawArgs);
+}
+
+function parseConcatCall(state: FormatParseState): unknown {
+	const values: unknown[] = [parseExpression(state)];
+	while (peekChar(state) === ",") {
+		state.i++;
+		values.push(parseExpression(state));
+	}
+	expectChar(state, ")");
+	return opConcat(values);
+}
+
+function parseSubstrCall(state: FormatParseState): unknown {
+	const value = parseExpression(state);
+	expectComma(state);
+	const start = parseSignedIntLiteral(state);
+	let end: number | null = null;
+	if (peekChar(state) === ",") {
+		state.i++;
+		end = parseSignedIntLiteral(state);
+	}
+	expectChar(state, ")");
+	return opSubstr(value, start, end);
+}
+
+function parseJoinCall(state: FormatParseState): unknown {
+	const separator = parseEscapedStringAtom(state);
+	expectComma(state);
+	const value = parseExpression(state);
+	expectChar(state, ")");
+	return opJoin(separator, value);
+}
+
+/** Dispatch table for `parseAtom`'s named-function-call branch -- each key is exactly
+ * the real grammar's own `"name(" ` literal token text, so a plain `startsWith` prefix
+ * check at the current position is sufficient: none of these names is a prefix of
+ * another (checked directly against `format_grammar`'s own function list), and every one
+ * is always immediately followed by `"("`. */
+const FORMAT_FUNCTION_CALLS: readonly [string, (state: FormatParseState) => unknown][] = [
+	["round(", parseRoundCall],
+	["number(", parseNumberCall],
+	["int(", parseSingleExprCall],
+	["metric_length(", parseMetricLengthCall],
+	["imperial_length(", parseImperialLengthCall],
+	["lower(", parseSingleExprCall],
+	["upper(", parseSingleExprCall],
+	["title(", parseSingleExprCall],
+	["concat(", parseConcatCall],
+	["substr(", parseSubstrCall],
+	["sort(", parseSingleExprCall],
+	["reverse(", parseSingleExprCall],
+	["join(", parseJoinCall],
+];
+
+// Post-processing applied to a handful of the single-`expression`-argument functions
+// above (`int`/`lower`/`upper`/`title`/`sort`/`reverse` all share `parseSingleExprCall`
+// for *parsing*, since they're syntactically identical -- this table supplies each
+// one's own *evaluation*, matching `FormatTransformer`'s own per-rule methods).
+const FORMAT_SINGLE_ARG_OPS: Readonly<Record<string, (value: unknown) => unknown>> = {
+	"int(": opInt,
+	"lower(": opLower,
+	"upper(": opUpper,
+	"title(": opTitle,
+	"sort(": opSort,
+	"reverse(": opReverse,
+};
+
+/** `function: round | number | int | format_length | lower | upper | title | concat |
+ * substr | sort | reverse | join | variable | ESCAPED_STRING | SIGNED_NUMBER | "("
+ * expression ")"` -- the tightest-binding precedence level (atoms and function calls).
+ * `format_length: metric_length | imperial_length` has no separate representation here
+ * since its own `FormatTransformer.format_length` method is a pure passthrough
+ * (`return args[0]`) -- `metric_length(`/`imperial_length(` are dispatched directly,
+ * observably identical. */
+function parseAtom(state: FormatParseState): unknown {
+	skipFormatWs(state);
+	const { query } = state;
+	const n = query.length;
+	if (state.i >= n) {
+		throw new Error(`format(): expected a value at position ${state.i} in expression: '${query}'`);
+	}
+
+	if (query.startsWith("{{", state.i)) {
+		return parseVariableAtom(state);
+	}
+	if (query[state.i] === '"') {
+		return parseEscapedStringAtom(state);
+	}
+	if (query[state.i] === "(") {
+		state.i++;
+		const value = parseExpression(state);
+		expectChar(state, ")");
+		return value;
+	}
+
+	for (const [prefix, parseCall] of FORMAT_FUNCTION_CALLS) {
+		if (query.startsWith(prefix, state.i)) {
+			state.i += prefix.length;
+			const result = parseCall(state);
+			const singleArgOp = FORMAT_SINGLE_ARG_OPS[prefix];
+			return singleArgOp ? singleArgOp(result) : result;
+		}
+	}
+
+	// SIGNED_NUMBER: ["+"|"-"] NUMBER -- kept as its raw source text (a plain JS
+	// string), matching Python's own runtime shape here (no `SIGNED_NUMBER`
+	// `Transformer` method is defined, so it stays a `lark.Token`, which behaves as a
+	// plain `str` everywhere `FormatTransformer` uses it -- see this section's header
+	// comment).
+	const numberMatch = /^[+-]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?/.exec(query.slice(state.i));
+	if (numberMatch) {
+		state.i += numberMatch[0].length;
+		return numberMatch[0];
+	}
+
+	throw new Error(
+		`format(): unexpected character '${query[state.i]}' at position ${state.i} in expression: '${query}'`,
+	);
+}
+
+/** `?mul_div: function | mul_div "*" function -> multiply | mul_div "/" function ->
+ * divide` -- left-associative, tighter than `+`/`-`. */
+function parseMulDiv(state: FormatParseState): unknown {
+	let left = parseAtom(state);
+	for (;;) {
+		const op = peekChar(state);
+		if (op === "*") {
+			state.i++;
+			left = opMultiply(left, parseAtom(state));
+		} else if (op === "/") {
+			state.i++;
+			left = opDivide(left, parseAtom(state));
+		} else {
+			return left;
+		}
+	}
+}
+
+/** `?add_sub: mul_div | add_sub "+" mul_div -> add | add_sub "-" mul_div -> subtract` --
+ * left-associative, the loosest-binding level. */
+function parseAddSub(state: FormatParseState): unknown {
+	let left = parseMulDiv(state);
+	for (;;) {
+		const op = peekChar(state);
+		if (op === "+") {
+			state.i++;
+			left = opAdd(left, parseMulDiv(state));
+		} else if (op === "-") {
+			state.i++;
+			left = opSubtract(left, parseMulDiv(state));
+		} else {
+			return left;
+		}
+	}
+}
+
+function parseExpression(state: FormatParseState): unknown {
+	return parseAddSub(state);
+}
+
+/** Python: `FormatTransformer.start` -- if the whole expression's final value is a
+ * (real, JS) array (Python: `list`/`tuple` -- deliberately *not* a `Set`, matching
+ * Python's own `isinstance(args[0], (list, tuple))` excluding `set`), auto-joins it with
+ * `", "` (e.g. a bare `{{materials.Name}}` with no `sort`/`reverse`/`join` wrapped
+ * around it); otherwise passes the value through unchanged (which, per this section's
+ * header comment, can genuinely be `null`). */
+function finalizeFormatResult(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return opJoin(", ", value);
+	}
+	return value;
+}
+
+/**
+ * Python: `format(query, element=None) -> str`.
+ *
+ * Formats a query string with optional element context for variable substitution. See
+ * this section's header comment for the full function set, the grammar's operator
+ * precedence, and every disclosed Python/JS semantic divergence investigated while
+ * porting this.
+ *
+ * :param query: Format query string (can include `{{variable}}` placeholders).
+ * :param element: Optional IFC element for variable substitution.
+ * :returns: The formatted result -- almost always a `string`, but see this section's
+ *     header comment for the (real, tested) case where this can be `null`.
+ *
+ * @example
+ * format("{{z}} / 2", element) // substitutes element's z value
+ * format('imperial_length({{z}} / 2, 4)', element) // uses z in a calculation
+ */
+export function format(query: string, element: EntityInstance | null = null): unknown {
+	const state: FormatParseState = { query, i: 0, element };
+	const result = parseExpression(state);
+	skipFormatWs(state);
+	if (state.i < state.query.length) {
+		throw new Error(`format(): unexpected trailing content at position ${state.i} in expression: '${query}'`);
+	}
+	return finalizeFormatResult(result);
 }

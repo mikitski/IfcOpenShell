@@ -969,14 +969,19 @@ export function calculateUnitScale(ifcFile: IfcFile, unitType = "LENGTHUNIT"): n
 // --- formatLength ---
 
 /**
- * @internal Python's `round()` for a `float` uses round-half-to-even ("banker's
- * rounding") ties, unlike JS's `Math.round` (always rounds a `.5` tie toward
- * +Infinity) -- `format_length`'s whole purpose is exact, human-readable rounding, so
- * this replicates Python's tie-breaking rule (within a small floating-point epsilon,
+ * Python's `round()` for a `float` uses round-half-to-even ("banker's rounding")
+ * ties, unlike JS's `Math.round` (always rounds a `.5` tie toward +Infinity) --
+ * `format_length`'s whole purpose is exact, human-readable rounding, so this
+ * replicates Python's tie-breaking rule (within a small floating-point epsilon,
  * since an exact `.5` tie is itself rarely bit-exact after prior float arithmetic)
  * rather than accepting `Math.round`'s different behavior on that one edge case.
+ *
+ * Exported (not `@internal`) because `util/selector.ts`'s `round()` format function
+ * needs the exact same half-even tie-break (it goes through Python's `Decimal`, which
+ * defaults to the same `ROUND_HALF_EVEN` rule) -- reused directly rather than
+ * duplicated, per `/code-review`'s finding on that chunk's PR.
  */
-function pythonRound(x: number): number {
+export function pythonRound(x: number): number {
 	const floor = Math.floor(x);
 	const diff = x - floor;
 	const EPSILON = 1e-9;

@@ -740,10 +740,27 @@ folded into the entry above.
 review of that chunk's PR. See `util/migrator.ts`'s own header comment (finding 2) for the original
 disclosure and the two exact call sites using the lossy heuristic.
 
+**Second occurrence (2026-09-11):** Phase 3's `util.selector` `format()` chunk (`src/util/selector.ts`)
+hit the exact same gap, and more broadly than just `number()`: Python's `str()`/format-spec rendering
+of a Python `int` (`5` -> `"5"`) differs from a `float` (`5.0` -> `"5.0"`) of the same value, confirmed
+against the real Python package (`format('concat({{material.item.LayerThickness.0}})', wall)` renders
+`"5.0"` in real Python for a whole-number REAL attribute, `"5"` in this port). `number()`'s own
+`resolveNumberArgVal` at least gets a *literal* argument's int/float-ness exactly right (Python's own
+`float(x) if "." in x else int(x)` re-derivation, ported faithfully), falling back to the lossy
+`Number.isInteger(...)` heuristic only for a `{{...}}`-sourced value — but the file's shared `pyStr`
+helper (backing `concat`/`lower`/`upper`/`title`/`substr`, plus `opAdd`'s string-concatenation
+fallback) has *no* int/float signal available at all for a raw JS `number` and always renders via
+plain `Number.prototype.toString()`, silently indistinguishable from Python's own `int` rendering.
+Disclosed in that file's own "format()" section header comment (divergence 2) and its own test file.
+This is exactly the "second caller reinvents the same lossy heuristic" scenario this entry already
+called out below — still not fixed at the root, now two independent call sites (one of them itself
+multiple internal callers) depend on it.
+
 **Depends on / blocked by:** Nothing blocking; independent design work in `entityInstance.ts` (Phase
 2, already-shipped code). Low practical impact today (only `util/migrator.ts`'s two retyping checks
+and `util/selector.ts`'s `format()` — both its `number()` function and its shared `pyStr` helper —
 currently depend on this distinction, and only for whole-number REAL literals specifically), but worth
-fixing at the root before a second caller reinvents the same lossy heuristic.
+fixing at the root now that a second caller has reinvented the same lossy heuristic.
 
 ---
 
