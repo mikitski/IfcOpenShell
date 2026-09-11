@@ -883,3 +883,45 @@ the concrete "what would landing this actually unblock" writeup that finding did
 **Depends on / blocked by:** Nothing blocking -- independent N-API shim work, not blocking any
 currently-planned Phase 3 `util` chunk (confirmed no other not-yet-ported `util` module needs
 `spf_header.file_description()` either, by the same reasoning `util/file.ts`'s own finding used).
+
+---
+
+### `ci-ifcopenshell-ts.yml`'s macOS x64 leg was retired -- Homebrew no longer supports installing under Rosetta emulation
+
+**What:** `ci-ifcopenshell-ts.yml`'s `build-and-test` matrix used to cross-compile a macOS x64 build
+of the native addon from the `macos-14` (Apple Silicon) runner, via a separate x86_64 Homebrew
+installed under `/usr/local` (`arch -x86_64 /bin/bash -c "$(curl -fsSL .../install.sh)"`) -- the same
+pattern `build_osx.yml` (the main C++ core CI) uses. On 2026-09-11 this step began failing
+consistently (8+ times across 4 unrelated PRs over several hours) with:
+```
+Homebrew on macOS is only supported on Apple Silicon processors!
+```
+Initially misdiagnosed as a transient network flake (dies in under a minute, before any log the
+diagnostic-comment step captures, while every other CI check stayed green) and retried repeatedly,
+including with a 3-attempt retry-loop fix -- none of that helped, because it isn't transient: Homebrew's
+installer script (fetched unpinned from `HEAD` every run) now unconditionally refuses to install when
+running as an x86_64 process on Apple Silicon hardware (i.e. under Rosetta emulation), which is exactly
+what `arch -x86_64` does. Confirmed via the actual Actions UI log (the orchestrating session's own
+sandbox couldn't reach GitHub's log-blob-storage host to see this directly -- the user pasted it).
+
+**Fix applied:** Retired the `macosCrossCompileX64` matrix entry entirely (user-approved, given
+GitHub's native macOS Intel (`macos-13`) runners are separately scarce/deprioritized and can queue
+indefinitely, and the industry has broadly moved off x86_64 Mac hardware). `ci-ifcopenshell-ts.yml`'s
+macOS coverage is now arm64-only.
+
+**Not fixed here, a separate, bigger-blast-radius decision:** `build_osx.yml` (the main C++ core
+project's own CI, not just this TS port) uses the identical `arch -x86_64` + Homebrew-installer
+pattern and is presumably now equally broken -- confirmed only by reading its source (grep), not by
+observing an actual failed run of it. Deliberately not touched by this fix: that workflow's blast
+radius (the whole C++ core project, not just the TS port) and ownership are outside this Phase's
+scope. Worth a maintainer decision on the same question (retire macOS x64 there too, or find another
+fix -- e.g. `vcpkg`'s `x64-osx` triplet, matching how this same `ci-ifcopenshell-ts.yml` already
+handles both Windows architectures without Homebrew at all).
+
+**Context:** Surfaced 2026-09-11 while landing Phase 3/4/5 chunks (PRs #43/#44/#45); root-caused with
+the user's help after the orchestrating session's own sandbox couldn't fetch the real CI logs (blocked
+by a network proxy allowlist on the GitHub Actions log-blob-storage host).
+
+**Depends on / blocked by:** Nothing -- this specific fix (retiring the leg) is independent and
+already applied. The `build_osx.yml` follow-up decision noted above is a separate, not-yet-scheduled
+piece of work.
