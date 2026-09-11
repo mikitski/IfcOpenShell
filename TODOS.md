@@ -748,24 +748,31 @@ fixing at the root before a second caller reinvents the same lossy heuristic.
 ---
 
 ### `util.selector.get_element_value`'s positional/geolocated keys and `"profiles"`'s extrusion
-### fallback -- genuinely blocked, not yet portable
+### fallback -- genuinely blocked, not yet portable (positional `x`/`y`/`z` RESOLVED 2026-09-11)
 
 **What:** Phase 3's `util.selector` chunk (`src/util/selector.ts`, `get_element_value`/the
-key-path mini-language) ports every key `_get_element_value` supports except two genuine,
-disclosed hard blockers, both throwing a clear, descriptive error naming the real missing Python
-modules rather than being stubbed or silently dropped:
+key-path mini-language) originally ported every key `_get_element_value` supports except two
+genuine, disclosed hard blockers, both throwing a clear, descriptive error naming the real
+missing Python modules rather than being stubbed or silently dropped:
 
 1. **The positional/geolocated keys** `x`/`y`/`z`/`easting`/`northing`/`elevation`/`rotation_x`/
    `rotation_y`/`rotation_z`. Python's `_get_element_value` calls
    `ifcopenshell.util.placement.get_local_placement` (all nine keys), plus
    `ifcopenshell.util.geolocation.auto_xyz2enh` (the `easting`/`northing`/`elevation` trio), plus
    `ifcopenshell.util.shape_builder.np_matrix_to_euler` (the `rotation_*` trio) -- none of
-   `util.placement`/`util.geolocation`/`util.shape_builder` are ported yet in this TS port (all
-   Tier B, later phases; `util.placement` is this project's own research doc's #3 near-term
-   porting priority, not yet picked up). The blocker only fires when Python itself would actually
-   need the unported math (a real, *set* `ObjectPlacement`) -- these keys still return `null`
-   (matching Python) when the element's class has no `ObjectPlacement` at all, or when it's
-   declared but left unset.
+   `util.placement`/`util.geolocation`/`util.shape_builder` were ported yet at the time.
+
+   **UPDATE 2026-09-11 (Phase 4's `util.placement` chunk):** `util.placement` has now landed
+   (`src/util/placement.ts`). `x`/`y`/`z` are RESOLVED -- `getElementValueForKeys` now calls the
+   real `getLocalPlacement` and reads the translation column directly (`positionalXyzValue` in
+   `selector.ts`), caught and fixed by that chunk's own `/code-review` pass (an earlier version of
+   this entry, and the error message `throwPositionalKeyBlocked` used to throw, had gone stale the
+   moment `util.placement` merged, since it still claimed `get_local_placement` itself wasn't
+   ported). `easting`/`northing`/`elevation` and `rotation_x`/`rotation_y`/`rotation_z` remain
+   genuinely blocked -- `util.geolocation`/`util.shape_builder` are still not ported. The blocker
+   only fires when Python itself would actually need the unported math (a real, *set*
+   `ObjectPlacement`) -- these six keys still return `null` (matching Python) when the element's
+   class has no `ObjectPlacement` at all, or when it's declared but left unset.
 2. **`"profiles"`'s extrusion-based fallback path.** `ifcopenshell.util.shape.get_profiles`'s
    `IfcMaterialProfileSet` path is fully ported (self-contained, via already-ported
    `util.element.getMaterial`), but its fallback (`ifcopenshell.util.shape.get_extrusions`, used
@@ -774,33 +781,38 @@ modules rather than being stubbed or silently dropped:
    representation-item graph resolution (including `IfcMappedItem` indirection), not a narrow,
    self-contained lookup like the `findBodyRepresentation`/`getElementSystemsNarrow`-style
    re-implementations this same chunk used for the `classification`/`system`/`zone` keys. Neither
-   `util.shape` nor `util.representation` is ported yet.
+   `util.shape` nor `util.representation` is ported yet. Still fully blocked, unaffected by the
+   `util.placement` landing above.
 
 **Why deferred rather than attempted:** Same category as `convert_file_length_units` above -- a
 genuine cross-module hard blocker, not a "split into a follow-up chunk" situation. Porting only a
-narrow slice of `util.placement`/`util.geolocation`/`util.shape_builder`/`util.representation`
-just to unblock these specific keys would be real, disclosed scope creep into later-phase work
-(`util.placement` and `util.representation` are each substantial modules in their own right), not
-a small addition.
+narrow slice of `util.geolocation`/`util.shape_builder`/`util.representation` just to unblock
+these specific keys would be real, disclosed scope creep into later-phase work (`util.representation`
+is a substantial module in its own right), not a small addition.
 
-**Fix:** Port `ifcopenshell.util.placement` (Tier B, this project's own #3 near-term priority per
-`planning/ifcopenshell-ts/research/03-python-util-inventory.md`) and `ifcopenshell.util
-.geolocation`/`util.shape_builder` first, to unblock the positional/rotation keys; port
-`ifcopenshell.util.representation`'s `get_representation`/`resolve_representation` (Tier B) to
-unblock `"profiles"`'s extrusion fallback. Once each lands, the corresponding branch in
-`src/util/selector.ts`'s `getElementValueForKeys` is a small, mechanical follow-up (replace the
+**Fix:** Port `ifcopenshell.util.geolocation`/`util.shape_builder` to unblock the remaining
+`easting`/`northing`/`elevation`/`rotation_*` keys; port `ifcopenshell.util.representation`'s
+`get_representation`/`resolve_representation` (Tier B) to unblock `"profiles"`'s extrusion
+fallback. Once each lands, the corresponding branch in `src/util/selector.ts`'s
+`getElementValueForKeys` is a small, mechanical follow-up (replace the
 `throwPositionalKeyBlocked`/`getProfilesNarrow` blocker call with the real computation) -- the
-grammar/key-resolution plumbing around it is already fully ported and tested.
+grammar/key-resolution plumbing around it is already fully ported and tested, and `x`/`y`/`z`'s
+own resolution above is the concrete precedent for how mechanical that follow-up is once the
+underlying module lands.
 
 **Context:** Surfaced during Phase 3's `util.selector` (key-path mini-language) chunk
-(2026-09-10) -- see that chunk's own PR description for the full disclosure.
-`test_selector.py::TestGetElementValue.test_selecting_an_elements_rotation_using_a_query` has no
-full TS counterpart for the same reason (this port's own test covers only the parts it *can*
-reproduce: the blocker firing with a clear error, and the no-`ObjectPlacement`-set `null` case).
+(2026-09-10) -- see that chunk's own PR description for the full disclosure. Positional `x`/`y`/`z`
+resolved during Phase 4's `util.placement` chunk (2026-09-11), caught by that chunk's own
+`/code-review` pass rather than planned from the start.
+`test_selector.py::TestGetElementValue.test_selecting_an_elements_rotation_using_a_query` still has
+no full TS counterpart (only exercises `rotation_*`, still blocked) -- this port's own test covers
+only the parts it *can* reproduce: the blocker firing with a clear error for the still-blocked
+keys, the new real `x`/`y`/`z` computation, and the no-`ObjectPlacement`-set `null` case.
 
-**Depends on / blocked by:** Blocked on `util.placement`/`util.geolocation`/`util.shape_builder`/
-`util.representation` landing first (all Tier B, `planning/ifcopenshell-ts/20-roadmap.md` Phase
-4-ish, not yet scheduled in detail).
+**Depends on / blocked by:** Item 1 (positional `x`/`y`/`z`) is resolved. The remaining
+`easting`/`northing`/`elevation`/`rotation_*` are blocked on `util.geolocation`/`util.shape_builder`
+landing; `"profiles"`'s extrusion fallback is blocked on `util.representation` landing (all Tier B,
+`planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet scheduled in detail).
 
 ---
 
@@ -883,3 +895,70 @@ the concrete "what would landing this actually unblock" writeup that finding did
 **Depends on / blocked by:** Nothing blocking -- independent N-API shim work, not blocking any
 currently-planned Phase 3 `util` chunk (confirmed no other not-yet-ported `util` module needs
 `spf_header.file_description()` either, by the same reasoning `util/file.ts`'s own finding used).
+
+---
+
+### `gl-matrix` -- this project's first and only current runtime npm dependency beyond the native addon
+
+**What:** Phase 4's `util.placement` chunk (`src/util/placement.ts`) added `gl-matrix@3.4.4`, pinned
+exact, as a real `dependencies` entry (not `devDependencies`) in `package.json` -- the first time this
+project has taken on a runtime npm dependency beyond the native `.node` addon itself. This was an
+already-made project decision, not this chunk's own call: `planning/ifcopenshell-ts/research/03-python
+-util-inventory.md`'s Porting priority section and `PROGRESS.md`'s Phase 4 table both explicitly name
+`gl-matrix` as the intended TS mapping for `util.placement`'s numpy-based 4x4 matrix math.
+
+**Why flagged here (not a problem, just worth visibility):** every prior chunk that considered a new
+dependency (e.g. `util.selector`'s key-path/`format()` grammars, `util.date`'s ISO-8601 duration
+parsing) correctly judged a hand-rolled implementation sufficient and avoided adding one -- this is the
+first (and, as of this chunk, only) case where the "flag before adding a new dependency" convention
+concluded a real dependency was the right call (genuine numerical linear algebra, not a small
+hand-rollable grammar). Worth a tracked note purely so later chunks/reviewers aren't surprised to find
+a runtime dependency in `package.json` and can see the reasoning in one place, not because it's an
+open problem.
+
+**A related, real, disclosed finding from the same chunk:** `gl-matrix`'s `ARRAY_TYPE` defaults to
+`Float32Array` (only ~7 significant decimal digits), which would silently lose real precision for
+IFC's frequent large-magnitude survey/geolocated coordinates (verified empirically: a translation
+component of `6543210.123456789` round-trips as `6543210` under the default). `placement.ts` calls
+`glMatrix.setMatrixArrayType(Float64Array)` once at module load to force numpy-float64-equivalent
+precision globally -- a deliberate, disclosed *global* mutation of `gl-matrix`'s shared module state,
+correct today since this is the only module using `gl-matrix`, but worth knowing about before a much
+later chunk adds a second `gl-matrix` consumer with different precision needs (e.g. a GPU-buffer-facing
+use case genuinely wanting `Float32Array`). See `placement.ts`'s own header comment for the full
+verification writeup (including the confirmed-safe `mat4.multiply`/`mat4.scale`/`fromXRotation` etc.
+composition-order and row/column-major mapping).
+
+**Depends on / blocked by:** Nothing. Purely informational.
+
+---
+
+### `getAxis2placement`'s `IfcAxis2PlacementLinear` fallback needs `ifcopenshell.geom` (not yet ported)
+
+**What:** `ifcopenshell.util.placement.get_axis2placement`'s `IfcAxis2Placement3D`/
+`IfcAxis2PlacementLinear` branch has a fallback path, taken only when `placement.Location` has no
+`Coordinates` attribute at all -- true only for `IfcAxis2PlacementLinear.Location`
+(`IfcPointByDistanceExpression`, an IFC4X3+ alignment-referenced point with no direct Cartesian
+coordinates; never true for `IfcAxis2Placement3D.Location`, always a plain `IfcCartesianPoint`).
+Python's fallback calls `ifcopenshell.geom.create_shape` (the native OpenCASCADE-backed geometry
+kernel) to resolve the point's real-world coordinates. This TS port has no `ifcopenshell.geom` binding
+at all (confirmed: no `geom`-named module anywhere under `src/`, no native geometry-kernel primitive in
+`src/native/ifcopenshell_native.ts`).
+
+**Why deferred rather than attempted:** A real, narrow, cross-module hard blocker in the same category
+as this file's existing `convert_file_length_units`/`util.selector` positional-key entries --
+`ifcopenshell.geom` is a substantial, separate native-geometry-kernel binding effort, not something a
+`util.placement` chunk should build unilaterally to unblock one rare branch.
+
+**Fix:** `getAxis2placement` below throws a clear, descriptive error naming the real gap only when this
+exact branch is reached (every `IfcAxis2Placement3D`/`IfcAxis2Placement2D`/`IfcAxis1Placement` call --
+the overwhelming majority of real usage -- is unaffected). Once `ifcopenshell.geom` (or at least its
+`create_shape` entry point) is ported, replace the thrown error with the real
+`settings.set("convert-back-units", True)` + `create_shape` + `.matrix` reshape call Python performs.
+
+**Context:** Surfaced during Phase 4's `util.placement` chunk (2026-09-11). Covered by a dedicated test
+in `test/util/placement.test.ts`, guarded on `AVAILABLE_SCHEMAS.includes("IFC4X3")` since
+`IfcAxis2PlacementLinear`/`IfcPointByDistanceExpression` are IFC4X3-only EXPRESS types and cannot be
+exercised under CI's current `SCHEMA_VERSIONS=4` (IFC4-only) build.
+
+**Depends on / blocked by:** Blocked on a future `ifcopenshell.geom` binding effort (not yet scheduled
+in the roadmap as of this chunk). Does not block anything else in Phase 4.
