@@ -652,8 +652,13 @@ description for the full disclosure. `test_unit.py::TestConvertFileLengthUnits`/
 `TestConvertFileLengthUnitsIFC4`/`TestConvertFileLengthUnitsIFC4X3` have no TS counterpart for the
 same reason.
 
-**Depends on / blocked by:** Blocked on Phase 4's `util.geolocation` and Phase 6's `api.unit`/
-`api.georeference` landing first.
+**UPDATE 2026-09-11 (Phase 4's `util.geolocation` chunk):** `util.geolocation` has now landed
+(`src/util/geolocation.ts`) -- one of the two remaining dependencies. Still fully blocked overall:
+`convert_file_length_units` also needs `ifcopenshell.api.unit`/`ifcopenshell.api.georeference`
+(Phase 6, `api` Tier 1), neither of which exists yet.
+
+**Depends on / blocked by:** `util.geolocation` dependency resolved. Still blocked on Phase 6's
+`api.unit`/`api.georeference` landing first.
 
 ### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch
 
@@ -778,7 +783,8 @@ would benefit from the same root-level fix.
 ---
 
 ### `util.selector.get_element_value`'s positional/geolocated keys and `"profiles"`'s extrusion
-### fallback -- genuinely blocked, not yet portable (positional `x`/`y`/`z` RESOLVED 2026-09-11)
+### fallback -- genuinely blocked, not yet portable (positional `x`/`y`/`z`/`easting`/`northing`/
+### `elevation` RESOLVED 2026-09-11; only `rotation_*` and `"profiles"`'s extrusion fallback remain)
 
 **What:** Phase 3's `util.selector` chunk (`src/util/selector.ts`, `get_element_value`/the
 key-path mini-language) originally ported every key `_get_element_value` supports except two
@@ -803,6 +809,18 @@ missing Python modules rather than being stubbed or silently dropped:
    only fires when Python itself would actually need the unported math (a real, *set*
    `ObjectPlacement`) -- these six keys still return `null` (matching Python) when the element's
    class has no `ObjectPlacement` at all, or when it's declared but left unset.
+
+   **UPDATE 2026-09-11 (Phase 4's `util.geolocation` chunk, same day):** `util.geolocation` has now
+   also landed (`src/util/geolocation.ts`). `easting`/`northing`/`elevation` are ALSO RESOLVED --
+   `getElementValueForKeys` now calls the real `autoXyz2enh` (`positionalEnhValue` in
+   `selector.ts`), reusing the same translation-column read `positionalXyzValue` already does (via
+   a new shared `matrixTranslation` helper) and the original top-level element's `.file` (a real,
+   confirmed-against-the-source subtlety -- Python's `auto_xyz2enh(element.file, *xyz)` uses the
+   *original* `element` parameter, not the loop's own traveling `value`; `getElementValueForKeys`
+   now captures that as `rootElement` for this one call). Only `rotation_x`/`rotation_y`/
+   `rotation_z` remain genuinely blocked now -- `util.shape_builder` (a separate module,
+   untouched by this update) is still not ported.
+
 2. **`"profiles"`'s extrusion-based fallback path.** `ifcopenshell.util.shape.get_profiles`'s
    `IfcMaterialProfileSet` path is fully ported (self-contained, via already-ported
    `util.element.getMaterial`), but its fallback (`ifcopenshell.util.shape.get_extrusions`, used
@@ -816,32 +834,33 @@ missing Python modules rather than being stubbed or silently dropped:
 
 **Why deferred rather than attempted:** Same category as `convert_file_length_units` above -- a
 genuine cross-module hard blocker, not a "split into a follow-up chunk" situation. Porting only a
-narrow slice of `util.geolocation`/`util.shape_builder`/`util.representation` just to unblock
-these specific keys would be real, disclosed scope creep into later-phase work (`util.representation`
-is a substantial module in its own right), not a small addition.
+narrow slice of `util.shape_builder`/`util.representation` just to unblock these specific keys
+would be real, disclosed scope creep into later-phase work (`util.representation` is a substantial
+module in its own right), not a small addition.
 
-**Fix:** Port `ifcopenshell.util.geolocation`/`util.shape_builder` to unblock the remaining
-`easting`/`northing`/`elevation`/`rotation_*` keys; port `ifcopenshell.util.representation`'s
-`get_representation`/`resolve_representation` (Tier B) to unblock `"profiles"`'s extrusion
-fallback. Once each lands, the corresponding branch in `src/util/selector.ts`'s
-`getElementValueForKeys` is a small, mechanical follow-up (replace the
+**Fix:** Port `ifcopenshell.util.shape_builder` to unblock the remaining `rotation_*` keys; port
+`ifcopenshell.util.representation`'s `get_representation`/`resolve_representation` (Tier B) to
+unblock `"profiles"`'s extrusion fallback. Once each lands, the corresponding branch in
+`src/util/selector.ts`'s `getElementValueForKeys` is a small, mechanical follow-up (replace the
 `throwPositionalKeyBlocked`/`getProfilesNarrow` blocker call with the real computation) -- the
-grammar/key-resolution plumbing around it is already fully ported and tested, and `x`/`y`/`z`'s
-own resolution above is the concrete precedent for how mechanical that follow-up is once the
-underlying module lands.
+grammar/key-resolution plumbing around it is already fully ported and tested, and `x`/`y`/`z`'s/
+`easting`/`northing`/`elevation`'s own resolution above is the concrete precedent for how
+mechanical that follow-up is once the underlying module lands.
 
 **Context:** Surfaced during Phase 3's `util.selector` (key-path mini-language) chunk
 (2026-09-10) -- see that chunk's own PR description for the full disclosure. Positional `x`/`y`/`z`
 resolved during Phase 4's `util.placement` chunk (2026-09-11), caught by that chunk's own
-`/code-review` pass rather than planned from the start.
+`/code-review` pass rather than planned from the start; `easting`/`northing`/`elevation` resolved
+the same day by Phase 4's `util.geolocation` chunk.
 `test_selector.py::TestGetElementValue.test_selecting_an_elements_rotation_using_a_query` still has
 no full TS counterpart (only exercises `rotation_*`, still blocked) -- this port's own test covers
 only the parts it *can* reproduce: the blocker firing with a clear error for the still-blocked
-keys, the new real `x`/`y`/`z` computation, and the no-`ObjectPlacement`-set `null` case.
+`rotation_*` keys, the real `x`/`y`/`z`/`easting`/`northing`/`elevation` computation, and the
+no-`ObjectPlacement`-set `null` case.
 
-**Depends on / blocked by:** Item 1 (positional `x`/`y`/`z`) is resolved. The remaining
-`easting`/`northing`/`elevation`/`rotation_*` are blocked on `util.geolocation`/`util.shape_builder`
-landing; `"profiles"`'s extrusion fallback is blocked on `util.representation` landing (all Tier B,
+**Depends on / blocked by:** Item 1's `x`/`y`/`z`/`easting`/`northing`/`elevation` are all
+resolved. The remaining `rotation_*` are blocked on `util.shape_builder` landing;
+`"profiles"`'s extrusion fallback is blocked on `util.representation` landing (both Tier B,
 `planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet scheduled in detail).
 
 ---
