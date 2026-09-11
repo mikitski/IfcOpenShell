@@ -104,8 +104,24 @@ jobs:
           # A separate x86_64 Homebrew under /usr/local, distinct from the
           # arm64 one at /opt/homebrew - matches build_osx.yml's pattern for
           # cross-compiling x64 from an Apple Silicon runner.
-          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          /usr/local/bin/brew install boost eigen pkg-config
+          #
+          # Retried (3 attempts, backoff) because both the installer's own
+          # `curl | bash` fetch and the subsequent `brew install` have been
+          # observed failing transiently (network-flaky, not code-related) -
+          # confirmed by the fact that the same step passed cleanly on other
+          # PRs the same day, and by every other CI leg staying green.
+          for attempt in 1 2 3; do
+            if arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+                && /usr/local/bin/brew install boost eigen pkg-config; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::Homebrew install failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "Homebrew install attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
           echo "CMAKE_PREFIX_PATH=/usr/local" >> "$GITHUB_ENV"
           echo "CMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
 
