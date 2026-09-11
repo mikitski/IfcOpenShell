@@ -509,9 +509,27 @@ const MUTATING_ARRAY_METHODS: ReadonlySet<string> = new Set([
 	"splice",
 	"fill",
 	"copyWithin",
-	"sort",
-	"reverse",
 ]);
+
+/**
+ * `Array.prototype.sort`/`.reverse` -- deliberately NOT in `MUTATING_ARRAY_METHODS`
+ * above, despite also mutating in place through multiple internal writes (the same
+ * category of bug that set fixed there). Verified empirically against real Python
+ * (`list.sort()`/`.reverse()` on a subclass that only overrides `append`/`extend`/
+ * `insert`/`remove`/`pop`/`clear`/`__setitem__`/`__delitem__`): CPython's built-in
+ * `list.sort`/`.reverse` operate directly on the list's underlying C-level storage,
+ * never going through the Python-level `__setitem__`/`__delitem__` override --
+ * confirmed with a real `list` subclass reproducing `AutoCommitList`'s exact method
+ * set: `.sort()`/`.reverse()` silently reorder the list in memory with ZERO commits,
+ * a real (if obscure) upstream Python quirk, not a hypothetical one. Reproduced here
+ * faithfully: applied directly to the raw target (so callers still observe the
+ * reordering, matching Python's real in-memory mutation), but never committed --
+ * `push`/`pop`/etc. above legitimately need "batch the internal writes, then commit
+ * once" (Python's own equivalents DO commit); `sort`/`reverse` need "batch the
+ * internal writes, commit ZERO times," a different, disclosed rule, not the same fix
+ * applied twice.
+ */
+const SILENTLY_MUTATING_ARRAY_METHODS: ReadonlySet<string> = new Set(["sort", "reverse"]);
 
 function createAutoCommitList(
 	initial: readonly string[],
@@ -549,6 +567,18 @@ function createAutoCommitList(
 					const result = method.apply(t, args);
 					commit();
 					return result;
+				};
+			}
+			if (typeof prop === "string" && SILENTLY_MUTATING_ARRAY_METHODS.has(prop)) {
+				// See `SILENTLY_MUTATING_ARRAY_METHODS`'s own doc comment: applied
+				// directly to the raw target, deliberately never committed -- matches
+				// real Python's verified `list.sort()`/`.reverse()` behavior on an
+				// `AutoCommitList`-equivalent subclass exactly.
+				return (...args: unknown[]) => {
+					const method = (Array.prototype as unknown as Record<string, (...a: unknown[]) => unknown>)[prop] as (
+						...a: unknown[]
+					) => unknown;
+					return method.apply(t, args);
 				};
 			}
 			return Reflect.get(t, prop, receiver);

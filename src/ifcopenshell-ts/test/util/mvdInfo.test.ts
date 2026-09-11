@@ -405,4 +405,37 @@ describe("Proxy translation behaviors", () => {
 		expect(writes).toHaveLength(1);
 		expect(writes[0]).toEqual(["ViewDefinition [A,X,B,C]"]);
 	});
+
+	// Verified empirically against real Python (`list.sort()`/`.reverse()` on a
+	// subclass reproducing `AutoCommitList`'s exact overridden-method set): CPython's
+	// built-in `list.sort`/`.reverse` never go through `__setitem__`, so a real
+	// `AutoCommitList.sort()`/`.reverse()` call silently reorders the list in memory
+	// with ZERO write-backs to the header -- a real, if obscure, upstream Python quirk.
+	// Reproduced here faithfully, not "fixed": the array is still reordered (callers
+	// observe the correct new order), but no commit fires.
+	test("sort/reverse mutate the array but never commit, matching real Python's verified list.sort()/list.reverse() behavior", () => {
+		let current: string[] = ["ViewDefinition [C,A,B]"];
+		const writes: string[][] = [];
+		const header: MvdHeader = {
+			file_description: {
+				get description(): string[] {
+					return current;
+				},
+				set description(value: string[]) {
+					current = [...value];
+					writes.push(current);
+				},
+			},
+		};
+
+		const mvd = new MvdInfo(header);
+		const vd = mvd.viewDefinitions as string[];
+		vd.sort();
+		expect(vd).toEqual(["A", "B", "C"]);
+		expect(writes).toHaveLength(0);
+
+		vd.reverse();
+		expect(vd).toEqual(["C", "B", "A"]);
+		expect(writes).toHaveLength(0);
+	});
 });
