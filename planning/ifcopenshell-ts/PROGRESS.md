@@ -144,10 +144,24 @@ its own prompt. Logged as product feedback (queued locally, not yet sent). Mitig
 the remainder of this session: review-only tasks are done directly by the orchestrating session
 itself rather than delegated to a `fork` subagent.
 
-**Next Phase 3/5 dispatch**: any remaining `util` Tier A module (`util.pset` — now unblocked, needed
-`util.type` — `util.file`, `util.resource`, `util.doc`/`util.mvd_info` — see the table below) or
+✅ **`util.file` (PR #38) and `util.pset` (PR #39) landed** — see the Phase 3 table below for
+per-module detail. `util.pset` corrected a wrong assumption in its own dispatch brief (bundled pset
+templates are plain STEP text, not XML/JSON — no new tooling needed) and a wrong one about mutating
+functions (only a one-time internal-only patch, no undo/redo test needed). `util.file` needed real
+ZIP decompression for `.ifczip` and solved it with `node:zlib` alone, no new dependency. Both
+independently re-reviewed by the orchestrating session directly (not via subagent) before merge, per
+the fork-reliability mitigation above; no bugs found in either.
+
+**Remaining Phase 3 Tier A work is mostly Tier-B-blocked, not a scope choice**: `util.resource` needs
+`util.cost` (Tier B, not yet ported) — a real dependency, disclosed, not deferrable by choosing a
+different chunk order. `util.doc` (1123 lines) and `util.mvd_info` (341 lines) remain unstarted;
+per the research doc, `util.doc`'s runtime lookup functions are Tier A (trivial JSON lookups) but its
+`DocExtractor` scraper is Tier C / not a real porting target.
+
+**Next Phase 3/5 dispatch**: `util.doc`'s runtime lookups or `util.mvd_info` (both unblocked), or
 continuing Lane C's `selector.py` (the `filter_elements` facet grammar or the `format()` expression
-grammar, both now unblocked by the key-path chunk above).
+grammar, both now unblocked by the key-path chunk above) — Phase 3 Tier A is otherwise essentially
+complete pending `util.cost` (Tier B) unblocking `util.resource`.
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -244,10 +258,10 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.constraint` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. No Python test file exists for this module (`test_constraint.py` doesn't exist) — original test coverage written. |
 | `util.system` | ✅ | [#36](https://github.com/mikitski/IfcOpenShell/pull/36) | Landed `bba7bab7c`. `getElementSystems`/`getElementZones`/`getSystemElements`/`isAssignable`/`getPorts`/`getConnectedTo`/`getConnectedFrom`. Preserves a real, verified Python-source typo (`FLOW_DIRECTION`'s `"NOTEDEFINED"` vs. the schema's real `"NOTDEFINED"`) verbatim, disclosed not corrected. Also promoted from `selector.ts`'s narrow copies (see `util.classification` row). |
 | `util.date` | ✅ | [#35](https://github.com/mikitski/IfcOpenShell/pull/35) | Landed `321b71b89`. Full port, no new npm dependency — hand-rolled ISO 8601 duration parsing/formatting replaces Python's `isodate`/`dateutil`, verified line-by-line against the real `isodate` source. Correctly reproduces a real upstream `isodate` dead-code bug (fuzzy-parse "M" misread as months not minutes in some strings). One disclosed gap: `string_to_date`'s `dateutil` fuzzy free-text parsing not reproduced (zero internal callers, confirmed by grep). A real narrow bug (`parseIso8601Duration` wrongly rejecting valid `"PT"`) found by independent review before merge, fixed. |
-| `util.file` | 🔲 | — | |
-| `util.pset` | 🔲 | — | Needs `util.type` (now landed) — no longer blocked. |
-| `util.resource` | 🔲 | — | |
-| `util.doc` | 🔲 | — | |
+| `util.file` | ✅ | [#38](https://github.com/mikitski/IfcOpenShell/pull/38) | Landed `d2f4aa965`. `IfcHeaderExtractor` (STEP-header-only extraction, no full model parse). `.ifczip` reading needed real ZIP decompression (real save path uses DEFLATE, not just STORED) — solved with `node:zlib`'s `inflateRawSync` + a small hand-rolled EOCD/Central-Directory/Local-File-Header reader, no new npm dependency. Independently re-reviewed byte-offset-by-byte-offset against the real ZIP spec. |
+| `util.pset` | ✅ | [#39](https://github.com/mikitski/IfcOpenShell/pull/39) | Landed `ca80783a0`. `PsetQto`/`getTemplate`/`getPsetTemplateType`/`parseApplicableEntity`/`convertApplicableEntitiesToQuery`. Bundled template files are plain STEP text (not XML/JSON as the dispatch brief guessed) — reused the existing STEP parser, no new tooling. Corrects the dispatch brief's mutating-function assumption (only a one-time internal-only IFC4 backport patch, no undo/redo test needed). |
+| `util.resource` | 🔲 | — | Blocked on `util.cost` (Tier B, not yet ported) — a real dependency, not a scope choice. |
+| `util.doc` | 🔲 | — | 1123 lines; per the research doc, runtime lookup functions are Tier A (trivial JSON lookups), the `DocExtractor` scraper itself is Tier C / not a porting target. |
 | `util.mvd_info` | 🔲 | — | |
 
 ## Phase 4 — `util` Tier B [Lane B — needs `util.element`/`schema`/`unit`]
