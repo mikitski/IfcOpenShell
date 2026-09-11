@@ -73,23 +73,10 @@
 //    established "genuinely-blocked-not-just-deferred" disclosure pattern (that file's
 //    `util.unit.convert_file_length_units` entry).
 //
-// 2. **Narrow, disclosed, non-exported local re-implementations** of exactly what three
-//    of the special keys need, each individually small and self-contained (matching
-//    `util/element.ts` chunk 3's `findBodyRepresentation` precedent -- a disclosed narrow
-//    re-implementation of exactly one fixed lookup, not scope creep into porting the
-//    whole owning module):
-//    - `classification` key: `getClassificationNarrow`/`getReferencesNarrow` re-implement
-//      `ifcopenshell.util.classification.get_classification`/`.get_references` (~45
-//      combined lines in the real Python source) -- both are entirely self-contained
-//      once `util.element.getType` (already ported) is available, no dependency on any
-//      other not-yet-ported `util.classification` function (`get_classification_data`,
-//      the IFC-file-level scan helpers, etc. are NOT needed here and NOT ported).
-//    - `system`/`zone` keys: `getElementSystemsNarrow`/`getElementZonesNarrow`
-//      re-implement `ifcopenshell.util.system.get_element_systems`/`.get_element_zones`
-//      (~10 lines each in the real Python source, a direct `element.HasAssignments`
-//      filter with no further dependency at all) -- ported verbatim, matching
-//      `util/element.ts`'s already-ported `getGroups`/`getControls`'s identical
-//      `HasAssignments`-filter shape one-for-one.
+// 2. **Narrow, disclosed, non-exported local re-implementation** of exactly what one of
+//    the special keys needs (matching `util/element.ts` chunk 3's
+//    `findBodyRepresentation` precedent -- a disclosed narrow re-implementation of
+//    exactly one fixed lookup, not scope creep into porting the whole owning module):
 //    - `profiles` key: **partially** narrow -- `ifcopenshell.util.shape.get_profiles`'s
 //      `IfcMaterialProfileSet` path (via already-ported `util.element.getMaterial`) is
 //      fully ported below (`getProfilesNarrow`), but its fallback path
@@ -101,23 +88,34 @@
 //      fallback throws the same disclosed-blocker pattern as point 1 above rather than
 //      being silently dropped or force-approximated.
 //
+//    **UPDATE (a later Phase 3 chunk, `util.classification`/`util.constraint`/
+//    `util.system`/`util.type`, 2026-09-10):** this finding originally also covered the
+//    `classification` key (`getClassificationNarrow`/`getReferencesNarrow`, a narrow
+//    re-implementation of `ifcopenshell.util.classification.get_classification`/
+//    `.get_references`) and the `system`/`zone` keys (`getElementSystemsNarrow`/
+//    `getElementZonesNarrow`, re-implementing `ifcopenshell.util.system
+//    .get_element_systems`/`.get_element_zones`) -- both narrow-reimplementation
+//    rationales are now obsolete, since `util.classification`/`util.system` are fully
+//    ported (`util/classification.ts`, `util/system.ts`). Verified, before switching
+//    over, that each narrow copy was behaviorally identical to the real ported function
+//    (see those files' own header comments) -- this file now imports and calls
+//    `classification.getReferences`/`system.getElementSystems`/`system.getElementZones`
+//    directly, and the four narrow functions plus their backing `EntityInstanceSet`
+//    class have been removed from this file entirely, along with the disclosure
+//    paragraphs that only applied to them (preserved below in trimmed form for what's
+//    still true of this file: the `parseKeyPath` empty-regex-key bugfix, still real and
+//    still here).
+//
 // A real bug found and fixed by this chunk's own adversarial review (not shipped and
-// deferred): `getReferencesNarrow`'s three `set()`-building points originally used plain
-// JS `Set<EntityInstance>`, which dedupes by reference equality -- but the N-API layer
-// mints a fresh wrapper object per accessor call (`entityInstance.ts`'s own header
-// comment), so two wrappers of the identical underlying instance are never `===`.
-// Reproduced empirically (two `IfcRelAssociatesClassification` rels pointing at the same
-// `IfcClassificationReference` produced a size-2 result instead of size-1). Fixed by
-// `EntityInstanceSet` below, mirroring `util/element.ts`'s own private class of the same
-// name (not exported from that file, re-declared here for this file's one use site, same
-// rationale as `attrOrMissing`/`attrOrNull`/`attrList`). The same review also caught and
-// this chunk fixed: `parseKeyPath` silently accepting an empty `//` regex key (the real
+// deferred): `parseKeyPath` silently accepting an empty `//` regex key (the real
 // grammar's inner class is one-or-more, so this is a parse error in Python, not a
-// match-everything pattern); `getElementSystemsNarrow` using the subtype-inclusive
-// `isA(name)` form for its `IfcStructuralAnalysisModel`/`IfcZone` exclusion where Python
-// uses an exact-class-name comparison (`is_a()` with no argument) -- currently latent
-// (no subtype of either class exists in the schema today) but ported exactly rather than
-// approximated.
+// match-everything pattern) -- see `parseKeyPath`'s own inline comment below. (Two
+// other bugs this same review caught -- a dedup-by-reference-equality bug in the
+// then-narrow `getReferencesNarrow`, and an over-permissive subtype-inclusive `isA(name)`
+// check in the then-narrow `getElementSystemsNarrow` -- were fixed at the time and are
+// now simply part of the real, ported `classification.getReferences`/
+// `system.getElementSystems` this file calls; see those files' own header comments for
+// the current writeup, not repeated here now that the narrow copies are gone.)
 //
 // Every other key documented in this chunk's task brief (`type`, `material`/`mat`,
 // `materials`/`mats`, `styles`, `item`/`i`, `container`, `space`, `storey`, `building`,
@@ -127,6 +125,7 @@
 // above are narrowly scoped, not an excuse to under-scope the rest.
 
 import { EntityInstance } from "../entityInstance";
+import { getReferences } from "./classification";
 import {
 	getContainer,
 	getGroups,
@@ -140,6 +139,7 @@ import {
 	getType,
 	getTypes,
 } from "./element";
+import { getElementSystems, getElementZones } from "./system";
 
 // --- internal helpers (mirroring `util/element.ts`'s own `attrOrMissing`/`attrOrNull`/
 // `attrList` -- not exported from that file, so re-declared here rather than reaching
@@ -306,148 +306,11 @@ export function parseKeyPath(query: string): (string | RegExp)[] {
 	return keys;
 }
 
-/**
- * Python's `results = set()` idiom (`classification.get_references`'s `results`/
- * `occurrence_results`), keyed by `EntityInstance.identity()` rather than relying on JS
- * `Set`'s reference-equality membership test -- the N-API primitive layer mints a fresh
- * JS wrapper object on every accessor call (`entityInstance.ts`'s own header comment,
- * also `util/element.ts`'s identical `EntityInstanceSet` doc comment), so two wrappers
- * of the literal same underlying instance are never `===`; a plain `Set<EntityInstance>`
- * would silently fail to dedupe the way Python's real `set()` (hashing by identity)
- * does -- confirmed empirically (found by this chunk's own adversarial review): two
- * `IfcRelAssociatesClassification` relationships pointing at the identical
- * `IfcClassificationReference` produced a plain-`Set` result of size 2, not 1. Mirrors
- * `util/element.ts`'s own private `EntityInstanceSet` (not exported from that file, so
- * re-declared here narrowly for this file's one use site -- same "not exported,
- * re-declared" rationale as `attrOrMissing`/`attrOrNull`/`attrList` above).
- */
-class EntityInstanceSet {
-	private readonly byIdentity = new Map<number, EntityInstance>();
-
-	add(instance: EntityInstance): void {
-		this.byIdentity.set(instance.identity(), instance);
-	}
-
-	update(instances: Iterable<EntityInstance>): void {
-		for (const instance of instances) this.add(instance);
-	}
-
-	get size(): number {
-		return this.byIdentity.size;
-	}
-
-	toSet(): Set<EntityInstance> {
-		return new Set(this.byIdentity.values());
-	}
-}
-
-// --- narrow, disclosed local re-implementations (see this file's header comment,
-// finding #2, for why these three are inlined here rather than treated as blockers) ---
-
-/** Narrow re-implementation of `ifcopenshell.util.classification.get_classification`. */
-function getClassificationNarrow(reference: EntityInstance): EntityInstance | null {
-	if (reference.isA("IfcClassification")) return reference;
-	const referencedSource = attrOrNull(reference, "ReferencedSource") as EntityInstance | null;
-	return referencedSource ? getClassificationNarrow(referencedSource) : null;
-}
-
-/** Narrow re-implementation of `ifcopenshell.util.classification.get_references`. */
-function getReferencesNarrow(element: EntityInstance, shouldInherit = true): Set<EntityInstance> {
-	if (!element.isA("IfcRoot")) {
-		// Python: `(references := getattr(element, "HasExternalReferences", None)) is
-		// not None or (references := getattr(element, "HasExternalReference", None)) is
-		// not None` -- takes this branch when the attribute is both *declared* and
-		// *non-None* (a declared-but-unset forward attribute, `null` here, does NOT
-		// short-circuit; only a genuinely missing/undeclared attribute or a real value
-		// does), matching `!== MISSING && !== null` below, not just `!== MISSING`.
-		let references = attrOrMissing(element, "HasExternalReferences");
-		if (references === MISSING || references === null) references = attrOrMissing(element, "HasExternalReference");
-		if (references !== MISSING && references !== null) {
-			const refs = references as EntityInstance[];
-			const set = new EntityInstanceSet();
-			set.update(refs.map((r) => r.get("RelatingReference") as EntityInstance));
-			return set.toSet();
-		}
-	}
-
-	let results = new Set<EntityInstance>();
-	if (shouldInherit && element.isA("IfcObject")) {
-		const elementType = getType(element);
-		if (elementType && !elementType.equals(element)) {
-			results = getReferencesNarrow(elementType);
-		}
-	}
-
-	const occurrenceSet = new EntityInstanceSet();
-	for (const rel of attrList(element, "HasAssociations")) {
-		if (rel.isA("IfcRelAssociatesClassification")) {
-			occurrenceSet.add(rel.get("RelatingClassification") as EntityInstance);
-		}
-	}
-	const occurrenceResults = occurrenceSet.toSet();
-
-	if (results.size === 0) return occurrenceResults;
-
-	// Group both the inherited type-level references and the element's own occurrence
-	// references by their owning `IfcClassification` "system", then let an occurrence
-	// group fully *replace* a type-level group for the same system (Python's
-	// `type_references_per_system.update(occurrence_references_per_system)`), rather
-	// than merge into it -- an element's own classification under a given system
-	// overrides an inherited one under that same system.
-	const groupBySystem = (refs: Iterable<EntityInstance>): Map<number, EntityInstance[]> => {
-		const groups = new Map<number, EntityInstance[]>();
-		for (const r of refs) {
-			const classification = getClassificationNarrow(r);
-			const key = classification ? classification.identity() : -1;
-			const group = groups.get(key);
-			if (group) group.push(r);
-			else groups.set(key, [r]);
-		}
-		return groups;
-	};
-	const bySystem = groupBySystem(results);
-	for (const [key, refs] of groupBySystem(occurrenceResults)) bySystem.set(key, refs);
-	const merged = new EntityInstanceSet();
-	for (const refs of bySystem.values()) {
-		merged.update(refs);
-	}
-	return merged.toSet();
-}
-
-/** Narrow re-implementation of `ifcopenshell.util.system.get_element_systems` --
- * verbatim `HasAssignments`-filter shape, matching `util/element.ts`'s already-ported
- * `getGroups`/`getControls`. */
-function getElementSystemsNarrow(element: EntityInstance): EntityInstance[] {
-	const results: EntityInstance[] = [];
-	for (const rel of element.get("HasAssignments") as EntityInstance[]) {
-		if (!rel.isA("IfcRelAssignsToGroup")) continue;
-		const group = rel.get("RelatingGroup") as EntityInstance;
-		if (!group.isA("IfcSystem")) continue;
-		// Python: `group.is_a() in ("IfcStructuralAnalysisModel", "IfcZone")` -- a
-		// no-argument `is_a()` call compared by exact class name, deliberately NOT the
-		// subtype-inclusive `is_a(name)` form used for the `IfcSystem` check above (which
-		// also matches subtypes). No subtype of `IfcStructuralAnalysisModel`/`IfcZone`
-		// exists in the current schema, so this distinction is latent today, but ported
-		// exactly rather than approximated with `group.isA("IfcZone")` (which would
-		// silently start over-excluding if such a subtype were ever introduced).
-		const exactClass = group.isA();
-		if (exactClass === "IfcStructuralAnalysisModel" || exactClass === "IfcZone") continue;
-		results.push(group);
-	}
-	return results;
-}
-
-/** Narrow re-implementation of `ifcopenshell.util.system.get_element_zones`. */
-function getElementZonesNarrow(element: EntityInstance): EntityInstance[] {
-	const results: EntityInstance[] = [];
-	for (const rel of element.get("HasAssignments") as EntityInstance[]) {
-		if (!rel.isA("IfcRelAssignsToGroup")) continue;
-		const group = rel.get("RelatingGroup") as EntityInstance;
-		if (!group.isA("IfcZone")) continue;
-		results.push(group);
-	}
-	return results;
-}
+// --- narrow, disclosed local re-implementation (see this file's header comment,
+// finding #2, for why this one is still inlined here rather than treated as a
+// blocker -- `classification`/`system`/`zone`'s own former narrow copies were removed
+// once `util/classification.ts`/`util/system.ts` landed; see that same finding for the
+// full story) ---
 
 /** Partial, disclosed narrow re-implementation of
  * `ifcopenshell.util.shape.get_profiles` -- see this file's header comment, finding #2,
@@ -549,13 +412,13 @@ function getElementValueForKeys(initialValue: unknown, keys: readonly (string | 
 		} else if (typeof key === "string" && key === "id") {
 			value = (value as EntityInstance).id();
 		} else if (typeof key === "string" && key === "classification") {
-			value = getReferencesNarrow(value as EntityInstance);
+			value = getReferences(value as EntityInstance);
 		} else if (typeof key === "string" && key === "group") {
 			value = getGroups(value as EntityInstance);
 		} else if (typeof key === "string" && key === "system") {
-			value = getElementSystemsNarrow(value as EntityInstance);
+			value = getElementSystems(value as EntityInstance);
 		} else if (typeof key === "string" && key === "zone") {
-			value = getElementZonesNarrow(value as EntityInstance);
+			value = getElementZones(value as EntityInstance);
 		} else if (
 			typeof key === "string" &&
 			(POSITIONAL_XYZ_KEYS.includes(key) || POSITIONAL_ENH_KEYS.includes(key) || ROTATION_KEYS.includes(key)) &&

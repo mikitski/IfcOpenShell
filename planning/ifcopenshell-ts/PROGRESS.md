@@ -90,8 +90,39 @@ real Python source before merge.
   and always reported `value_type: null` even where it's recoverable. Fixed in a dedicated follow-up
   PR — see the entry below once it lands.
 
-**Next Phase 3 dispatch**: either `util.schema`'s `Migrator` (its own chunk) or a different `util`
-module entirely (`util.type`, `util.classification`, etc. — see the table below).
+✅ **`util.schema`'s `Migrator` chunk landed** (`d256978d2`, PR #33): the ~380-line JSON-data-driven
+cross-schema migration engine (`migrate`/`migrateClass`/`migrateAttributes`/`generateDefaultValue`),
+plus `_enum_value_outside_target`. Establishes this project's first JSON-data-bundling precedent
+(`src/ifcopenshell-ts/data/schema-migration/`, sibling to `src/` since `tsc` doesn't copy non-`.ts`
+files under `rootDir`). Two real, disclosed primitive-layer gaps in `TODOS.md`: (1) blocking —
+`EntityInstance.setByIndex`/`IfcFile.createEntity` can't write an initial value into a freshly
+created simple/defined-type instance (a pre-existing Phase 2 gap, not introduced here, blocks
+`migrate()`'s `id() === 0` branch); (2) non-blocking — `getByIndex` collapses EXPRESS INTEGER vs.
+REAL into one JS `number`, affecting two IFC4X3 class-retyping checks. `/code-review` caught 2 real
+bugs before shipping (a silent-null-to-`[]` default where Python raises; an overly broad `catch`).
+Independently re-reviewed by the orchestrating session against the real Python source before merge
+(full control flow + positional-argument ordering for the synthesized `IfcOwnerHistory` chain,
+spot-checked against the generated `.d.ts`); also hit and fixed a real merge conflict with PR #32
+and a real `biome` formatting CI failure (leading-comma JSON style) post-push.
+
+✅ **`selector.py`'s key-path grammar landed** (`dba7cc445`, PR #32, tracked under Phase 5 below):
+`get_element_value`/`_get_element_value`, the shared dependency both `filter_elements`'s `query:`
+facet and `format()`'s `{{...}}` interpolation will need — ported first, standalone, to unblock both.
+Hand-rolled recursive-descent parser, no new npm dependency. Two disclosed blockers (positional/
+geolocated keys needing unported `util.placement`/`util.geolocation`/`util.shape_builder`; the
+`"profiles"` key's extrusion fallback needing unported `util.representation`) — both throw only when
+Python itself would need the missing math, not unconditionally. 3 real bugs caught and fixed by this
+chunk's own adversarial review (an `EntityInstanceSet` identity-dedup fix, a rejected-empty-regex
+fix, an exact-vs-subtype `isA()` fix). Independently re-reviewed by the orchestrating session
+directly against the real Python source after a review-fork's result came back anomalous (blocked by
+a security classifier, phrased as if it had taken unauthorized merge actions) — verified via the
+GitHub API that nothing had actually changed, then completed the review manually; no bugs found.
+
+**Next Phase 3/5 dispatch**: any remaining `util` Tier A module (`util.type`, `util.classification`,
+`util.date`, `util.pset`, `util.system`, `util.constraint`, `util.file`, `util.resource`,
+`util.doc`/`util.mvd_info` — see the table below) or continuing Lane C's `selector.py` (the
+`filter_elements` facet grammar or the `format()` expression grammar, both now unblocked by the
+key-path chunk above).
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -181,7 +212,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.element` — chunk 3/3 (structural-editing helpers) | ✅ | [#25](https://github.com/mikitski/IfcOpenShell/pull/25) | Landed `ea575b238`. `copy`/`copyDeep`/`removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`unbatchRemoveDeep2`/`replaceElement`/`replaceAttribute`. **`util/element.py` is now fully ported.** 2 real primitive gaps found+disclosed (file-to-string, `type_of_aggregation`), 1 real V8 spread-limit bug found+fixed — see "Current focus" above. |
 | `util.attribute` | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2` alongside `util.schema` chunk 1 (small, self-contained prerequisite — see below). `getPrimitiveType`/`getEnumItems`/`getSelectItems`. |
 | `util.schema` — chunk 1 (query/reflection + `BatchReassignClass`) | ✅ | [#27](https://github.com/mikitski/IfcOpenShell/pull/27) | Landed `d0e1742c2`. `getFallbackSchema`/`getDeclaration`/`isA`/`getSupertypes`/`getSubtypes`/`geometryClassesIntroducedAfter`/`ifc4OnlyGeometryClasses`/`reassignClass`/`BatchReassignClass`. 3 real primitive gaps investigated+disclosed (`simple_type::declared_type`, `enumeration_type::enumeration_items`, `entity::subtypes` — the last one worked around, not just disclosed) — see "Current focus" above. |
-| `util.schema` — chunk 2 (`Migrator`) | 🔲 | — | ~380 lines, JSON-data-file-driven cross-schema migration engine — large enough to warrant its own chunk, not yet dispatched |
+| `util.schema` — chunk 2 (`Migrator`) | ✅ | [#33](https://github.com/mikitski/IfcOpenShell/pull/33) | Landed `d256978d2`. `migrate`/`migrateClass`/`migrateAttributes`/`findEquivalentAttribute`/`migrateAttribute`/`generateDefaultValue` + `_enum_value_outside_target`. First JSON-data-bundling precedent (`data/schema-migration/`). 2 primitive-layer gaps disclosed (see "Current focus" above / `TODOS.md`). |
 | `util.unit` | ✅ | [#29](https://github.com/mikitski/IfcOpenShell/pull/29) | Landed `7fbe3dfed`. Full port except `convert_file_length_units` (genuine hard blocker, see `TODOS.md`). Resolved a wrapping-behavior question vs. `util.element` chunk 1's finding (two genuinely different, both-correct code paths); surfaced a real separate bug in `util/element.ts`'s `getProperty`/`getProperties`, fixed in a follow-up PR. |
 | `util.classification` | 🔲 | — | |
 | `util.constraint` | 🔲 | — | |
@@ -210,7 +241,9 @@ binding could be built, since it decided generated-vs-hand-written.
 
 | Chunk | Status | PR | Notes |
 |---|---|---|---|
-| Query DSL (3 grammars, hand-rolled recursive-descent) | 🔲 | — | — |
+| Key-path grammar / `get_element_value` (shared dependency of the other 2 grammars) | ✅ | [#32](https://github.com/mikitski/IfcOpenShell/pull/32) | Landed `dba7cc445`. `parseKeyPath` + `getElementValueForKeys`. 2 disclosed blockers (positional/geolocated keys, `"profiles"`'s extrusion fallback) — see "Current focus" above / `TODOS.md`. |
+| `filter_elements` facet grammar | 🔲 | — | Now unblocked (depends on `get_element_value`, landed above). |
+| `format()` expression grammar | 🔲 | — | Now unblocked (depends on `get_element_value`, landed above). |
 
 ## Phase 6 — `api` Tier 1 [Lane A]
 
