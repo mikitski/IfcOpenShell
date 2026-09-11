@@ -26,13 +26,17 @@
 // `parseFilterQuery` unit tests (no Python counterpart -- Python's grammars are parsed by
 // `lark`, this port's hand-rolled scanners have their own edge cases worth covering
 // directly), the disclosed positional/geolocated-key blocker (`src/util/selector.ts`'s
-// finding #1 -- Python's own suite has a `test_selecting_an_elements_rotation_using_a_query`
-// test that exercises the *unblocked* real computation, which this port cannot reproduce;
-// the blocker itself has no Python counterpart by definition), the narrow `profiles`/
-// `classification`/`system`/`zone`/spatial-parent key re-implementations (`selector.ts`'s
-// finding #2), and the `int`-vs-`float`/`Decimal` numeric-comparison findings (chunk 2's
-// header comment, findings 1-2) -- none of which have a dedicated Python test case, so
-// these are original coverage of documented Python/port behavior, not ports of existing
+// finding #1 -- UPDATED by Phase 4's `util.placement` chunk: `x`/`y`/`z` are now real,
+// covered by a new test below reading an actual computed translation, not just the
+// blocker firing; `easting`/`northing`/`elevation`/`rotation_x`/`rotation_y`/`rotation_z`
+// remain blocked. Python's own suite has a `test_selecting_an_elements_rotation_using_a_query`
+// test that exercises the *still-unblocked* `rotation_*` computation, which this port
+// cannot yet reproduce; the blocker itself has no Python counterpart by definition), the
+// narrow `profiles`/`classification`/`system`/`zone`/spatial-parent key re-implementations
+// (`selector.ts`'s finding #2), and the `int`-vs-`float`/`Decimal` numeric-comparison
+// findings (the `filter_elements` chunk's header comment, findings 1-2) -- none of which
+// have a dedicated Python test case, so these are original coverage of documented
+// Python/port behavior, not ports of existing
 // Python tests.
 
 import { describe, expect, test } from "vitest";
@@ -537,16 +541,30 @@ describe("selector.getElementValue", () => {
 		expect(subject.getElementValue(element, "Qto_WallBaseQuantities.Count")).toBe(3);
 	});
 
-	describe("positional/geolocated keys -- disclosed blocker (see src/util/selector.ts's header comment, finding #1)", () => {
-		test("throws a clear, descriptive error naming the missing Python modules when ObjectPlacement is actually set", () => {
+	describe("positional/geolocated keys -- x/y/z now real, easting/northing/elevation/rotation_* still a disclosed blocker (see src/util/selector.ts's header comment, finding #1)", () => {
+		// `x`/`y`/`z` are now fully computed via the real, landed `util.placement
+		// .getLocalPlacement` -- needs a real, fully-formed `RelativePlacement` (unlike
+		// the still-blocked keys below, which throw before ever touching the matrix).
+		test("x/y/z read the real translation off the element's world-space placement matrix", () => {
+			const file = newFile();
+			const element = file.createEntity("IfcWall");
+			const point = file.createEntity("IfcCartesianPoint", [1, 2, 3]);
+			const axis2Placement = file.createEntity("IfcAxis2Placement3D", point);
+			const localPlacement = file.createEntity("IfcLocalPlacement");
+			localPlacement.set("RelativePlacement", axis2Placement);
+			element.set("ObjectPlacement", localPlacement);
+
+			expect(subject.getElementValue(element, "x")).toBe(1);
+			expect(subject.getElementValue(element, "y")).toBe(2);
+			expect(subject.getElementValue(element, "z")).toBe(3);
+		});
+
+		test("easting/northing/elevation/rotation_x/y/z still throw a clear, descriptive error naming the missing Python module when ObjectPlacement is actually set", () => {
 			const file = newFile();
 			const element = file.createEntity("IfcWall");
 			const placement = file.createEntity("IfcLocalPlacement");
 			element.set("ObjectPlacement", placement);
 
-			for (const key of ["x", "y", "z"]) {
-				expect(() => subject.getElementValue(element, key)).toThrow(/util\.placement/);
-			}
 			for (const key of ["easting", "northing", "elevation"]) {
 				expect(() => subject.getElementValue(element, key)).toThrow(/util\.geolocation/);
 			}
@@ -558,7 +576,7 @@ describe("selector.getElementValue", () => {
 		// Python: `test_selecting_an_elements_rotation_using_a_query`'s
 		// `element_without_placement` assertion (`get_element_value(..., "rotation_z") is
 		// None`) -- the only part of that Python test this port can still reproduce; the
-		// rest of that test exercises the real placement/geolocation computation this
+		// rest of that test exercises the real rotation-decomposition computation this
 		// port cannot yet perform (see the blocker above).
 		test("returns null, not a throw, when ObjectPlacement is declared but left unset", () => {
 			const file = newFile();

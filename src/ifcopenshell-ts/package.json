@@ -24,6 +24,9 @@
 		"lint:fix": "biome check --write .",
 		"generate:dts": "vite-node tools/generate-dts.ts"
 	},
+	"dependencies": {
+		"gl-matrix": "3.4.4"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@types/node": "^22.10.2",

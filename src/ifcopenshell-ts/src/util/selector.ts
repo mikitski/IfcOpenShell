@@ -61,26 +61,35 @@
 //
 // *** Two real, disclosed gaps found while building this chunk: ***
 //
-// 1. **Genuine, disclosed hard blocker (not stubbed or partially implemented): the
-//    positional/geolocated keys `x`/`y`/`z`/`easting`/`northing`/`elevation`/
-//    `rotation_x`/`rotation_y`/`rotation_z`.** Python's `_get_element_value` calls
+// 1. **Originally a genuine, disclosed hard blocker for all nine positional/geolocated
+//    keys (`x`/`y`/`z`/`easting`/`northing`/`elevation`/`rotation_x`/`rotation_y`/
+//    `rotation_z`), now PARTIALLY resolved.** Python's `_get_element_value` calls
 //    `ifcopenshell.util.placement.get_local_placement` (all nine keys) plus
 //    `ifcopenshell.util.geolocation.auto_xyz2enh` (the `easting`/`northing`/`elevation`
 //    trio) plus `ifcopenshell.util.shape_builder.np_matrix_to_euler` (the `rotation_*`
-//    trio) -- none of `util.placement`/`util.geolocation`/`util.shape_builder` are
-//    ported yet in this TS port (all Tier B, later phases per
-//    `planning/ifcopenshell-ts/20-roadmap.md`; `util.placement` is this project's own
-//    research doc's #3 near-term porting priority, not yet picked up).
-//    `throwPositionalKeyBlocked` below throws a clear, descriptive error naming the
-//    real missing Python modules --
-//    but only when Python itself would actually need them: exactly mirroring Python's
-//    own `hasattr(value, "ObjectPlacement")` guard, these keys fall through to ordinary
+//    trio).
+//
+//    **UPDATE (Phase 4's `util.placement` chunk, 2026-09-11):** `util.placement` has
+//    now landed (`util/placement.ts`) -- caught by that chunk's own `/code-review` pass
+//    as making this entry's `x`/`y`/`z` disclosure stale/misleading (the error message
+//    below used to claim `get_local_placement` itself "is not ported yet", which became
+//    false the moment that chunk merged). `x`/`y`/`z` are now fully wired to the real
+//    `getLocalPlacement` (`positionalXyzValue` below, reading the translation column
+//    directly off the returned `mat4` -- verified against `util/placement.ts`'s own
+//    documented flat-index layout, no new `gl-matrix` call needed for a 3-element
+//    read). `easting`/`northing`/`elevation` and `rotation_x`/`rotation_y`/
+//    `rotation_z` remain genuinely blocked: `util.geolocation`/`util.shape_builder` are
+//    still not ported (both Tier B, `planning/ifcopenshell-ts/20-roadmap.md`, not yet
+//    scheduled). `throwPositionalKeyBlocked` below throws a clear, descriptive error
+//    naming the real missing Python module for exactly those six keys now, but only
+//    when Python itself would actually need them: exactly mirroring Python's own
+//    `hasattr(value, "ObjectPlacement")` guard, these keys fall through to ordinary
 //    attribute/pset lookup (returning `null`, same as Python) when `value` isn't a class
 //    that declares `ObjectPlacement` at all, and return `null` without throwing (same as
 //    Python, which short-circuits to `value = None` before ever calling
 //    `get_local_placement`) when `ObjectPlacement` is declared but unset -- the blocker
 //    only fires for the one case that would genuinely need the unported math: a real,
-//    *set* `ObjectPlacement`. See `TODOS.md`'s new entry for this; matches the
+//    *set* `ObjectPlacement`. See `TODOS.md`'s updated entry for this; matches the
 //    established "genuinely-blocked-not-just-deferred" disclosure pattern (that file's
 //    `util.unit.convert_file_length_units` entry).
 //
@@ -153,6 +162,7 @@ import {
 	getType,
 	getTypes,
 } from "./element";
+import { getLocalPlacement } from "./placement";
 import { getElementSystems, getElementZones } from "./system";
 import { formatLength, pythonRound } from "./unit";
 
@@ -388,17 +398,33 @@ const POSITIONAL_XYZ_KEYS: readonly string[] = ["x", "y", "z"];
 const POSITIONAL_ENH_KEYS: readonly string[] = ["easting", "northing", "elevation"];
 const ROTATION_KEYS: readonly string[] = ["rotation_x", "rotation_y", "rotation_z"];
 
-/** Throws the disclosed blocker for a positional/geolocated key -- see this file's
- * header comment, finding #1, for the full rationale. Only called once Python itself
- * would actually need the unported math (a real, *set* `ObjectPlacement`). */
+/**
+ * `x`/`y`/`z`: now fully computable (`util.placement.getLocalPlacement` landed --
+ * Phase 4's `util.placement` chunk) -- Python: `matrix[:, 3][:3]` (the translation
+ * column) indexed by `"xyz".index(key)`. `getLocalPlacement`'s `mat4` stores that same
+ * translation at flat indices 12/13/14 (verified, `util/placement.ts`'s own header
+ * comment) -- `[matrix[12], matrix[13], matrix[14]]` is `xyz` directly, no `gl-matrix`
+ * helper call needed for a plain 3-element read.
+ */
+function positionalXyzValue(matrix: ReturnType<typeof getLocalPlacement>, key: string): number {
+	return matrix[12 + POSITIONAL_XYZ_KEYS.indexOf(key)] as number;
+}
+
+/**
+ * Throws the disclosed blocker for a still-unported positional key -- see this file's
+ * header comment, finding #1 (updated), for the full rationale. `easting`/`northing`/
+ * `elevation` need `ifcopenshell.util.geolocation.auto_xyz2enh` (not ported);
+ * `rotation_x`/`rotation_y`/`rotation_z` need `ifcopenshell.util.shape_builder
+ * .np_matrix_to_euler` (not ported). `x`/`y`/`z` are NOT blocked any more -- see
+ * `positionalXyzValue` above. Only called once Python itself would actually need the
+ * unported math (a real, *set* `ObjectPlacement`).
+ */
 function throwPositionalKeyBlocked(key: string): never {
 	const extra = POSITIONAL_ENH_KEYS.includes(key)
-		? " and `ifcopenshell.util.geolocation.auto_xyz2enh`"
-		: ROTATION_KEYS.includes(key)
-			? " and `ifcopenshell.util.shape_builder.np_matrix_to_euler`"
-			: "";
+		? "`ifcopenshell.util.geolocation.auto_xyz2enh`"
+		: "`ifcopenshell.util.shape_builder.np_matrix_to_euler`";
 	throw new Error(
-		`getElementValue: the "${key}" key-path key requires \`ifcopenshell.util.placement.get_local_placement\`${extra} -- none of \`util.placement\`/\`util.geolocation\`/\`util.shape_builder\` are ported yet in this TS port (Tier B, a later phase; see TODOS.md). Not stubbed or partially implemented: this element has a real, set \`ObjectPlacement\`, so Python would compute an actual value here that this port cannot yet reproduce.`,
+		`getElementValue: the "${key}" key-path key requires ${extra} -- neither \`util.geolocation\` nor \`util.shape_builder\` is ported yet in this TS port (Tier B, a later phase; see TODOS.md). Not stubbed or partially implemented: this element has a real, set \`ObjectPlacement\`, so Python would compute an actual value here that this port cannot yet reproduce. (\`x\`/\`y\`/\`z\` are unaffected -- those are fully computable now that \`util.placement.getLocalPlacement\` has landed.)`,
 	);
 }
 
@@ -480,7 +506,12 @@ function getElementValueForKeys(initialValue: unknown, keys: readonly (string | 
 		) {
 			const placement = attrOrNull(value, "ObjectPlacement");
 			if (placement) {
-				throwPositionalKeyBlocked(key);
+				if (POSITIONAL_XYZ_KEYS.includes(key)) {
+					const matrix = getLocalPlacement(placement as EntityInstance);
+					value = positionalXyzValue(matrix, key);
+				} else {
+					throwPositionalKeyBlocked(key);
+				}
 			} else {
 				value = null;
 			}
