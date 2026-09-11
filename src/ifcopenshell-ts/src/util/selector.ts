@@ -696,11 +696,12 @@ export type FilterFacet =
 	| { kind: "instance"; negate: boolean; globalId: string }
 	| { kind: "entity"; negate: boolean; ifcClass: string }
 	| { kind: "attribute"; name: string; comparison: FilterComparison; value: FilterValue }
-	| {
-			kind: "type" | "material" | "classification" | "location" | "group" | "parent";
-			comparison: FilterComparison;
-			value: FilterValue;
-	  }
+	| { kind: "type"; comparison: FilterComparison; value: FilterValue }
+	| { kind: "material"; comparison: FilterComparison; value: FilterValue }
+	| { kind: "classification"; comparison: FilterComparison; value: FilterValue }
+	| { kind: "location"; comparison: FilterComparison; value: FilterValue }
+	| { kind: "group"; comparison: FilterComparison; value: FilterValue }
+	| { kind: "parent"; comparison: FilterComparison; value: FilterValue }
 	| {
 			kind: "property";
 			pset: string | RegExp;
