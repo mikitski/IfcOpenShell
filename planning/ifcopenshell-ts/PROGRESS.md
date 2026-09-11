@@ -152,15 +152,21 @@ ZIP decompression for `.ifczip` and solved it with `node:zlib` alone, no new dep
 independently re-reviewed by the orchestrating session directly (not via subagent) before merge, per
 the fork-reliability mitigation above; no bugs found in either.
 
+✅ **`util.mvd_info` landed** (PR #41) — see the Phase 3 table below for detail. Independently
+re-reviewed by the orchestrating session directly before merge (per the fork-reliability mitigation
+above); found and fixed one real, undisclosed bug (the `Proxy` write-back wrapper committing on
+`.sort()`/`.reverse()`, verified empirically against real Python that `AutoCommitList` never does).
+
 **Remaining Phase 3 Tier A work is mostly Tier-B-blocked, not a scope choice**: `util.resource` needs
 `util.cost` (Tier B, not yet ported) — a real dependency, disclosed, not deferrable by choosing a
-different chunk order. `util.doc` (1123 lines) and `util.mvd_info` (341 lines) remain unstarted;
-per the research doc, `util.doc`'s runtime lookup functions are Tier A (trivial JSON lookups) but its
-`DocExtractor` scraper is Tier C / not a real porting target.
+different chunk order. `util.doc` (1123 lines) remains unstarted; per the research doc, its runtime
+lookup functions are Tier A (trivial JSON lookups) but its `DocExtractor` scraper is Tier C / not a
+real porting target.
 
-**Next Phase 3/5 dispatch**: `util.doc`'s runtime lookups or `util.mvd_info` (both unblocked), or
-continuing Lane C's `selector.py` (the `filter_elements` facet grammar or the `format()` expression
-grammar, both now unblocked by the key-path chunk above) — Phase 3 Tier A is otherwise essentially
+**Next Phase 3/5 dispatch**: `util.doc`'s runtime lookups (unblocked), or continuing Lane C's
+`selector.py` (the `filter_elements` facet grammar or the `format()` expression grammar, both now
+unblocked by the key-path chunk above), or starting Lane B (`util` Tier B, now unblocked —
+`util.placement` is the research doc's own #3 near-term priority) — Phase 3 Tier A is otherwise essentially
 complete pending `util.cost` (Tier B) unblocking `util.resource`.
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
@@ -262,7 +268,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.pset` | ✅ | [#39](https://github.com/mikitski/IfcOpenShell/pull/39) | Landed `ca80783a0`. `PsetQto`/`getTemplate`/`getPsetTemplateType`/`parseApplicableEntity`/`convertApplicableEntitiesToQuery`. Bundled template files are plain STEP text (not XML/JSON as the dispatch brief guessed) — reused the existing STEP parser, no new tooling. Corrects the dispatch brief's mutating-function assumption (only a one-time internal-only IFC4 backport patch, no undo/redo test needed). |
 | `util.resource` | 🔲 | — | Blocked on `util.cost` (Tier B, not yet ported) — a real dependency, not a scope choice. |
 | `util.doc` | 🔲 | — | 1123 lines; per the research doc, runtime lookup functions are Tier A (trivial JSON lookups), the `DocExtractor` scraper itself is Tier C / not a porting target. |
-| `util.mvd_info` | 🔲 | — | |
+| `util.mvd_info` | ✅ | [#41](https://github.com/mikitski/IfcOpenShell/pull/41) | Landed `2ac5fd564`. Hand-rolled parser for the `ViewDefinition`/`Comment`/`ExchangeRequirement`/`Option`/dynamic-keyword grammar (no new npm dependency); `MvdInfo`/`DictionaryHandler`/`AutoCommitList` as `Proxy`-based write-back wrappers. Grammar behavior pinned down by empirically probing a real `lark` install against ~20 inputs, not just reading the grammar text — several real quirks found and preserved verbatim (whitespace-absorbing `value` regex, an `Option` kv-success `keywords`-omission bug, dead grammar productions). `spf_header` has no `file_description()` accessor yet (pre-existing Phase 2 gap, disclosed in `TODOS.md`) — `MvdInfo` can't yet wire to a real `IfcFile.header()`. A real, undisclosed bug (the Proxy committing on `sort()`/`reverse()`, which real Python's `AutoCommitList` verifiably never does) found by independent review and fixed before merge. |
 
 ## Phase 4 — `util` Tier B [Lane B — needs `util.element`/`schema`/`unit`]
 
