@@ -13,3 +13,14 @@
 // comment for why individual usecase files call `wrapUsecase` directly rather than
 // this barrel doing any reflection-based auto-wrapping.
 export * from "./hooks";
+
+// Phase 6, `api.root`/`api.owner` chunk: `root.create_entity` (the foundational
+// function almost every other `api.*` usecase calls internally, per
+// `research/02-python-api-inventory.md` SS3's "root" deep dive) plus its two minimal
+// real dependencies, `owner.create_owner_history` and the `owner.settings`
+// monkeypatch-replacement hook. Namespaced as `api.root.createEntity`/
+// `api.owner.createOwnerHistory`/`api.owner.ownerSettings`, matching `util/index.ts`'s
+// per-submodule convention -- see `root/createEntity.ts`'s and `owner/settings.ts`'s
+// own header comments for this chunk's exact scope and design decisions.
+export * as root from "./root";
+export * as owner from "./owner";

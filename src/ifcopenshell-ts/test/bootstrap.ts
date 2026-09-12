@@ -59,3 +59,33 @@ function isSchemaAvailable(schema: Schema): boolean {
 }
 
 export const AVAILABLE_SCHEMAS: readonly Schema[] = ALL_SCHEMAS.filter(isSchemaAvailable);
+
+/**
+ * Removes every `IfcApplication`/`IfcPersonAndOrganization` from a `createTestFile`
+ * result -- `template.ts`'s `TEMPLATE` (matching real Python's
+ * `ifcopenshell.template.create`, which `ifcopenshell.api.project.create_file` calls)
+ * always pre-populates a default person/organization/application/owner-history chain
+ * (`#1`-`#5` in `template.ts`'s `TEMPLATE` string), exactly as real
+ * `test/bootstrap.py`'s own comment notes ("bootstrap is creating users in ifc2x3 by
+ * default"). Some tests (e.g. `ownerSettings`'s/`createOwnerHistory`'s own
+ * "no user or application available" cases) need a file that genuinely has neither,
+ * matching what the real Python test achieves by opening a second, bare
+ * `ifcopenshell.file(schema=...)` instead of reusing the fixture's `self.file` --
+ * this port doesn't have a bound "schema-only, no template" file constructor
+ * available at the `IfcFile` level (the low-level `file_new_with_schema_...`
+ * primitive exists but nothing wraps it yet, a narrower gap not worth closing just
+ * for this), so it reaches the same "no owner entities" state by stripping a
+ * `createTestFile` result instead -- behaviorally equivalent for every consumer of
+ * `file.byType("IfcApplication")`/`file.byType("IfcPersonAndOrganization")`, since
+ * `file.remove` (unlike `util.element.removeDeep`) has no referential-integrity
+ * check and simply deletes, leaving `IfcOwnerHistory`/`IfcPerson`/`IfcOrganization`
+ * harmlessly dangling (not read by anything these tests exercise).
+ */
+export function stripOwnerBootstrap(file: IfcFile): void {
+	for (const application of file.byType("IfcApplication")) {
+		file.remove(application);
+	}
+	for (const user of file.byType("IfcPersonAndOrganization")) {
+		file.remove(user);
+	}
+}
