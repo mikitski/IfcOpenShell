@@ -36,3 +36,12 @@ export { getClassAttributeMeta } from "./attributeCache";
 // findings. Namespaced as `util.element.getPset(...)`, mirroring Python's
 // `ifcopenshell.util.element.get_pset(...)` (see `util/index.ts`).
 export * as util from "./util";
+
+// Phase 6, first chunk: the `ifcopenshell.api` pre/post-listener hook system
+// (planning/ifcopenshell-ts/20-roadmap.md Phase 6's "cross-cutting, do early" item) --
+// see `api/hooks.ts`'s own header comment for the exact ported scope and the two
+// TS-specific design decisions (`shouldRunListeners` threading, the disclosed
+// friendlier-TypeError non-reproduction). Namespaced as `api.addPreListener(...)`,
+// mirroring Python's `ifcopenshell.api.add_pre_listener(...)` living directly in
+// `ifcopenshell/api/__init__.py`'s own top-level namespace (see `api/index.ts`).
+export * as api from "./api";
