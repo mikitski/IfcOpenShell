@@ -243,4 +243,43 @@ describe("Phase 1 async primitive layer", () => {
 		const asyncValues = (await wall.get_all_attribute_values_async()) as unknown[];
 		expect(asyncValues).toEqual(syncValues);
 	});
+
+	// Regression test for a real, fuzzer-found bug in the C++ core's tokenizer:
+	// token::as_string() used to accept any is_enumeration()-classified token --
+	// which (see that predicate's own "a bit confusing?" comment) includes
+	// Token_BOOL -- and read the union's `value_string` member even though a
+	// Token_BOOL token only ever sets `value_char`. That's undefined behavior
+	// (UBSan reported it at parse.cpp:500:16 on an unrelated PR's CI run); see
+	// token::as_string()'s own comment in src/ifcparse/parse.cpp for the full
+	// root-cause writeup and the fix (gating on `type == Token_ENUMERATION`
+	// instead of `is_enumeration()`).
+	//
+	// `parse_header()`'s `read_terminal()` helper (parse.cpp, `read_terminal()`)
+	// calls `lexer.next().as_string()` on the very first header token with no
+	// type guard at all, expecting the `ISO-10303-21` keyword -- so a file whose
+	// first token is `.T.`/`.F.`/`.U.` (a plain content byte, not a keyword) hits
+	// this directly, reachable straight from `file_new_with_data_data_size` (the
+	// synchronous sibling of the primitive `File.open_buffer_async()` awaits, and
+	// also the fuzz harness's own entry point -- see native/fuzz/fuzz_parse.cpp's
+	// doc comment), i.e. from raw, untrusted bytes with no need to construct a
+	// valid IFC file first.
+	//
+	// After the fix, a malformed header like this throws a normal, catchable
+	// `invalid_token_exception` (caught by `try_parse_header()`'s own try/catch)
+	// instead of hitting UB.
+	test("a malformed SPF header starting with a `.T.`/`.F.`/`.U.` literal does not crash the process (token::as_string()/is_enumeration() union confusion)", () => {
+		for (const literal of [".T.", ".F.", ".U."]) {
+			const malformed = Buffer.from(`${literal};`, "ascii");
+			let handle: unknown;
+			expect(() => {
+				handle = native.file_new_with_data_data_size(malformed, malformed.length);
+			}).not.toThrow();
+
+			const file = new File(handle);
+			// The header is malformed (no `ISO-10303-21` keyword), so schema
+			// resolution must fail -- but as a clean, catchable exception, not a
+			// native crash/process abort.
+			expect(() => file.schema()).toThrow();
+		}
+	});
 });

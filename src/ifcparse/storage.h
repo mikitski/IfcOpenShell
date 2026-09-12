@@ -160,10 +160,10 @@ namespace ifcopenshell {
         token_type type;
 
         union {
-            char value_char;     //types: OPERATOR
+            char value_char;     //types: OPERATOR, BOOL
             int64_t value_int;   //types: INT, IDENTIFIER
             double value_double; //types: FLOAT
-            const std::string* value_string;  //types: STR, ENUM, KEYWORD; lifetime managed by spf_lexer::string_pool_
+            const std::string* value_string;  //types: STR, ENUM, KEYWORD, BINARY; lifetime managed by spf_lexer::string_pool_
         };
 
         token() : start_pos(0),
