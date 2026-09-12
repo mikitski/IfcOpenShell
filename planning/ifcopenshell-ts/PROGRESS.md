@@ -191,15 +191,20 @@ Python-source bugs found and preserved verbatim in each, and both resolved pre-e
 cross-file gaps elsewhere (`selector.ts`'s `easting`/`northing`/`elevation`/`"profiles"` blockers,
 `element.ts`'s `getStyles` narrow re-implementation).
 
-**New: a real, unrelated C++ core bug found by `fuzz` CI on PR #50 (2026-09-12)**, tracked and being
-fixed separately (not blocking, since `fuzz` isn't a required check and the finding has zero relation
-to any TS-port diff): `token::as_string()` (`src/ifcparse/parse.cpp`) misreads its own `union` for a
-`Token_BOOL` token (`.T.`/`.F.`/`.U.` literals) — `is_enumeration()`'s dual `Token_ENUMERATION`-or-
-`Token_BOOL` meaning bleeds into `as_string()`'s "does this token store a `value_string`" check, but
-`Token_BOOL` tokens only ever populate the union's `value_char` member, never `value_string` — a real
-type-confusion UBSan correctly caught. Root-caused by direct code reading (not guessed); a dedicated
-fix-and-verify agent is in flight, matching this project's own Phase 1 precedent for ASan/fuzz-found
-core bugs (investigate, fix narrowly, verify, PR — not folded into unrelated TS-port work).
+✅ **Resolved: the fuzz-found C++ core bug from PR #50 (2026-09-12)** — `token::as_string()`
+(`src/ifcparse/parse.cpp`) misread its own `union` for a `Token_BOOL` token (`.T.`/`.F.`/`.U.`
+literals): `is_enumeration()`'s dual `Token_ENUMERATION`-or-`Token_BOOL` meaning bled into
+`as_string()`'s "does this token store a `value_string`" check, but `Token_BOOL` tokens only ever
+populate the union's `value_char` member — a real type-confusion UBSan correctly caught. Fixed by
+narrowing `as_string()`'s condition to `type == Token_ENUMERATION` directly (`is_enumeration()`
+itself untouched — its only other caller is safe). A dedicated fix-and-verify agent also found and
+fixed an identical, previously-latent bug in `as_logical()` (reads `value_int` instead of
+`value_char` for the same token kind — masked in production only by caller call-order luck). Root
+cause reproduced directly (a standalone `-fsanitize=undefined` repro matching the real crash's exact
+diagnostic), fix verified via the real `fuzz`/`asan-ubsan` CI jobs going green. Independently
+re-reviewed by the orchestrating session directly against the real source before merge, matching this
+project's own Phase 1 precedent for ASan/fuzz-found core bugs (investigate, fix narrowly, verify, PR —
+not folded into unrelated TS-port work).
 
 **Next Phase 3/4/5 dispatch**: `util.doc`'s runtime lookups (unblocked), continuing Lane B (`util`
 Tier B — `util.cost` to unblock `util.resource`, or `util.shape`/`util.shape_builder`/`util.alignment`
