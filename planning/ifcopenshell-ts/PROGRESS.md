@@ -163,8 +163,22 @@ disclosed, not deferrable by choosing a different chunk order.
 
 ✅ **`util.cost` landed** (PR #56) — see the Phase 4 table below for detail. `util.resource` (the
 last remaining Phase 3 Tier A item) is now unblocked. Independently re-reviewed by the orchestrating
-session directly against the real Python source before merge (per the fork-reliability mitigation
-above); no bugs found beyond what the dispatch agent itself already disclosed and fixed.
+session directly against the real Python source before merge; no bugs found.
+
+✅ **`util.resource` landed** (PR #60) — **Phase 3 (`util` Tier A) is now fully complete.** Real
+finding: `date.ts`'s unified `Duration` type keeps `days`/`hours`/`minutes`/`seconds` independently
+parsed (not normalized the way a real Python `timedelta`/`isodate.Duration`'s `.days`/`.seconds` are),
+which would have silently produced wrong results for `get_resource_required_work`/`get_quantity`'s
+direct field reads — caught by tracing the real `isodate` source rather than assuming the field names
+lined up, fixed with a local bridging helper. A real CI-only test bug (not a code bug) was found and
+fixed after merge review: a new `mepBendShape` test (landed in the concurrent `util.shape_builder`
+part 2 chunk, PR #61) hardcoded `createTestFile("IFC2X3")` without the established
+`AVAILABLE_SCHEMAS`-gating convention (`bootstrap.ts`'s own documented `SCHEMA_VERSIONS=4`-only CI
+build) — real build-and-test failures on 3 platforms, diagnosed from the actual CI log (not assumed
+to be a flake) and fixed directly by the orchestrating session before merging PR #61. `util.resource`
+itself was independently re-reviewed by the orchestrating session directly against the real Python
+source before merge (per the fork-reliability mitigation above); no bugs found beyond what the
+dispatch agent itself already disclosed and fixed.
 
 ✅ **`selector.py` is now fully ported** (all three grammars — key-path, `filter_elements`, `format()`
 — see the Phase 5 table below): this completes the research doc's own "single highest-leverage
@@ -209,11 +223,11 @@ re-reviewed by the orchestrating session directly against the real source before
 project's own Phase 1 precedent for ASan/fuzz-found core bugs (investigate, fix narrowly, verify, PR —
 not folded into unrelated TS-port work).
 
-**Next Phase 3/4 dispatch**: `util.resource` (now unblocked by `util.cost` — the last remaining
-Phase 3 Tier A item), `util.shape_builder` part 2 (the four MEP transition/bend methods left out of
-part 1), `util.shape` (needs `polygon-clipping`, confirmed installable — the npm registry is
-reachable in this sandbox even though `pip`/PyPI is not), or `util.alignment`. Phase 3 Tier A and
-Phase 5 (`selector.py`) are both fully complete; Phase 4 (`util` Tier B) now has
+**Phase 3 (`util` Tier A) is now fully complete.** **Next Phase 4 dispatch**: `util.shape_builder`
+part 2 is in flight (the four MEP transition/bend methods left out of part 1); after it lands, the
+remaining Phase 4 Tier B modules are `util.shape` (needs `polygon-clipping`, confirmed installable —
+the npm registry is reachable in this sandbox even though `pip`/PyPI is not) and `util.alignment`.
+Phase 5 (`selector.py`) is also fully complete. Phase 4 (`util` Tier B) now has
 `placement`/`geolocation`/`representation`/`cost`/`shape_builder` (part 1) landed.
 
 **Recurring CI-flake pattern — now also confirmed on Windows arm64 (vcpkg dependency downloads),
@@ -341,7 +355,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.date` | ✅ | [#35](https://github.com/mikitski/IfcOpenShell/pull/35) | Landed `321b71b89`. Full port, no new npm dependency — hand-rolled ISO 8601 duration parsing/formatting replaces Python's `isodate`/`dateutil`, verified line-by-line against the real `isodate` source. Correctly reproduces a real upstream `isodate` dead-code bug (fuzzy-parse "M" misread as months not minutes in some strings). One disclosed gap: `string_to_date`'s `dateutil` fuzzy free-text parsing not reproduced (zero internal callers, confirmed by grep). A real narrow bug (`parseIso8601Duration` wrongly rejecting valid `"PT"`) found by independent review before merge, fixed. |
 | `util.file` | ✅ | [#38](https://github.com/mikitski/IfcOpenShell/pull/38) | Landed `d2f4aa965`. `IfcHeaderExtractor` (STEP-header-only extraction, no full model parse). `.ifczip` reading needed real ZIP decompression (real save path uses DEFLATE, not just STORED) — solved with `node:zlib`'s `inflateRawSync` + a small hand-rolled EOCD/Central-Directory/Local-File-Header reader, no new npm dependency. Independently re-reviewed byte-offset-by-byte-offset against the real ZIP spec. |
 | `util.pset` | ✅ | [#39](https://github.com/mikitski/IfcOpenShell/pull/39) | Landed `ca80783a0`. `PsetQto`/`getTemplate`/`getPsetTemplateType`/`parseApplicableEntity`/`convertApplicableEntitiesToQuery`. Bundled template files are plain STEP text (not XML/JSON as the dispatch brief guessed) — reused the existing STEP parser, no new tooling. Corrects the dispatch brief's mutating-function assumption (only a one-time internal-only IFC4 backport patch, no undo/redo test needed). |
-| `util.resource` | 🔲 | — | Unblocked — `util.cost` (its remaining dependency) landed in PR #56. |
+| `util.resource` | ✅ | [#60](https://github.com/mikitski/IfcOpenShell/pull/60) | Landed `ad5fa71c8`. `getProductivity`/`getParentProductivity`/`getUnitConsumed`/`getQuantityProduced`/`getQuantityProducedName`/`getTotalQuantityProduced`/`getParametricResourceProducts`/`getTaskAssignments`/`getResourceRequiredWork`/`getNestedResources`/`getCost`/`getQuantity`/`getParentCost`. No mutating functions, no Transaction test needed. Real finding: `date.ts`'s unified `Duration` fields need explicit `timedelta`-style day/second normalization before use (see the note above) — fixed with a local bridging helper, verified with a dedicated test. No Python test file exists for this module — all 41 tests are original coverage. **This completes Phase 3 (`util` Tier A).** |
 | `util.doc` | ✅ | [#54](https://github.com/mikitski/IfcOpenShell/pull/54) | Landed `89199d0fe`. Runtime lookups only (`getDb`/`getSchemaByName`/`getClassSuggestions`/`getEntityDoc`/`getAttributeDoc`/`getPredefinedTypeDoc`/`getPropertySetDoc`/`getPropertyDoc`/`getTypeDoc`/`getInverseAttributes`) — `DocExtractor`/`run_doc_api_examples()` (the build-time doc scraper) correctly excluded, Tier C. Bundles 10 real doc-data JSON files (several MB, independently verified byte-identical). 3 real, disclosed discrepancies between Python's own type hints and its actual data/behavior found+verified against the real bundled data (`get_class_suggestions` returns a list not a single object; `PsetData.properties` values are structured objects not bare strings). Found+fixed a real, previously-undisclosed CI gap: `biome`'s 1 MiB file-size cap silently rejected one of the new data files. Independently re-reviewed by the orchestrating session against the real Python source and real data before merge; no bugs found. |
 | `util.mvd_info` | ✅ | [#41](https://github.com/mikitski/IfcOpenShell/pull/41) | Landed `2ac5fd564`. Hand-rolled parser for the `ViewDefinition`/`Comment`/`ExchangeRequirement`/`Option`/dynamic-keyword grammar (no new npm dependency); `MvdInfo`/`DictionaryHandler`/`AutoCommitList` as `Proxy`-based write-back wrappers. Grammar behavior pinned down by empirically probing a real `lark` install against ~20 inputs, not just reading the grammar text — several real quirks found and preserved verbatim (whitespace-absorbing `value` regex, an `Option` kv-success `keywords`-omission bug, dead grammar productions). `spf_header` has no `file_description()` accessor yet (pre-existing Phase 2 gap, disclosed in `TODOS.md`) — `MvdInfo` can't yet wire to a real `IfcFile.header()`. A real, undisclosed bug (the Proxy committing on `sort()`/`reverse()`, which real Python's `AutoCommitList` verifiably never does) found by independent review and fixed before merge. |
 
