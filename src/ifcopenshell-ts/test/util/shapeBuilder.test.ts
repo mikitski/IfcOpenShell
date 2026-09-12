@@ -1657,24 +1657,32 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("mepTransitionSha
 // `shapeBuilder.ts`'s own header comment for the full story) ---
 
 describe("mepBendShape (currently unconditionally blocked -- see shapeBuilder.ts's header comment)", () => {
-	test("throws under IFC2X3 -- 'IfcMaterialProfileSet' doesn't exist in that schema at all, so no segment can ever resolve a profile", () => {
-		// `IfcMaterialProfileSet` is an IFC4+ entity (confirmed: absent from
-		// `src/generated/ifc2x3.d.ts`), so `segmentWithProfile()`'s own fixture can't be
-		// built under IFC2X3 -- meaning no real IFC2X3 caller could ever satisfy
-		// `mepGetProfile`/`get_profile` either. `mepBendShape` throws via its own
-		// `assert profile` check (never even reaching `polyline()`'s separate, real
-		// "arcs not supported for IFC2X3" restriction) -- a distinct, schema-capability
-		// reason, not the same IFC4/IFC4X3 primitive-layer gap tested below.
-		const file = createTestFile("IFC2X3");
-		const builder = new ShapeBuilder(file);
-		const segment = file.createEntity("IfcFlowSegment"); // No material at all.
+	// `describe.skipIf`/`test.skipIf`-guarded on `AVAILABLE_SCHEMAS.includes("IFC2X3")` --
+	// CI's core build is `SCHEMA_VERSIONS=4` (IFC4 only, see `bootstrap.ts`'s own header
+	// comment), so an unconditional `createTestFile("IFC2X3")` throws "No schema loaded"
+	// there, matching this project's established convention for any IFC2X3-specific test
+	// (e.g. `test/util/doc.test.ts`'s own `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))`).
+	test.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))(
+		"throws under IFC2X3 -- 'IfcMaterialProfileSet' doesn't exist in that schema at all, so no segment can ever resolve a profile",
+		() => {
+			// `IfcMaterialProfileSet` is an IFC4+ entity (confirmed: absent from
+			// `src/generated/ifc2x3.d.ts`), so `segmentWithProfile()`'s own fixture can't be
+			// built under IFC2X3 -- meaning no real IFC2X3 caller could ever satisfy
+			// `mepGetProfile`/`get_profile` either. `mepBendShape` throws via its own
+			// `assert profile` check (never even reaching `polyline()`'s separate, real
+			// "arcs not supported for IFC2X3" restriction) -- a distinct, schema-capability
+			// reason, not the same IFC4/IFC4X3 primitive-layer gap tested below.
+			const file = createTestFile("IFC2X3");
+			const builder = new ShapeBuilder(file);
+			const segment = file.createEntity("IfcFlowSegment"); // No material at all.
 
-		expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
-			/no supported single-profile material/,
-		);
+			expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
+				/no supported single-profile material/,
+			);
 
-		file.dispose();
-	});
+			file.dispose();
+		},
+	);
 
 	test.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 		"throws under %s (pre-existing defined-type-instance-creation primitive gap)",
