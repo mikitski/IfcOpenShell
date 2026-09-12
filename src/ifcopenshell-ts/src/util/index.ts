@@ -4,14 +4,15 @@
 // package) -- mirrors Python's namespace nesting (`ifcopenshell.util.element.get_pset`)
 // as `util.element.getPset` here, rather than flattening every util module's exports
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
-// port more `util` modules; `attribute`/`classification`/`constraint`/`date`/`element`/
-// `file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/`pset`/`representation`/
-// `schema`/`selector`/`system`/`type`/`unit` are ported so far
+// port more `util` modules; `attribute`/`classification`/`constraint`/`date`/`doc`/
+// `element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/`pset`/
+// `representation`/`schema`/`selector`/`system`/`type`/`unit` are ported so far
 // (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4).
 export * as attribute from "./attribute";
 export * as classification from "./classification";
 export * as constraint from "./constraint";
 export * as date from "./date";
+export * as doc from "./doc";
 export * as element from "./element";
 export * as file from "./file";
 export * as geolocation from "./geolocation";
