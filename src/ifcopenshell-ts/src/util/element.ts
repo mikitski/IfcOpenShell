@@ -46,13 +46,21 @@
 //
 // 1. `get_styles` (IN this chunk's scope) transitively calls
 //    `ifcopenshell.util.representation.get_representation(element, "Model", "Body",
-//    "MODEL_VIEW")` -- a Tier B module (20-roadmap.md Phase 4), not yet ported. This
-//    contradicts this chunk's own task brief, which asserted no in-scope function needs
-//    `util.representation`. Rather than porting that module's general API (scope creep)
-//    or silently dropping half of `get_styles`' behavior, `findBodyRepresentation` below
-//    is a narrow, non-exported, disclosed local re-implementation of exactly the one
-//    fixed-argument lookup `get_styles` needs -- not a stand-in for a real
-//    `util.representation` port, which Phase 4 will still need to do properly.
+//    "MODEL_VIEW")` -- a Tier B module (20-roadmap.md Phase 4), not yet ported at the
+//    time. This contradicted this chunk's own task brief, which asserted no in-scope
+//    function needs `util.representation`. Rather than porting that module's general API
+//    (scope creep) or silently dropping half of `get_styles`' behavior, a narrow,
+//    non-exported, disclosed local re-implementation (`findBodyRepresentation`) of
+//    exactly the one fixed-argument lookup `get_styles` needs stood in here temporarily.
+//
+//    **UPDATE (Phase 4's `util.representation` chunk, 2026-09-11):** `util.representation`
+//    has now landed (`util/representation.ts`) -- `getStyles` below now calls the real
+//    `getRepresentation(element, "Model", "Body", "MODEL_VIEW")` directly, and
+//    `findBodyRepresentation` has been removed. Verified behaviorally equivalent before
+//    switching over: both implementations walk the exact same `Representation
+//    .Representations`/`RepresentationMaps.MappedRepresentation` -> `ContextOfItems`
+//    shape; this file's own pre-existing `getStyles` test (`element.test.ts`, unchanged)
+//    still passes unmodified against the real `getRepresentation` call.
 //
 // 2. CORRECTED 2026-09-10 (`ts/phase-3-element-nominal-unwrap-fix`; the paragraph below
 //    is what this chunk originally believed, kept for the record -- see that PR's final
@@ -102,6 +110,7 @@ import { AttributeCategory, EntityInstance } from "../entityInstance";
 import { IfcFile } from "../file";
 import * as guid from "../guid";
 import { native } from "../native/native_loader";
+import { getRepresentation } from "./representation";
 
 /** Python: `MATERIAL_TYPE = Literal[...]` (module-level constant in element.py). */
 export type MaterialType =
@@ -960,44 +969,13 @@ export function getMaterialProfiles(element: EntityInstance): PrioritisedProfile
 }
 
 /**
- * Narrow, disclosed, non-exported stand-in for exactly
- * `ifcopenshell.util.representation.get_representation(element, "Model", "Body",
- * "MODEL_VIEW")` -- the one fixed-argument call `get_styles` (below) makes. See this
- * file's header comment: `util.representation` is a not-yet-ported Tier B module;
- * porting its general `get_representation`/`get_representations_iter`/
- * `is_representation_of_context` surface is out of scope for this chunk. This inlines
- * only the "Model"/"Body"/"MODEL_VIEW" lookup, not a general-purpose port.
- */
-function findBodyRepresentation(element: EntityInstance): EntityInstance | null {
-	let representations: readonly EntityInstance[] = [];
-	if (element.isA("IfcProduct")) {
-		const representation = element.get("Representation") as EntityInstance | null;
-		if (representation) representations = attrList(representation, "Representations");
-	} else if (element.isA("IfcTypeProduct")) {
-		representations = attrList(element, "RepresentationMaps").map(
-			(representationMap) => representationMap.get("MappedRepresentation") as EntityInstance,
-		);
-	}
-	for (const representation of representations) {
-		const context = representation.get("ContextOfItems") as EntityInstance | null;
-		if (
-			context?.isA("IfcGeometricRepresentationSubContext") &&
-			context.get("TargetView") === "MODEL_VIEW" &&
-			context.get("ContextIdentifier") === "Body" &&
-			context.get("ContextType") === "Model"
-		) {
-			return representation;
-		}
-	}
-	return null;
-}
-
-/**
  * Python: `get_styles(element) -> list[entity_instance]`.
  *
  * Retrieves the styles used in an element's representation -- from the material or the
  * body representation. See this file's header comment for the `util.representation`
- * dependency finding.
+ * dependency finding: this now calls the real `getRepresentation` (`util/representation
+ * .ts`, landed Phase 4) directly, exactly `ifcopenshell.util.representation
+ * .get_representation(element, "Model", "Body", "MODEL_VIEW")`.
  */
 export function getStyles(element: EntityInstance): EntityInstance[] {
 	const styles: EntityInstance[] = [];
@@ -1014,7 +992,7 @@ export function getStyles(element: EntityInstance): EntityInstance[] {
 		}
 	}
 
-	const body = findBodyRepresentation(element);
+	const body = getRepresentation(element, "Model", "Body", "MODEL_VIEW");
 	if (!body) return styles;
 
 	const queue: EntityInstance[] = [...attrList(body, "Items")];

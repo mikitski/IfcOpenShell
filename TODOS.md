@@ -829,8 +829,16 @@ missing Python modules rather than being stubbed or silently dropped:
    representation-item graph resolution (including `IfcMappedItem` indirection), not a narrow,
    self-contained lookup like the `findBodyRepresentation`/`getElementSystemsNarrow`-style
    re-implementations this same chunk used for the `classification`/`system`/`zone` keys. Neither
-   `util.shape` nor `util.representation` is ported yet. Still fully blocked, unaffected by the
-   `util.placement` landing above.
+   `util.shape` nor `util.representation` was ported yet at the time. Still fully blocked, unaffected
+   by the `util.placement` landing above.
+
+   **UPDATE 2026-09-11 (Phase 4's `util.representation` chunk):** `util.representation` has now
+   landed (`src/util/representation.ts`), resolving the `util.representation.get_representation`/
+   `.resolve_representation` half of `get_extrusions`' own dependency chain. `ifcopenshell.util.shape`
+   itself (both `get_extrusions` and `get_profiles`) is still not ported -- a separate module,
+   explicitly out of that chunk's own scope -- so this key is still genuinely blocked, just on a
+   narrower gap now. `getProfilesNarrow`'s error message in `src/util/selector.ts` was updated to
+   name only the real remaining gap (`util.shape`), not `util.representation` too.
 
 **Why deferred rather than attempted:** Same category as `convert_file_length_units` above -- a
 genuine cross-module hard blocker, not a "split into a follow-up chunk" situation. Porting only a
@@ -860,8 +868,68 @@ no-`ObjectPlacement`-set `null` case.
 
 **Depends on / blocked by:** Item 1's `x`/`y`/`z`/`easting`/`northing`/`elevation` are all
 resolved. The remaining `rotation_*` are blocked on `util.shape_builder` landing;
-`"profiles"`'s extrusion fallback is blocked on `util.representation` landing (both Tier B,
-`planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet scheduled in detail).
+`"profiles"`'s extrusion fallback is now blocked only on `util.shape` landing (`util.representation`
+resolved 2026-09-11) -- both Tier B, `planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet
+scheduled in detail.
+
+---
+
+### `util.representation.getReferenceLine`'s `util.shape.get_base_extrusions` fallback
+
+**What:** Python's `get_reference_line` is `if axis := get_representation(wall, "Plan", "Axis",
+"GRAPH_VIEW"): ... elif extrusions := ifcopenshell.util.shape.get_base_extrusions(wall): ...`. The
+primary path (a real "Plan"/"Axis"/"GRAPH_VIEW" `IfcShapeRepresentation` containing an
+`IfcPolyline`/`IfcIndexedPolyCurve`) is fully ported in `src/util/representation.ts`'s
+`getReferenceLine`. The `elif` fallback -- reached only when the wall has no such axis representation
+at all -- needs `ifcopenshell.util.shape.get_base_extrusions`, a separate, not-yet-ported Tier B
+module (explicitly out of that chunk's own scope). `getReferenceLine` throws a clear, disclosed error
+in exactly that one case (verified against the real `if`/`elif` control flow: a wall WITH an axis
+representation, even one whose items don't match `IfcPolyline`/`IfcIndexedPolyCurve`, falls through to
+the ordinary fallback-length return without ever touching this blocker, matching Python's own
+fall-through behavior).
+
+**Fix:** Port `ifcopenshell.util.shape.get_base_extrusions` (needs `util.shape`, Tier B). Once it
+lands, `getReferenceLine`'s `else` branch is a small, mechanical follow-up.
+
+**Context:** Surfaced during Phase 4's `util.representation` chunk (2026-09-11).
+
+---
+
+### `util.representation.guessType`'s `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` branches are blocked by the pre-existing `entityInstance.ts` DERIVED-attribute gap
+
+**What:** `guess_type`'s `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` branches read `i.Dim` --
+`IfcCurve.Dim`/`IfcSurface.Dim` are real EXPRESS DERIVED attributes (`DERIVE Dim :=
+IfcCurveDim(SELF)`/`IfcSurfaceDim(SELF)`; `IfcCurveDim` alone is a genuinely non-trivial ~20-line
+recursive function spanning `IfcLine`/`IfcConic`/`IfcPolyline`/`IfcTrimmedCurve`/
+`IfcCompositeCurve`/`IfcBSplineCurve`/`IfcOffsetCurve2D`/`3D`/`IfcPcurve`/`IfcIndexedPolyCurve`,
+confirmed by reading the real `ifcopenshell.express.rules.*` generated rule modules). Real Python
+resolves this via `ifcopenshell.express.rules.<schema>`'s compiled EXPRESS-rule module
+(`entity_instance.py`'s `__getattr__`, DERIVED-category branch); this TS port's `EntityInstance.get()`
+has no such fallback at all (a pre-existing, already-disclosed `entityInstance.ts` gap: "the EXPRESS
+derived-attribute rule-compilation fallback ... is explicitly out of scope ... `.get()` throws
+instead") -- `.get("Dim")` on any real entity unconditionally throws in this port today.
+
+This is a genuinely *reachable* practical limitation, not merely theoretical: the `elif` chain checks
+`Curve2D` (which evaluates `.Dim` for every `IfcCurve`-typed item) BEFORE the plain, dimension-agnostic
+`Curve` branch, so `guessType` throws for essentially any real-world `items` list containing an actual
+`IfcCurve`/`IfcSurface` instance -- including cases that would otherwise have resolved to the simple
+`"Curve"`/`"Surface"` result, since the throwing check runs first and never falls through.
+
+**Why not fixed now:** Implementing `IfcCurveDim`/`IfcSurfaceDim` would be real, disclosed scope creep
+into a separate, sizable EXPRESS-derived-attribute-execution feature -- `entityInstance.ts`'s own
+primitive-layer domain, already explicitly scoped out there (see that file's header comment). Not a
+small, narrow addition `util/representation.ts` should silently take on.
+
+**Fix:** Either (a) implement general EXPRESS DERIVED-attribute execution in `entityInstance.ts`
+(a much larger, cross-cutting primitive-layer feature -- would unblock every module that ever needs
+any derived attribute, not just this one), or (b) a narrower, `util.representation`-local
+`calcCurveDim`/`calcSurfaceDim` re-implementation of just these two rule functions (feasible, since
+both are fully described above, but has the same "narrow re-implementation of one module's private
+rule, not the general primitive" character as `findBodyRepresentation`'s former precedent).
+
+**Context:** Surfaced during Phase 4's `util.representation` chunk (2026-09-11). Pinned by a dedicated
+regression test in `test/util/representation.test.ts`'s `guessType` coverage (asserts the real,
+documented error for an `IfcLine` item), not just prose.
 
 ---
 

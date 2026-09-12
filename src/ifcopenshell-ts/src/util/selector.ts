@@ -125,6 +125,14 @@
 //      fallback throws the same disclosed-blocker pattern as point 1 above rather than
 //      being silently dropped or force-approximated.
 //
+//    **UPDATE (Phase 4's `util.representation` chunk, 2026-09-11):** `util.representation`
+//    has now landed (`util/representation.ts`), unblocking the `util.representation`
+//    half of the `get_extrusions` dependency named above. `ifcopenshell.util.shape`
+//    itself (both `get_extrusions` and `get_profiles`) is still not ported -- a separate
+//    module, explicitly out of that chunk's own scope -- so `getProfilesNarrow`'s
+//    fallback is still a genuine blocker, just narrower now: its error message below
+//    names only the real remaining gap (`util.shape`), not `util.representation` too.
+//
 //    **UPDATE (a later Phase 3 chunk, `util.classification`/`util.constraint`/
 //    `util.system`/`util.type`, 2026-09-10):** this finding originally also covered the
 //    `classification` key (`getClassificationNarrow`/`getReferencesNarrow`, a narrow
@@ -405,10 +413,10 @@ function getProfilesNarrow(element: EntityInstance): EntityInstance[] {
 	throw new Error(
 		'getElementValue: the "profiles" key\'s extrusion-based fallback (this element has no ' +
 			"IfcMaterialProfileSet, the only path this port implements) requires " +
-			"`ifcopenshell.util.shape.get_extrusions`, which itself transitively calls " +
-			"`ifcopenshell.util.representation.get_representation`/`.resolve_representation` -- " +
-			"neither `util.shape` nor `util.representation` is ported yet in this TS port " +
-			"(Tier B, a later phase; see TODOS.md). Not stubbed or partially implemented.",
+			"`ifcopenshell.util.shape.get_extrusions` -- `util.shape` is not ported yet in this TS port " +
+			"(Tier B, a later phase; see TODOS.md). `util.representation.get_representation`/" +
+			"`.resolve_representation` (the other half of `get_extrusions`' own dependency) landed in " +
+			"`util/representation.ts` and is no longer part of this blocker. Not stubbed or partially implemented.",
 	);
 }
 
