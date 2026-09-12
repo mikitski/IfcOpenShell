@@ -157,11 +157,9 @@ re-reviewed by the orchestrating session directly before merge (per the fork-rel
 above); found and fixed one real, undisclosed bug (the `Proxy` write-back wrapper committing on
 `.sort()`/`.reverse()`, verified empirically against real Python that `AutoCommitList` never does).
 
-**Remaining Phase 3 Tier A work is mostly Tier-B-blocked, not a scope choice**: `util.resource` needs
-`util.cost` (Tier B, not yet ported) — a real dependency, disclosed, not deferrable by choosing a
-different chunk order. `util.doc` (1123 lines) remains unstarted; per the research doc, its runtime
-lookup functions are Tier A (trivial JSON lookups) but its `DocExtractor` scraper is Tier C / not a
-real porting target.
+✅ **`util.doc`'s runtime lookups landed** (PR #54) — Phase 3 Tier A is now fully complete except
+`util.resource`, which still needs `util.cost` (Tier B, not yet ported) — a real dependency,
+disclosed, not deferrable by choosing a different chunk order.
 
 ✅ **`selector.py` is now fully ported** (all three grammars — key-path, `filter_elements`, `format()`
 — see the Phase 5 table below): this completes the research doc's own "single highest-leverage
@@ -206,10 +204,10 @@ re-reviewed by the orchestrating session directly against the real source before
 project's own Phase 1 precedent for ASan/fuzz-found core bugs (investigate, fix narrowly, verify, PR —
 not folded into unrelated TS-port work).
 
-**Next Phase 3/4/5 dispatch**: `util.doc`'s runtime lookups (unblocked), continuing Lane B (`util`
-Tier B — `util.cost` to unblock `util.resource`, or `util.shape`/`util.shape_builder`/`util.alignment`
-are the remaining Tier B modules) — Phase 3 Tier A and Phase 5 (`selector.py`) are both complete;
-Phase 4 (`util` Tier B) now has `placement`/`geolocation`/`representation` landed.
+**Next Phase 3/4 dispatch**: `util.cost` (now unblocked by `util.doc`) to unblock `util.resource`, or
+`util.shape`/`util.shape_builder`/`util.alignment` (the remaining Phase 4 Tier B modules) — Phase 3
+Tier A and Phase 5 (`selector.py`) are both fully complete; Phase 4 (`util` Tier B) now has
+`placement`/`geolocation`/`representation` landed.
 
 **Recurring CI flake — now at 4 confirmed occurrences, worth a dedicated look soon**:
 `test/native/event_loop.test.ts`'s timing-sensitive assertion (`MAX_ALLOWED_TICK_GAP_MS`/the
@@ -327,7 +325,7 @@ binding could be built, since it decided generated-vs-hand-written.
 | `util.file` | ✅ | [#38](https://github.com/mikitski/IfcOpenShell/pull/38) | Landed `d2f4aa965`. `IfcHeaderExtractor` (STEP-header-only extraction, no full model parse). `.ifczip` reading needed real ZIP decompression (real save path uses DEFLATE, not just STORED) — solved with `node:zlib`'s `inflateRawSync` + a small hand-rolled EOCD/Central-Directory/Local-File-Header reader, no new npm dependency. Independently re-reviewed byte-offset-by-byte-offset against the real ZIP spec. |
 | `util.pset` | ✅ | [#39](https://github.com/mikitski/IfcOpenShell/pull/39) | Landed `ca80783a0`. `PsetQto`/`getTemplate`/`getPsetTemplateType`/`parseApplicableEntity`/`convertApplicableEntitiesToQuery`. Bundled template files are plain STEP text (not XML/JSON as the dispatch brief guessed) — reused the existing STEP parser, no new tooling. Corrects the dispatch brief's mutating-function assumption (only a one-time internal-only IFC4 backport patch, no undo/redo test needed). |
 | `util.resource` | 🔲 | — | Blocked on `util.cost` (Tier B, not yet ported) — a real dependency, not a scope choice. |
-| `util.doc` | 🔲 | — | 1123 lines; per the research doc, runtime lookup functions are Tier A (trivial JSON lookups), the `DocExtractor` scraper itself is Tier C / not a porting target. |
+| `util.doc` | ✅ | [#54](https://github.com/mikitski/IfcOpenShell/pull/54) | Landed `89199d0fe`. Runtime lookups only (`getDb`/`getSchemaByName`/`getClassSuggestions`/`getEntityDoc`/`getAttributeDoc`/`getPredefinedTypeDoc`/`getPropertySetDoc`/`getPropertyDoc`/`getTypeDoc`/`getInverseAttributes`) — `DocExtractor`/`run_doc_api_examples()` (the build-time doc scraper) correctly excluded, Tier C. Bundles 10 real doc-data JSON files (several MB, independently verified byte-identical). 3 real, disclosed discrepancies between Python's own type hints and its actual data/behavior found+verified against the real bundled data (`get_class_suggestions` returns a list not a single object; `PsetData.properties` values are structured objects not bare strings). Found+fixed a real, previously-undisclosed CI gap: `biome`'s 1 MiB file-size cap silently rejected one of the new data files. Independently re-reviewed by the orchestrating session against the real Python source and real data before merge; no bugs found. |
 | `util.mvd_info` | ✅ | [#41](https://github.com/mikitski/IfcOpenShell/pull/41) | Landed `2ac5fd564`. Hand-rolled parser for the `ViewDefinition`/`Comment`/`ExchangeRequirement`/`Option`/dynamic-keyword grammar (no new npm dependency); `MvdInfo`/`DictionaryHandler`/`AutoCommitList` as `Proxy`-based write-back wrappers. Grammar behavior pinned down by empirically probing a real `lark` install against ~20 inputs, not just reading the grammar text — several real quirks found and preserved verbatim (whitespace-absorbing `value` regex, an `Option` kv-success `keywords`-omission bug, dead grammar productions). `spf_header` has no `file_description()` accessor yet (pre-existing Phase 2 gap, disclosed in `TODOS.md`) — `MvdInfo` can't yet wire to a real `IfcFile.header()`. A real, undisclosed bug (the Proxy committing on `sort()`/`reverse()`, which real Python's `AutoCommitList` verifiably never does) found by independent review and fixed before merge. |
 
 ## Phase 4 — `util` Tier B [Lane B — needs `util.element`/`schema`/`unit`]
