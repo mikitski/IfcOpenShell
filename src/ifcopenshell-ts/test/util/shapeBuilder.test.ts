@@ -6,9 +6,12 @@
 // cases), `TestRectangle.test_get_rectangle_coords`, `TestVertex`/`TestEdge`/`TestFace`,
 // `TestFaceset.test_polygonal_face_set_invalid_face_types` (one value adjusted, see its
 // own comment for why), `TestCreatePolyline`'s 3 cases and `TestMirror.test_mirror` (both
-// re-purposed into disclosed-blocked regression tests, see below). NOT ported:
-// `TestCalculateTransitions` (tests `mep_transition_calculate`, a Part-2/MEP method, out
-// of this chunk's scope entirely) and `TestFaceset.test_polygonal_face_set_simple_and_with_voids`'s
+// re-purposed into disclosed-blocked regression tests, see below). NOT ported (at the
+// time Part 1 landed): `TestCalculateTransitions` (tests `mep_transition_calculate`, a
+// Part-2/MEP method) -- **now ported below, verbatim, all 6 cases**, as part of Part 2
+// (`mepTransitionShape`/`mepTransitionLength`/`mepTransitionCalculate`/`mepBendShape`, see
+// `shapeBuilder.ts`'s own header comment for the per-method findings). Also NOT ported:
+// `TestFaceset.test_polygonal_face_set_simple_and_with_voids`'s
 // `ifcopenshell.geom.create_shape`/`ifcopenshell.util.shape.get_area` assertions (both
 // unported kernel-dependent modules) -- its structural assertions (isA/Faces
 // count/With Voids-or-not) ARE ported. `TestMathutilsCompatibleMethods` is ported with an
@@ -58,6 +61,22 @@
 // gap as `TODOS.md`'s existing "EntityInstance.getByIndex/wrapValue collapse EXPRESS
 // INTEGER vs. REAL" entry). Ported below using a genuinely fractional value
 // (`[1.5, 2.5, 3.5]`) instead, which validates correctly in both languages.
+//
+// *** Part 2 additions (the four MEP methods) ***
+//
+// `TestCalculateTransitions` (`mep_transition_calculate`) is ported verbatim below,
+// including its shared `calculate_and_test` helper's own independent 3-method (A/B/C)
+// angle-recomputation cross-check -- all 6 real Python cases. No Python test file coverage
+// exists for `mep_transition_shape`/`mep_transition_length`/`mep_bend_shape` (confirmed by
+// reading `test_shape_builder.py` in full) -- original coverage is added for all three,
+// matching `util/representation.ts`/`util/constraint.ts`'s established precedent for a
+// module with partial Python test coverage. `mepTransitionShape` is exercised across all 3
+// profile-pairing branches (rect-rect, circle-circle, and both directions of the mixed
+// circle/rect branch) plus its two `[null, null]` early-exit paths (unsupported profile
+// type, no material at all). `mepBendShape` is pinned as a regression test asserting its
+// current, disclosed, unconditional blockage on every schema (see `shapeBuilder.ts`'s own
+// header comment) -- both the IFC2X3 "arcs not supported" throw and the IFC4/IFC4X3
+// defined-type-instance-creation gap throw are covered.
 
 import { mat4, vec3 } from "gl-matrix";
 import { describe, expect, test } from "vitest";
@@ -1240,6 +1259,447 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC2X3"))("ShapeBuilder IFC
 				[1],
 			),
 		).toThrow(/Arcs are not supported for IFC2X3/);
+		file.dispose();
+	});
+});
+
+// =====================================================================================
+// Part 2: MEP transition/bend methods
+// =====================================================================================
+
+// --- local fixture helpers (no Python counterpart) ---
+
+function assignMaterial(file: IfcFile, elements: readonly EntityInstance[], material: EntityInstance): EntityInstance {
+	const rel = file.createEntity("IfcRelAssociatesMaterial");
+	rel.set("RelatedObjects", [...elements]);
+	rel.set("RelatingMaterial", material);
+	return rel;
+}
+
+/** A segment (any element works structurally -- `getMaterial`/`get_material` only cares
+ * about `HasAssociations`) with a single-profile `IfcMaterialProfileSet`, the shape
+ * `mepGetProfile`/`get_profile` (both `mep_transition_shape` and `mep_bend_shape`'s own
+ * nested closure) requires to resolve a profile at all. */
+function segmentWithProfile(file: IfcFile, profile: EntityInstance): EntityInstance {
+	const segment = file.createEntity("IfcFlowSegment");
+	const profileSet = file.createEntity("IfcMaterialProfileSet");
+	const materialProfile = file.createEntity("IfcMaterialProfile");
+	materialProfile.set("Profile", profile);
+	profileSet.set("MaterialProfiles", [materialProfile]);
+	assignMaterial(file, [segment], profileSet);
+	return segment;
+}
+
+function rectProfile(file: IfcFile, xDim: number, yDim: number): EntityInstance {
+	const profile = file.createEntity("IfcRectangleProfileDef");
+	profile.set("ProfileType", "AREA");
+	profile.set("XDim", xDim);
+	profile.set("YDim", yDim);
+	return profile;
+}
+
+function circleProfile(file: IfcFile, radius: number): EntityInstance {
+	const profile = file.createEntity("IfcCircleProfileDef");
+	profile.set("ProfileType", "AREA");
+	profile.set("Radius", radius);
+	return profile;
+}
+
+/** A Model/Body/MODEL_VIEW `IfcGeometricRepresentationSubContext`, matching
+ * `representation.test.ts`'s own `subContext` fixture helper -- `mepTransitionShape`/
+ * `mepBendShape` both call `getContext(file, "Model", "Body", "MODEL_VIEW")` and throw
+ * (Python: `assert body`) if none is found. */
+function bodyContext(file: IfcFile): EntityInstance {
+	const context = file.createEntity("IfcGeometricRepresentationSubContext");
+	context.set("ContextType", "Model");
+	context.set("ContextIdentifier", "Body");
+	context.set("TargetView", "MODEL_VIEW");
+	return context;
+}
+
+function addVec(a: readonly number[], b: readonly number[]): number[] {
+	return a.map((v, i) => v + b[i]);
+}
+
+function subVec(a: readonly number[], b: readonly number[]): number[] {
+	return a.map((v, i) => v - b[i]);
+}
+
+// --- `mepTransitionCalculate` (ported verbatim from `TestCalculateTransitions`,
+// including its shared `calculate_and_test` helper) ---
+
+function calculateAndTest(
+	builder: ShapeBuilder,
+	params: subject.MepTransitionCalculateOptions,
+	length: number | null,
+): void {
+	const endProfile = params.endProfile ?? false;
+	const startHalfDim = params.startHalfDim;
+	const endHalfDim = params.endHalfDim;
+	const offsetRaw = params.offset;
+	const offset: readonly [number, number] = endProfile ? [offsetRaw[1], offsetRaw[0]] : [offsetRaw[0], offsetRaw[1]];
+	const angle = params.angle as number;
+
+	const calculatedLength = builder.mepTransitionCalculate(params);
+	if (length === null) {
+		expect(calculatedLength).toBeNull();
+		return;
+	}
+	expect(calculatedLength).not.toBeNull();
+	expect(subject.isX(calculatedLength as number, length)).toBe(true);
+
+	// Angle confirmation methods:
+	// A - between two profiles of different dimensions
+	// B - between two profiles of the same dimensions, no offset by X
+	// C - between two profiles of the same dimensions, has offset by X
+	const diff = [startHalfDim[0] - endHalfDim[0], startHalfDim[1] - endHalfDim[1]];
+	const sameDimension = subject.isX(endProfile ? diff[1] : diff[0], 0);
+	const confirmationMethod: "A" | "B" | "C" = !sameDimension ? "A" : subject.isX(offset[0], 0) ? "B" : "C";
+
+	if (confirmationMethod === "A") {
+		const A = [(endProfile ? endHalfDim : startHalfDim)[0], 0, 0];
+		const endProfileOffset = subject.npTo3d(offset, length);
+		const D0 = [(endProfile ? startHalfDim : endHalfDim)[0], 0, 0];
+		const B = A.map((v) => -v);
+		const C = addVec(
+			D0.map((v) => -v),
+			endProfileOffset,
+		);
+		const D = addVec(D0, endProfileOffset);
+		const testedAngle = (subject.npAngle(subVec(A, D), subVec(B, C)) * 180) / Math.PI;
+		expect(subject.isX(testedAngle, angle)).toBe(true);
+	} else if (confirmationMethod === "B") {
+		const O = [0, 0, 0];
+		const A = addVec([-startHalfDim[0], 0, length], subject.npTo3d(offset));
+		const B = [A[0] * -1, A[1], A[2]];
+		const testedAngle = (subject.npAngle(subVec(A, O), subVec(B, O)) * 180) / Math.PI;
+		expect(subject.isX(testedAngle, angle)).toBe(true);
+	} else {
+		const A = [-startHalfDim[0], 0, 0];
+		const H = [A[0], A[1], A[2] + length];
+		H[1] += offset[1];
+		const D = [...H];
+		D[0] += offset[0];
+		const testedAngle = (subject.npAngle(subVec(H, A), subVec(D, A)) * 180) / Math.PI;
+		expect(subject.isX(testedAngle, angle)).toBe(true);
+	}
+
+	const calculatedAngle = builder.mepTransitionCalculate({ ...params, angle: null, length: calculatedLength });
+	expect(calculatedAngle).not.toBeNull();
+	expect(subject.isX(calculatedAngle as number, angle)).toBe(true);
+}
+
+describe("mepTransitionCalculate (ported verbatim from TestCalculateTransitions)", () => {
+	test("same dims, no offset", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		calculateAndTest(
+			builder,
+			{
+				startHalfDim: [100, 50, 0],
+				endHalfDim: [100, 50, 0],
+				offset: [0, 0],
+				endProfile: false,
+				angle: 90,
+				verbose: true,
+			},
+			100,
+		);
+		file.dispose();
+	});
+
+	test("same dims, has X offset", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		calculateAndTest(
+			builder,
+			{
+				startHalfDim: [100, 50, 0],
+				endHalfDim: [100, 50, 0],
+				offset: [50, 50],
+				endProfile: false,
+				angle: 30,
+				verbose: true,
+			},
+			70.71068,
+		);
+		file.dispose();
+	});
+
+	test("same dims, has Y offset", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		calculateAndTest(
+			builder,
+			{
+				startHalfDim: [100, 50, 0],
+				endHalfDim: [100, 50, 0],
+				offset: [0, 50],
+				endProfile: false,
+				angle: 90,
+				verbose: true,
+			},
+			86.60254,
+		);
+		file.dispose();
+	});
+
+	test("different dims, no offset", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		calculateAndTest(
+			builder,
+			{
+				startHalfDim: [100, 50, 0],
+				endHalfDim: [50, 100, 0],
+				offset: [0, 0],
+				endProfile: false,
+				angle: 30,
+				verbose: true,
+			},
+			186.60254,
+		);
+		file.dispose();
+	});
+
+	test("different dims, has X and Y offset", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		calculateAndTest(
+			builder,
+			{
+				startHalfDim: [100, 50, 0],
+				endHalfDim: [50, 100, 0],
+				offset: [50, 50],
+				endProfile: false,
+				angle: 30,
+				verbose: true,
+			},
+			165.83124,
+		);
+		file.dispose();
+	});
+
+	test("Y offset too big -- infeasible via methods A, B, and C", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+
+		// Method A.
+		const paramsA: subject.MepTransitionCalculateOptions = {
+			startHalfDim: [100, 50, 0],
+			endHalfDim: [50, 100, 0],
+			// offset.y > h -- 190 > 186.6
+			offset: [0, 190],
+			endProfile: false,
+			angle: 30,
+			verbose: true,
+		};
+		calculateAndTest(builder, paramsA, null);
+
+		// Method B.
+		const paramsB: subject.MepTransitionCalculateOptions = { ...paramsA, endHalfDim: [100, 100, 0] };
+		calculateAndTest(builder, paramsB, null);
+
+		// Method C.
+		const paramsC: subject.MepTransitionCalculateOptions = { ...paramsB, offset: [10.0, 190] };
+		calculateAndTest(builder, paramsC, null);
+
+		file.dispose();
+	});
+});
+
+// --- `mepTransitionLength` (no Python test coverage -- original, exercising the
+// bidirectional `check_transition()`/`check_transition(True)` logic that
+// `TestCalculateTransitions` above doesn't reach, since it calls `mep_transition_calculate`
+// directly) ---
+
+describe("mepTransitionLength", () => {
+	test("returns the same length as the underlying mepTransitionCalculate for a feasible case", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		const length = builder.mepTransitionLength([100, 50, 0], [100, 50, 0], 90, [0, 0]);
+		expect(length).not.toBeNull();
+		expect(subject.isX(length as number, 100)).toBe(true);
+		file.dispose();
+	});
+
+	test("returns null when no feasible transition exists", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		const length = builder.mepTransitionLength([100, 50, 0], [50, 100, 0], 30, [0, 190]);
+		expect(length).toBeNull();
+		file.dispose();
+	});
+});
+
+// --- `mepTransitionShape` (no Python test coverage -- original, exercising all 3
+// profile-pairing branches plus both `[null, null]` early-exit paths; fully functional,
+// see `shapeBuilder.ts`'s own header comment) ---
+
+describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("mepTransitionShape (%s)", (schema) => {
+	test("rectangle-to-rectangle transition", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		bodyContext(file);
+		const start = segmentWithProfile(file, rectProfile(file, 200, 100));
+		const end = segmentWithProfile(file, rectProfile(file, 100, 50));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 50, 50, 30);
+
+		expect(representation).not.toBeNull();
+		expect((representation as EntityInstance).isA("IfcShapeRepresentation")).toBe(true);
+		expect((representation as EntityInstance).get("RepresentationType")).toBe("Tesselation");
+		const items = (representation as EntityInstance).get("Items") as EntityInstance[];
+		// Rect-rect builds a single combined IfcPolygonalFaceSet -- no separate start/end
+		// extrusions (unlike the circle-circle/mixed branches below).
+		expect(items).toHaveLength(1);
+		expect(items[0].isA("IfcPolygonalFaceSet")).toBe(true);
+
+		expect(data).not.toBeNull();
+		const transitionData = data as subject.MepTransitionData;
+		expect(transitionData.startLength).toBe(50);
+		expect(transitionData.endLength).toBe(50);
+		expect(transitionData.angle).toBe(30);
+		expect(transitionData.transitionLength).toBeGreaterThan(0);
+		expect(transitionData.fullTransitionLength).toBeCloseTo(
+			transitionData.startLength + transitionData.transitionLength + transitionData.endLength,
+			9,
+		);
+
+		file.dispose();
+	});
+
+	test("circle-to-circle transition", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		bodyContext(file);
+		const start = segmentWithProfile(file, circleProfile(file, 50));
+		const end = segmentWithProfile(file, circleProfile(file, 30));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 40, 40, 30);
+
+		expect(representation).not.toBeNull();
+		const items = (representation as EntityInstance).get("Items") as EntityInstance[];
+		// Circle-circle: start extrusion, end extrusion, transition face set.
+		expect(items).toHaveLength(3);
+		for (const item of items) expect(item.isA("IfcPolygonalFaceSet")).toBe(true);
+		expect((data as subject.MepTransitionData).transitionLength).toBeGreaterThan(0);
+
+		file.dispose();
+	});
+
+	test("rectangle-to-circle transition (mixed branch, starting with rectangle)", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		bodyContext(file);
+		const start = segmentWithProfile(file, rectProfile(file, 100, 100));
+		const end = segmentWithProfile(file, circleProfile(file, 50));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 40, 40, 30);
+
+		expect(representation).not.toBeNull();
+		const items = (representation as EntityInstance).get("Items") as EntityInstance[];
+		expect(items).toHaveLength(3);
+		expect((data as subject.MepTransitionData).transitionLength).toBeGreaterThan(0);
+
+		file.dispose();
+	});
+
+	test("circle-to-rectangle transition (mixed branch, starting with circle -- exercises the face-orientation reversal)", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		bodyContext(file);
+		const start = segmentWithProfile(file, circleProfile(file, 50));
+		const end = segmentWithProfile(file, rectProfile(file, 100, 100));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 40, 40, 30);
+
+		expect(representation).not.toBeNull();
+		const items = (representation as EntityInstance).get("Items") as EntityInstance[];
+		expect(items).toHaveLength(3);
+		expect((data as subject.MepTransitionData).transitionLength).toBeGreaterThan(0);
+
+		file.dispose();
+	});
+
+	test("returns [null, null] when a segment has no resolvable single-profile material", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		const start = file.createEntity("IfcFlowSegment"); // No material at all.
+		const end = segmentWithProfile(file, rectProfile(file, 100, 50));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 40, 40);
+
+		expect(representation).toBeNull();
+		expect(data).toBeNull();
+
+		file.dispose();
+	});
+
+	test("returns [null, null] for an unsupported profile type", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		bodyContext(file);
+		const start = segmentWithProfile(file, file.createEntity("IfcArbitraryClosedProfileDef"));
+		const end = segmentWithProfile(file, rectProfile(file, 100, 50));
+
+		const [representation, data] = builder.mepTransitionShape(start, end, 40, 40);
+
+		expect(representation).toBeNull();
+		expect(data).toBeNull();
+
+		file.dispose();
+	});
+});
+
+// --- `mepBendShape` (no Python test coverage -- original; pinned as a regression test
+// against the CURRENT, disclosed, unconditional blockage on every schema -- see
+// `shapeBuilder.ts`'s own header comment for the full story) ---
+
+describe("mepBendShape (currently unconditionally blocked -- see shapeBuilder.ts's header comment)", () => {
+	test("throws under IFC2X3 -- 'IfcMaterialProfileSet' doesn't exist in that schema at all, so no segment can ever resolve a profile", () => {
+		// `IfcMaterialProfileSet` is an IFC4+ entity (confirmed: absent from
+		// `src/generated/ifc2x3.d.ts`), so `segmentWithProfile()`'s own fixture can't be
+		// built under IFC2X3 -- meaning no real IFC2X3 caller could ever satisfy
+		// `mepGetProfile`/`get_profile` either. `mepBendShape` throws via its own
+		// `assert profile` check (never even reaching `polyline()`'s separate, real
+		// "arcs not supported for IFC2X3" restriction) -- a distinct, schema-capability
+		// reason, not the same IFC4/IFC4X3 primitive-layer gap tested below.
+		const file = createTestFile("IFC2X3");
+		const builder = new ShapeBuilder(file);
+		const segment = file.createEntity("IfcFlowSegment"); // No material at all.
+
+		expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
+			/no supported single-profile material/,
+		);
+
+		file.dispose();
+	});
+
+	test.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
+		"throws under %s (pre-existing defined-type-instance-creation primitive gap)",
+		(schema) => {
+			const file = createTestFile(schema);
+			const builder = new ShapeBuilder(file);
+			const segment = segmentWithProfile(file, circleProfile(file, 50));
+
+			expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
+				DEFINED_TYPE_ERROR,
+			);
+
+			file.dispose();
+		},
+	);
+
+	test("throws for a rectangular profile too (same transitive blockage)", () => {
+		const file = createTestFile("IFC4");
+		const builder = new ShapeBuilder(file);
+		const segment = segmentWithProfile(file, rectProfile(file, 100, 100));
+
+		expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
+			DEFINED_TYPE_ERROR,
+		);
+
 		file.dispose();
 	});
 });
