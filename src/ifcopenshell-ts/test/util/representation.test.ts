@@ -14,21 +14,25 @@
 // `.set(...)`), matching `test/util/element.test.ts`'s/`test/util/placement.test.ts`'s
 // own established pattern for this exact gap.
 //
-// Four real, disclosed Python-source/primitive-layer findings are each pinned by a
+// Five real, disclosed Python-source/primitive-layer findings are each pinned by a
 // dedicated test here, not just described in prose (see `representation.ts`'s own header
 // comment for the full story on each):
 // 1. `getPartOfProduct`'s real `"IFX2X3"` typo -- a dedicated IFC2X3 test asserts the
 //    actual (surprising) behavior: an `IfcTypeProduct` under IFC2X3 does NOT short-circuit
 //    to `null`, contradicting Python's own docstring.
-// 2. `resolveItems`'s asymmetric identity-shortcut -- a dedicated 3-level nested
+// 2. `getPartOfProduct` also throws (matching Python's own unguarded `element
+//    .RepresentationMaps` access) for a genuinely unset `RepresentationMaps` -- found by
+//    an independent adversarial `/code-review` pass; an earlier version of this port
+//    silently avoided that crash with a `?? []` fallback.
+// 3. `resolveItems`'s asymmetric identity-shortcut -- a dedicated 3-level nested
 //    `IfcMappedItem` test (identity transform in the middle level) asserts the caller's
 //    accumulated matrix is silently discarded, not composed through.
-// 3. `getPrioritisedContexts`' `IDENTIFIER_PRIORITY`'s real `"Body-FallBack"` vs.
+// 4. `getPrioritisedContexts`' `IDENTIFIER_PRIORITY`'s real `"Body-FallBack"` vs.
 //    `REPRESENTATION_IDENTIFIER`'s `"Body-Fallback"` casing mismatch (found by this
 //    chunk's own `/code-review` pass) -- a dedicated test asserts a real
 //    `"Body-Fallback"`-identified context is ranked BELOW `"Axis"`, not second (right
 //    after `"Body"`) as the documented priority order intends.
-// 4. `guessType`'s `Dim`-dependent branches (`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`)
+// 5. `guessType`'s `Dim`-dependent branches (`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`)
 //    are blocked by the pre-existing `entityInstance.ts` "no EXPRESS DERIVED attribute"
 //    gap -- a dedicated test asserts the real, documented error for an `IfcLine` item,
 //    rather than silently skipping coverage of that branch.
@@ -396,6 +400,23 @@ describe("util.representation resolveRepresentation", () => {
 
 		expect(subject.resolveRepresentation(outerRep).equals(innerRep)).toBe(true);
 	});
+
+	// Python's own comment: "Tekla 2023 has missing items and mapped representation,
+	// though it's invalid IFC." -- a single `IfcMappedItem` whose `IfcRepresentationMap
+	// .MappedRepresentation` (mandatory in the schema, but left unset by this invalid
+	// real-world producer) is `null` must NOT be treated as "resolved"; the outer
+	// representation is returned unchanged instead of recursing into `null`.
+	test("passes through unchanged when the single mapped item's MappedRepresentation is unset (invalid IFC, Tekla 2023 tolerance)", () => {
+		const file = createTestFile("IFC4");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const map = file.createEntity("IfcRepresentationMap"); // MappedRepresentation left unset
+		const item = file.createEntity("IfcMappedItem");
+		item.set("MappingSource", map);
+		item.set("MappingTarget", translationOperator(file, [0, 0, 0]));
+		const rep = shapeRepresentation(file, context, [item]);
+
+		expect(subject.resolveRepresentation(rep).equals(rep)).toBe(true);
+	});
 });
 
 // --- resolve_items ---
@@ -637,6 +658,19 @@ describe("util.representation getPartOfProduct", () => {
 			expect(subject.getPartOfProduct(wallType, context)?.equals(maps[0])).toBe(true);
 		},
 	);
+
+	// **DISCLOSED BUG, found by an independent adversarial `/code-review` pass**: Python
+	// reads `element.RepresentationMaps` with no `or []` guard (unlike this same source
+	// file's own `resolve_representation`/`resolve_items`), so a genuinely unset
+	// `RepresentationMaps` (a real, common case, not contrived) raises `TypeError` in
+	// real Python. Reproduced verbatim below -- see `representation.ts`'s own header
+	// comment, finding #1's second part, and `getPartOfProduct`'s own doc comment.
+	test("DISCLOSED BUG: throws (matching Python) for an IfcTypeProduct with a genuinely unset RepresentationMaps", () => {
+		const file = createTestFile("IFC4");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const wallType = file.createEntity("IfcWallType"); // RepresentationMaps left unset
+		expect(() => subject.getPartOfProduct(wallType, context)).toThrow();
+	});
 });
 
 // --- get_item_shape_aspect ---

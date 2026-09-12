@@ -61,6 +61,29 @@
 //    pinned by a dedicated IFC2X3 test in `representation.test.ts` that asserts the
 //    (surprising, typo-driven) real behavior, not the docstring's claim.
 //
+//    **A second, real, undisclosed divergence in this same function, found by this
+//    chunk's own `/code-review` pass (an independent adversarial re-review, not the
+//    same pass that found the `IDENTIFIER_PRIORITY` casing bug above):** the Python
+//    source reads `element.RepresentationMaps` with NO `or []`/`getattr(..., default)`
+//    guard (line 443) -- unlike this same Python source file's own `resolve_representation`
+//    /`resolve_items` (`representation.Items or []`) and `element.py`'s own repeated
+//    `element.RepresentationMaps or []` guard elsewhere for this exact attribute. For a
+//    genuinely unset `RepresentationMaps` (a real, common case -- any `IfcTypeProduct`
+//    with no geometry mapping assigned yet, not a contrived edge case), Python's list
+//    comprehension raises `TypeError: 'NoneType' object is not iterable`. An earlier
+//    version of `getPartOfProduct` below used a defensive `?? []` fallback here,
+//    silently avoiding that crash and returning `null` instead -- a real behavioral
+//    improvement over Python, but an *undisclosed* one that contradicted this file's own
+//    "preserve real Python bugs verbatim" convention (unlike `placement.ts`'s `rotation`
+//    divergence, which is narrowly justified as TS-type-system-unreachable in practice;
+//    this case is neither narrow nor unreachable). Fixed: `getPartOfProduct` now reads
+//    `.get("RepresentationMaps")` directly (matching Python's own unguarded access,
+//    never throwing "attribute not declared" since the attribute is always declared on
+//    `IfcTypeProduct`) and lets the un-guarded `.filter(...)` call throw the TS/JS
+//    equivalent (`TypeError: Cannot read properties of null (reading 'filter')`) for a
+//    genuinely unset value -- reproducing Python's crash, not silently avoiding it.
+//    Pinned by a dedicated test in `representation.test.ts` asserting the throw.
+//
 // 2. **`resolve_items`'s asymmetric identity-shortcut, which silently discards the
 //    caller's accumulated `matrix` on an identity-transform `IfcMappedItem`.** The
 //    Python source:
@@ -735,6 +758,13 @@ export function getPrioritisedContexts(ifcFile: IfcFile): EntityInstance[] {
  * header comment, finding #1, for why the real Python source does NOT actually do this
  * due to a real `"IFX2X3"` typo, reproduced verbatim below.**
  *
+ * **Also throws (matching Python) for an `IfcTypeProduct` with a genuinely unset
+ * `RepresentationMaps`** -- Python's own source reads that attribute with no `or
+ * []`/`getattr(..., default)` guard, so a real, common case (a type object with no
+ * geometry mapping assigned yet) raises `TypeError` there; found by this chunk's own
+ * `/code-review` pass (an earlier version of this port silently avoided that crash with
+ * a `?? []` fallback -- see this file's header comment, finding #1, for the full story).
+ *
  * @param element An IfcProduct or IfcTypeProduct.
  * @param context A IfcGeometricRepresentationContext.
  * @returns IfcProductRepresentationSelect.
@@ -747,8 +777,23 @@ export function getPartOfProduct(element: EntityInstance, context: EntityInstanc
 	// -- see this file's header comment, finding #1. This comparison is therefore
 	// always true, for every real schema.
 	if (element.isA("IfcTypeProduct") && (element.file as IfcFile).schema !== "IFX2X3") {
-		const maps = (attrOrNull(element, "RepresentationMaps") as EntityInstance[] | null) ?? [];
-		const matching = maps.filter((r) =>
+		// Python: `element.RepresentationMaps` -- direct attribute access, deliberately
+		// NOT the `or []`/`getattr(..., default)` guard this same source file's own
+		// `resolve_representation`/`resolve_items` use for their own `Items` reads (see
+		// this file's header comment, a real found-by-`/code-review` finding: an
+		// earlier version of this port defensively substituted `?? []` here, silently
+		// avoiding a crash Python's real source does NOT avoid). For a genuinely unset
+		// `RepresentationMaps` (a real, common case -- any `IfcTypeProduct` with no
+		// geometry mapping assigned yet), Python's own list comprehension raises
+		// `TypeError: 'NoneType' object is not iterable`; `.get(...)` below matches
+		// Python's own unguarded direct attribute access exactly (never throws
+		// "attribute not declared", since `RepresentationMaps` is always declared on
+		// `IfcTypeProduct` -- only the *value* can be `null`), and the un-guarded
+		// `.filter(...)` call two lines down throws the TS/JS equivalent
+		// (`TypeError: Cannot read properties of null (reading 'filter')`) for the same
+		// input, reproducing Python's crash rather than silently avoiding it.
+		const maps = element.get("RepresentationMaps") as EntityInstance[] | null;
+		const matching = (maps as EntityInstance[]).filter((r) =>
 			((r.get("MappedRepresentation") as EntityInstance).get("ContextOfItems") as EntityInstance).equals(context),
 		);
 		if (matching.length > 0) return matching[0];
