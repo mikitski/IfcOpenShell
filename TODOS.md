@@ -891,22 +891,29 @@ scheduled in detail.
 
 ### `util.representation.getReferenceLine`'s `util.shape.get_base_extrusions` fallback
 
-**What:** Python's `get_reference_line` is `if axis := get_representation(wall, "Plan", "Axis",
-"GRAPH_VIEW"): ... elif extrusions := ifcopenshell.util.shape.get_base_extrusions(wall): ...`. The
-primary path (a real "Plan"/"Axis"/"GRAPH_VIEW" `IfcShapeRepresentation` containing an
-`IfcPolyline`/`IfcIndexedPolyCurve`) is fully ported in `src/util/representation.ts`'s
-`getReferenceLine`. The `elif` fallback -- reached only when the wall has no such axis representation
-at all -- needs `ifcopenshell.util.shape.get_base_extrusions`, a separate, not-yet-ported Tier B
-module (explicitly out of that chunk's own scope). `getReferenceLine` throws a clear, disclosed error
-in exactly that one case (verified against the real `if`/`elif` control flow: a wall WITH an axis
+**RESOLVED (`util.shape` chunk, 2026-09-12).** `ifcopenshell.util.shape.get_base_extrusions` is now
+ported for real (`src/util/shape.ts`'s `getBaseExtrusions`, no kernel dependency -- see that file's
+own header comment), and `getReferenceLine`'s `elif` fallback branch is wired up to call it directly,
+replacing the thrown-error stub described below. See `representation.ts`'s own header comment and
+`getReferenceLine`'s doc comment for the full resolution (including a real Python
+empty-list-is-falsy subtlety in the `elif extrusions := get_base_extrusions(wall):` check, preserved
+verbatim: `extrusions.length > 0`, not just non-null, gates the fallback branch).
+
+**What (historical, kept for context):** Python's `get_reference_line` is `if axis :=
+get_representation(wall, "Plan", "Axis", "GRAPH_VIEW"): ... elif extrusions :=
+ifcopenshell.util.shape.get_base_extrusions(wall): ...`. The primary path (a real
+"Plan"/"Axis"/"GRAPH_VIEW" `IfcShapeRepresentation` containing an `IfcPolyline`/`IfcIndexedPolyCurve`)
+was fully ported in `src/util/representation.ts`'s `getReferenceLine` from the start. The `elif`
+fallback -- reached only when the wall has no such axis representation at all -- needed
+`ifcopenshell.util.shape.get_base_extrusions`, a separate, not-yet-ported Tier B module at the time
+(explicitly out of that chunk's own scope); `getReferenceLine` threw a clear, disclosed error in
+exactly that one case (verified against the real `if`/`elif` control flow: a wall WITH an axis
 representation, even one whose items don't match `IfcPolyline`/`IfcIndexedPolyCurve`, falls through to
 the ordinary fallback-length return without ever touching this blocker, matching Python's own
 fall-through behavior).
 
-**Fix:** Port `ifcopenshell.util.shape.get_base_extrusions` (needs `util.shape`, Tier B). Once it
-lands, `getReferenceLine`'s `else` branch is a small, mechanical follow-up.
-
-**Context:** Surfaced during Phase 4's `util.representation` chunk (2026-09-11).
+**Context:** Surfaced during Phase 4's `util.representation` chunk (2026-09-11). Resolved during the
+`util.shape` chunk (2026-09-12).
 
 ---
 
@@ -1094,6 +1101,66 @@ exercised under CI's current `SCHEMA_VERSIONS=4` (IFC4-only) build.
 
 **Depends on / blocked by:** Blocked on a future `ifcopenshell.geom` binding effort (not yet scheduled
 in the roadmap as of this chunk). Does not block anything else in Phase 4.
+
+---
+
+### `util.shape`'s `ifcopenshell.geom`-dependent surface (39 of 43 functions, not ported)
+
+**What:** `ifcopenshell.util.shape` (`src/ifcopenshell-python/ifcopenshell/util/shape.py`, 754 lines,
+43 top-level functions) is the same `ifcopenshell.geom` gap as the entry directly above, but at a much
+larger scale: **only 4 of its 43 functions are portable at all** (`is_x`, `get_profiles`,
+`get_extrusions`, `get_base_extrusions` -- ported for real in `src/util/shape.ts`, no kernel
+dependency). The remaining 39 all take a `W.triangulation` and/or `ShapeElementType` parameter --
+types importable only under Python's `if TYPE_CHECKING:` guard, from `ifcopenshell.geom` -- so there
+is no way to produce a real input for any of them in this TS port today, not merely "no test fixture
+yet." This is confirmed independently of, and is a strictly bigger blocker than, the module's 3
+`shapely`/`shapely.ops.unary_union` call sites (`get_footprint_area`'s polygon union) that
+`planning/ifcopenshell-ts/20-roadmap.md`'s "just needs `polygon-clipping`" framing focuses on: 36 of
+the 39 blocked functions don't touch `shapely` at all and are blocked purely on the missing kernel
+binding, so swapping in `polygon-clipping` alone would not meaningfully unblock this module.
+
+Full list of the 39 deferred functions (grouped by kernel-object parameter -- see `shape.ts`'s own
+header comment for the identical, more detailed breakdown):
+- `geometry: W.triangulation` only: `get_volume`, `get_x`, `get_y`, `get_z`, `get_max_xy`,
+  `get_max_xyz`, `get_min_xyz`, `get_bbox_centroid`, `get_vert_centroid`, `get_vertices`, `get_edges`,
+  `get_faces`, `get_material_colors`, `get_normals`, `get_shape_material_styles`,
+  `get_faces_material_style_ids`, `get_faces_representation_item_ids`,
+  `get_edges_representation_item_ids`, `get_bottom_elevation`, `get_top_elevation`, `get_area`,
+  `get_side_area`, `get_max_side_area`, `get_top_area`, `get_footprint_area` (also uses
+  `shapely`/`shapely.ops.unary_union`), `get_outer_surface_area`, `get_footprint_perimeter`,
+  `get_total_edge_length`.
+- `shape: ShapeElementType` (plus `geometry: W.triangulation`): `get_shape_matrix`,
+  `get_shape_bbox_centroid`, `get_shape_vertices`, `get_shape_bottom_elevation`,
+  `get_shape_top_elevation`.
+- `element: ifcopenshell.entity_instance` (plus `geometry: W.triangulation`): `get_element_bbox_centroid`,
+  `get_element_vertices`, `get_element_bottom_elevation`, `get_element_top_elevation`.
+- Plain array inputs, no `W.triangulation`/`ShapeElementType` directly, but every real call site
+  sources its arrays exclusively from the blocked `get_vertices`/`get_faces` above -- disclosed as a
+  distinct sub-case in `shape.ts`'s header comment, not silently folded into the list above:
+  `get_bbox`, `get_area_vf`.
+
+**Why deferred rather than attempted, and why no per-function throwing stubs:** Same fundamental
+category as the `getAxis2placement` entry above -- `ifcopenshell.geom` is a substantial, separate
+native-geometry-kernel binding effort, not something a `util.shape` chunk should build unilaterally.
+Given the sheer count (39, all equally and completely blocked, none "more done" than another),
+`shape.ts` deliberately does NOT follow this project's usual one-real-throwing-stub-per-function
+precedent (`util/alignment.ts`'s 3 blocked functions, `getAxis2placement`'s single blocked branch) --
+39 near-identical stubs would be padding, not disclosure. Instead every function is named above (and
+in `shape.ts`'s header comment) for API-surface-parity tracking, with this single entry as the real,
+named gap.
+
+**Fix:** Port an `ifcopenshell.geom` binding (native `W.triangulation`/`ShapeElementType` equivalents,
+at minimum `triangulation.verts_buffer`/`.faces_buffer`/`.edges_buffer`/etc.). Once real geometry
+objects are producible, all 39 functions above are a mechanical, verbatim `numpy` → array-math port
+(no `IfcFile`/`EntityInstance`-shaped design questions of their own, unlike most other `util` chunks) --
+`get_bbox`/`get_area_vf` need no kernel work themselves, only wiring once `get_vertices`/`get_faces`
+exist.
+
+**Context:** Surfaced during the `util.shape` chunk (2026-09-12), scoped and verified directly against
+the real Python source (not assumed from the roadmap doc).
+
+**Depends on / blocked by:** Same future `ifcopenshell.geom` binding effort as the `getAxis2placement`
+entry above (not yet scheduled in the roadmap as of this chunk).
 
 ---
 

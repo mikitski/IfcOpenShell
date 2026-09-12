@@ -825,10 +825,103 @@ describe("util.representation getReferenceLine", () => {
 		]);
 	});
 
-	test("no axis representation at all throws the disclosed util.shape blocker", () => {
+	test("no axis representation and no Model/Body/MODEL_VIEW representation at all falls back to the fallback length", () => {
+		// Previously this threw the disclosed util.shape blocker (see this file's header
+		// comment, "RESOLVED" section) -- getBaseExtrusions now returns `null` for a
+		// wall with no representation at all, which is falsy, so `getReferenceLine` falls
+		// all the way through to the ordinary fallback-length return, matching real
+		// Python's `elif extrusions := get_base_extrusions(wall):` never firing.
 		const file = createTestFile("IFC4");
 		const wall = file.createEntity("IfcWall");
-		expect(() => subject.getReferenceLine(wall)).toThrow(/util\.shape/);
+		expect(subject.getReferenceLine(wall, 2.5)).toEqual([
+			[0, 0],
+			[2.5, 0],
+		]);
+	});
+
+	// --- no axis representation: the util.shape.get_base_extrusions fallback (now real) ---
+
+	function wallWithBodyExtrusions(file: IfcFile, extrusions: readonly EntityInstance[]): EntityInstance {
+		const bodyContext = subContext(file, "Model", "Body", "MODEL_VIEW");
+		const bodyRep = shapeRepresentation(file, bodyContext, extrusions);
+		return productWithRepresentations(file, "IfcWall", [bodyRep]);
+	}
+
+	function extrusionWithOuterCurve(file: IfcFile, curve: EntityInstance | null): EntityInstance {
+		const extrusion = file.createEntity("IfcExtrudedAreaSolid");
+		const profile = file.createEntity("IfcArbitraryClosedProfileDef");
+		if (curve) profile.set("OuterCurve", curve);
+		extrusion.set("SweptArea", profile);
+		return extrusion;
+	}
+
+	test("falls back to a base extrusion's IfcPolyline OuterCurve when there's no axis representation", () => {
+		const file = createTestFile("IFC4");
+		const curve = file.createEntity("IfcPolyline", [point(file, [7, 0]), point(file, [2, 5])]);
+		const extrusion = extrusionWithOuterCurve(file, curve);
+		const wall = wallWithBodyExtrusions(file, [extrusion]);
+
+		// min/max X of the polyline's points, always (0, minX)/(maxX, 0) regardless of order.
+		expect(subject.getReferenceLine(wall)).toEqual([
+			[2, 0],
+			[7, 0],
+		]);
+	});
+
+	test("falls back to a base extrusion's IfcIndexedPolyCurve OuterCurve when there's no axis representation", () => {
+		const file = createTestFile("IFC4");
+		const pointList = file.createEntity("IfcCartesianPointList2D", [
+			[3, 1],
+			[9, 4],
+		]);
+		const curve = file.createEntity("IfcIndexedPolyCurve", pointList);
+		const extrusion = extrusionWithOuterCurve(file, curve);
+		const wall = wallWithBodyExtrusions(file, [extrusion]);
+
+		expect(subject.getReferenceLine(wall)).toEqual([
+			[3, 0],
+			[9, 0],
+		]);
+	});
+
+	test("a base extrusion whose profile has no OuterCurve at all is skipped in favor of the next one", () => {
+		const file = createTestFile("IFC4");
+		const noCurveExtrusion = extrusionWithOuterCurve(file, null);
+		const curve = file.createEntity("IfcPolyline", [point(file, [0, 0]), point(file, [4, 0])]);
+		const matchingExtrusion = extrusionWithOuterCurve(file, curve);
+		const wall = wallWithBodyExtrusions(file, [noCurveExtrusion, matchingExtrusion]);
+
+		expect(subject.getReferenceLine(wall)).toEqual([
+			[0, 0],
+			[4, 0],
+		]);
+	});
+
+	test("a base extrusion whose OuterCurve is neither IfcPolyline nor IfcIndexedPolyCurve is skipped", () => {
+		const file = createTestFile("IFC4");
+		const curve = file.createEntity("IfcCircle");
+		const extrusion = extrusionWithOuterCurve(file, curve);
+		const wall = wallWithBodyExtrusions(file, [extrusion]);
+
+		expect(subject.getReferenceLine(wall, 3.0)).toEqual([
+			[0, 0],
+			[3.0, 0],
+		]);
+	});
+
+	test("real Python empty-list-is-falsy subtlety: a Model/Body/MODEL_VIEW representation with no base extrusions at all still falls back to the fallback length", () => {
+		// getBaseExtrusions returns `[]` (not `null`) here -- Python's own
+		// `elif extrusions := get_base_extrusions(wall):` treats `[]` as falsy too, so
+		// this must NOT throw or misbehave the way a plain `if (extrusions)` truthiness
+		// check would in JS (where `[]` is truthy). See this file's header comment.
+		const file = createTestFile("IFC4");
+		const circle = file.createEntity("IfcCircle");
+		const wall = wallWithBodyExtrusions(file, [circle]);
+
+		expect(subject.getReferenceLine(wall, 1.5)).toEqual([
+			[0, 0],
+			[1.5, 0],
+		]);
 	});
 
 	test("default fallbackLength is 1.0", () => {
