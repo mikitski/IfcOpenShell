@@ -7,9 +7,9 @@
 // port more `util` modules; `attribute`/`classification`/`constraint`/`cost`/`date`/`doc`/
 // `element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/`pset`/
 // `representation`/`resource`/`schema`/`selector`/`shapeBuilder`/`system`/`type`/`unit`
-// are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4). `shapeBuilder` is Part 1 of
-// `util/shape_builder.py` only -- the four MEP-specific methods are a separate,
-// not-yet-ported follow-up chunk, see `shapeBuilder.ts`'s own header comment.
+// are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4). `shapeBuilder` is
+// now `util/shape_builder.py` in full (landed across two PRs given its unusual size -- see
+// `shapeBuilder.ts`'s own header comment for the split).
 export * as attribute from "./attribute";
 export * as classification from "./classification";
 export * as constraint from "./constraint";

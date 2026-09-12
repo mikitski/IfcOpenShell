@@ -2,11 +2,13 @@
 //
 // Near-verbatim port of `ifcopenshell/util/shape_builder.py` (src/ifcopenshell-python,
 // 2312 lines, ~20 module-level functions + a 60-method `ShapeBuilder` class) -- a Phase 4
-// ("`util` Tier B") chunk. **This is PART 1 ONLY**: every module-level function and every
-// `ShapeBuilder` method EXCEPT the four MEP-specific methods (`mep_transition_shape`,
-// `mep_transition_length`, `mep_transition_calculate`, `mep_bend_shape`, roughly
-// shape_builder.py:1736-2312) -- those are entirely unported here (not stubbed), a
-// follow-up chunk's job. Confirmed **kernel-free** per `20-roadmap.md`'s Phase 4 section
+// ("`util` Tier B") chunk, landed across two PRs given its unusual size. **Part 1** (PR
+// #58) ported every module-level function and every `ShapeBuilder` method EXCEPT the four
+// MEP-specific methods. **Part 2** (this chunk) adds those four: `mepTransitionShape`,
+// `mepTransitionLength`, `mepTransitionCalculate`, `mepBendShape`
+// (`mep_transition_shape`/`mep_transition_length`/`mep_transition_calculate`/
+// `mep_bend_shape`, shape_builder.py:1736-2312) -- the module is now **fully ported**, no
+// functions or methods remain unported. Confirmed **kernel-free** per `20-roadmap.md`'s Phase 4 section
 // (no `shapely`/OpenCASCADE dependency despite the name) -- reuses `gl-matrix` (already
 // this project's runtime dependency, added by `util/placement.ts`) for the handful of 4x4
 // matrix operations; every other numeric operation here is on plain 2/3-component vectors,
@@ -159,16 +161,93 @@
 // (the fan-out point for `mirror()`'s per-point-type dispatch) gets the explicit guard,
 // not every elementwise-array helper in this file.
 //
+// *** Part 2 (the four MEP methods) -- findings specific to this chunk ***
+//
+// - **`mepTransitionShape` is FULLY FUNCTIONAL today**, unlike the other three MEP
+//   methods below (a genuinely good-news finding, verified by tracing every call it
+//   makes): it never calls the blocked `profile()`/`polyline(..., closed=true |
+//   arcPoints=...)` -- its only geometry-creation calls are `extrudeFaceSet()`/
+//   `polygonalFaceSet()` (both already fully functional -- `IfcPolygonalFaceSet`/
+//   `IfcIndexedPolygonalFace(WithVoids)` are real entities, not defined types), and its
+//   one `getRepresentation()` call always passes an explicit `representationType`
+//   ("Tesselation", see below), never triggering the blocked `guessType()` fallback.
+// - **`mepBendShape` is UNCONDITIONALLY BLOCKED on every schema and every profile shape**
+//   -- a new, transitive finding this chunk investigated directly (not assumed), for two
+//   DIFFERENT reasons depending on schema:
+//   - On IFC4/IFC4X3: its private `getBendRepresentationItem` closure always calls
+//     `this.polyline(..., arcPoints=...)` with a non-empty `arcPoints` array in every
+//     branch (circular profile: `[1]`; rectangular, degenerate-radius: `[2]`;
+//     rectangular, general: `[1, 4]`), which hits finding 2 above (`IfcLineIndex`/
+//     `IfcArcIndex` creation blocked).
+//   - On IFC2X3: `IfcMaterialProfileSet` (needed by `mepGetProfile`/`get_profile` to
+//     resolve ANY profile at all) is an IFC4+ entity -- confirmed absent from
+//     `src/generated/ifc2x3.d.ts` -- so no real IFC2X3 caller could ever satisfy
+//     `mep_bend_shape`'s own `assert profile` check in the first place. This means
+//     IFC2X3 never even reaches `polyline()`'s own separate, real "Arcs are not
+//     supported for IFC2X3" restriction (a genuine, pre-existing, unrelated Python-source
+//     restriction) -- it throws earlier, via `assert profile`, for a distinct
+//     schema-capability reason.
+//   Either way, every call to `mepBendShape` throws today, regardless of schema -- ported
+//   faithfully anyway (every branch is real, correct, verbatim-translated control flow,
+//   reachable end-to-end for any non-IFC2X3 file the moment finding 2 is fixed), pinned by
+//   dedicated regression tests for both cases.
+// - `mepTransitionLength`/`mepTransitionCalculate` are pure math (no entity creation at
+//   all) and are FULLY FUNCTIONAL and tested -- `test/util/shapeBuilder.test.ts` ports
+//   `test_shape_builder.py`'s real `TestCalculateTransitions` class verbatim (all 6
+//   cases, including the shared `calculate_and_test` helper's own independent 3-method
+//   angle-recomputation cross-check).
+// - `mepTransitionCalculate` is ported taking a single options object (`start_half_dim`/
+//   `end_half_dim`/`offset`/`diff`/`end_profile`/`length`/`angle`/`verbose`) rather than
+//   this file's usual positional-parameter style: every real Python call site
+//   (`mep_transition_length`'s two calls, `test_shape_builder.py`'s own test harness) is
+//   keyword-argument-only, several via `**dict`-spreading a shared arguments object -- an
+//   options object is the faithful translation here, not a stylistic deviation.
+// - Three real, disclosed, verbatim-preserved Python-source quirks found in
+//   `mep_transition_calculate`/`mep_transition_length`/`mep_transition_shape` while
+//   reading the exact source lines:
+//   1. `mep_transition_calculate` silently returns `None` if BOTH `length` and `angle`
+//      are already non-null on entry (neither its `if length is None` nor `elif angle is
+//      None` branch executes, so the function falls off the end) -- preserved verbatim
+//      (`mepTransitionCalculate` returns `null` in that case too).
+//   2. `mep_transition_length`'s `return check_transition() or check_transition(True)`
+//      relies on Python's `or` returning its second operand's own value whenever the
+//      first is falsy (`None` OR a legitimate `0`) -- JS's `||` has the identical
+//      falsy-short-circuit semantics for these two return types, so `checkTransition(false)
+//      || checkTransition(true)` preserves this exactly, including the dormant quirk that
+//      a legitimate zero-length result from the first call would be silently discarded in
+//      favor of the second call's result. Confirmed dormant in practice (not exercised by
+//      any test): `mepTransitionCalculate` only ever returns a length via `Math.sqrt` of a
+//      value already checked `> 0`, so it can never legitimately return exactly `0`.
+//   3. `mep_transition_shape` passes `"Tesselation"` (missing the second "l") as the
+//      explicit `representationType` to `get_representation()` -- the real IFC
+//      `RepresentationType` enumerant is `"Tessellation"`. A genuine Python-source typo,
+//      preserved verbatim rather than corrected.
+// - `mep_transition_shape`/`mep_bend_shape` both define an identical nested `get_profile`/
+//   `get_dim` closure pair; since neither closes over any enclosing method state (both are
+//   pure functions of their own parameters, calling only the free `get_material()`),
+//   they're hoisted to shared module-private `mepGetProfile`/`mepGetDim` functions below
+//   (next to `removeRedundantPoints`), matching that function's own established
+//   "closure-free nested Python helper -> module-private function" precedent -- a
+//   disclosed, non-behavioral simplification, not a deviation. `get_circle_points` differs
+//   in signature/semantics between the two methods (and `mep_bend_shape`'s version closes
+//   over several method-local variables -- `z_sign`/`lateral_axis`/`lateral_sign`), so
+//   each stays as its own local nested closure, matching Python's own structure.
+// - `mep_bend_shape`'s `next(i for i in range(2) if not is_x(rounded_bend_vector[i], 0))`
+//   raises `StopIteration` in Python if `bend_vector`'s X and Y components are both
+//   approximately zero (no lateral axis can be determined) -- reproduced as an explicit,
+//   descriptive throw rather than a silent `undefined`-driven crash later.
+//
 // See `test/util/shapeBuilder.test.ts`'s own header comment for what was ported from the
 // real `test/util/test_shape_builder.py` verbatim vs. added new.
 
 import { mat4, vec3 } from "gl-matrix";
 import type { EntityInstance } from "../entityInstance";
 import type { IfcFile } from "../file";
-import { copyDeep } from "./element";
+import { copyDeep, getMaterial } from "./element";
 import { getAxis2placement } from "./placement";
 import type { MatrixType } from "./placement";
-import { guessType } from "./representation";
+import { getContext, guessType } from "./representation";
+import { calculateUnitScale } from "./unit";
 
 export type { MatrixType };
 
@@ -192,6 +271,47 @@ export interface ExtrudeKwargs {
 	readonly extrusionVector: VectorType;
 }
 
+/** Return shape of `mepTransitionShape()`'s transition-geometry data
+ * (`ShapeBuilder.mep_transition_shape`'s returned `dict[str, Any]`). */
+export interface MepTransitionData {
+	readonly startLength: number;
+	readonly endLength: number;
+	readonly angle: number;
+	readonly profileOffset: VectorType;
+	readonly transitionLength: number;
+	readonly fullTransitionLength: number;
+}
+
+/**
+ * Named-parameter bag for `mepTransitionCalculate()` -- see that method's own doc comment
+ * (and this file's header comment) for why an options object, rather than this file's
+ * usual positional-parameter style, is the faithful translation here: every real Python
+ * call site is keyword-argument-only.
+ */
+export interface MepTransitionCalculateOptions {
+	readonly startHalfDim: VectorType;
+	readonly endHalfDim: VectorType;
+	readonly offset: VectorType;
+	readonly diff?: VectorType | null;
+	readonly endProfile?: boolean;
+	readonly length?: number | null;
+	readonly angle?: number | null;
+	readonly verbose?: boolean;
+}
+
+/** Return shape of `mepBendShape()`'s bend-geometry data (`ShapeBuilder.mep_bend_shape`'s
+ * returned `dict[str, Any]`). */
+export interface MepBendData {
+	readonly startLength: number;
+	readonly endLength: number;
+	readonly radius: number;
+	readonly angle: number;
+	readonly lateralAxis: number;
+	readonly lateralSign: number;
+	readonly zAxisSign: number;
+	readonly mainProfileDimension: number;
+}
+
 // --- internal vector-math helpers (not exported -- pure translation aids, operating on
 // plain `number[]`, per this file's header comment) ---
 
@@ -213,6 +333,13 @@ function vecLength(a: VectorType): number {
 
 function cross3(a: VectorType, b: VectorType): number[] {
 	return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+/** Elementwise vector multiply (`a * b` for two numpy arrays of matching length) -- added
+ * for Part 2's MEP methods below (`mepTransitionShape`'s extensive `half_dim * (+-1, +-1,
+ * +-1)`-style literal masking); no Part 1 caller needed it. */
+function mul(a: VectorType, b: VectorType): number[] {
+	return a.map((v, i) => v * b[i]);
 }
 
 /** Row-major matrix (any square size) times a vector: `result[i] = sum_j m[i][j] * v[j]`. */
@@ -1796,6 +1923,613 @@ export class ShapeBuilder {
 
 		return this.polygonalFaceSet(allPoints, faces);
 	}
+
+	// --- Part 2: MEP transition/bend methods (see this file's header comment for the
+	// per-method findings) ---
+
+	/**
+	 * Generate a MEP transition shape for the provided segments (`mep_transition_shape`).
+	 *
+	 * Fully functional today (unlike `mepBendShape` below) -- see this file's header
+	 * comment for why.
+	 *
+	 * @param startSegment Starting segment.
+	 * @param endSegment Ending segment.
+	 * @param startLength Start transition length.
+	 * @param endLength End transition length.
+	 * @param angle Transition angle, in degrees. Good default values from angle = 30/60
+	 *   deg -- a 30-degree angle results in 75 degrees on the transition (`= 90 - angle/2`).
+	 * @param profileOffset 2D vector for profile offset.
+	 * @returns A tuple of the Model/Body/MODEL_VIEW `IfcShapeRepresentation` and a
+	 *   transition-shape data object, or `[null, null]` if there was an error in the
+	 *   process (e.g. unsupported profile types).
+	 */
+	mepTransitionShape(
+		startSegment: EntityInstance,
+		endSegment: EntityInstance,
+		startLength: number,
+		endLength: number,
+		angle = 30.0,
+		profileOffset: VectorType = [0.0, 0.0],
+	): readonly [EntityInstance, MepTransitionData] | readonly [null, null] {
+		const getCirclePoints = (radius: number, segments = 16): number[][] => {
+			// Starting from (R, 0), going counter-clockwise.
+			const step = (2 * Math.PI) / segments;
+			return Array.from({ length: segments }, (_, i) => {
+				const a = i * step;
+				return [Math.cos(a) * radius, Math.sin(a) * radius, 0];
+			});
+		};
+
+		const getRectanglePoints = (dim: VectorType): number[][] => {
+			// Starting from (+X/2, +Y/2), going counter-clockwise.
+			const half = dim.map((v) => v / 2);
+			const offsets = [
+				[1, 1, 0],
+				[-1, 1, 0],
+				[-1, -1, 0],
+				[1, -1, 0],
+			];
+			return offsets.map((o) => mul(half, o));
+		};
+
+		const startProfile = mepGetProfile(startSegment);
+		const endProfile = mepGetProfile(endSegment);
+		if (startProfile === null || endProfile === null) return [null, null];
+
+		const startHalfDim = mepGetDim(startProfile, startLength);
+		const endHalfDim = mepGetDim(endProfile, endLength);
+		// If profile types are not supported.
+		if (startHalfDim === null || endHalfDim === null) return [null, null];
+
+		const transitionItems: EntityInstance[] = [];
+		const startOffset = [0, 0, startLength];
+
+		let transitionLength = this.mepTransitionLength(startHalfDim, endHalfDim, angle, profileOffset);
+		if (transitionLength === null) return [null, null];
+
+		let faces: (readonly number[])[] = [];
+		let endExtrusionOffset: number[] = [profileOffset[0], profileOffset[1], startLength + transitionLength];
+		let points: number[][];
+
+		if (startProfile.isA("IfcRectangleProfileDef") && endProfile.isA("IfcRectangleProfileDef")) {
+			// No transition for exactly the same profiles.
+			if (transitionLength === 0) return [null, null];
+
+			faces = [
+				[3, 4, 7, 0],
+				[11, 8, 15, 12],
+				[3, 11, 12, 4],
+				[7, 15, 8, 0],
+				// NOTE: clockwise order for correct face orientation.
+				// start extrusion
+				[0, 1, 2, 3],
+				[8, 11, 10, 9],
+				[0, 8, 9, 1],
+				[1, 9, 10, 2],
+				[2, 10, 11, 3],
+				// end extrusion
+				[4, 5, 6, 7],
+				[12, 15, 14, 13],
+				[4, 12, 13, 5],
+				[5, 13, 14, 6],
+				[6, 14, 15, 7],
+			];
+			points = [
+				mul(startHalfDim, [-1, -1, 1]),
+				mul(startHalfDim, [-1, -1, 0]),
+				mul(startHalfDim, [1, -1, 0]),
+				mul(startHalfDim, [1, -1, 1]),
+				add(mul(endHalfDim, [1, -1, 0]), endExtrusionOffset),
+				add(mul(endHalfDim, [1, -1, 1]), endExtrusionOffset),
+				add(mul(endHalfDim, [-1, -1, 1]), endExtrusionOffset),
+				add(mul(endHalfDim, [-1, -1, 0]), endExtrusionOffset),
+				mul(startHalfDim, [-1, 1, 1]),
+				mul(startHalfDim, [-1, 1, 0]),
+				mul(startHalfDim, [1, 1, 0]),
+				mul(startHalfDim, [1, 1, 1]),
+				add(mul(endHalfDim, [1, 1, 0]), endExtrusionOffset),
+				add(mul(endHalfDim, [1, 1, 1]), endExtrusionOffset),
+				add(mul(endHalfDim, [-1, 1, 1]), endExtrusionOffset),
+				add(mul(endHalfDim, [-1, 1, 0]), endExtrusionOffset),
+			];
+		} else if (startProfile.isA("IfcCircleProfileDef") && endProfile.isA("IfcCircleProfileDef")) {
+			// No transition for exactly the same profiles.
+			if (transitionLength === 0) return [null, null];
+
+			const nSegments = 16;
+			const firstProfilePoints = getCirclePoints(startProfile.get("Radius") as number, nSegments);
+			const secondProfilePoints = getCirclePoints(endProfile.get("Radius") as number, nSegments);
+
+			faces = [];
+			for (let i = 0; i < nSegments; i++) {
+				// For wrapping around the circle.
+				const nextI = (i + 1) % nSegments;
+				faces.push([i, nextI, nextI + nSegments, i + nSegments]);
+			}
+
+			transitionItems.push(
+				this.extrudeFaceSet(firstProfilePoints, startLength, undefined, undefined, undefined, false),
+			);
+			transitionItems.push(this.extrudeFaceSet(secondProfilePoints, endLength, undefined, endExtrusionOffset, false));
+
+			points = [
+				...firstProfilePoints.map((p) => add(p, startOffset)),
+				...secondProfilePoints.map((p) => add(p, endExtrusionOffset)),
+			];
+		} else {
+			// One is circular, another one is rectangular.
+			// Support transition from rectangle to circle of the same dimensions.
+			if (transitionLength === 0) {
+				transitionLength = (startLength + endLength) / 2;
+				endExtrusionOffset = [endExtrusionOffset[0], endExtrusionOffset[1], endExtrusionOffset[2] + transitionLength];
+			}
+
+			const startingWithCircle = startProfile.isA("IfcCircleProfileDef");
+			const circleProfile = startingWithCircle ? startProfile : endProfile;
+			const rectProfile = startingWithCircle ? endProfile : startProfile;
+
+			const circlePoints = getCirclePoints(circleProfile.get("Radius") as number);
+			const rectPoints = getRectanglePoints([rectProfile.get("XDim") as number, rectProfile.get("YDim") as number, 0]);
+
+			const startPoints = startingWithCircle ? circlePoints : rectPoints;
+			const endPoints = startingWithCircle ? rectPoints : circlePoints;
+
+			transitionItems.push(this.extrudeFaceSet(startPoints, startLength, undefined, undefined, undefined, false));
+			transitionItems.push(this.extrudeFaceSet(endPoints, endLength, undefined, endExtrusionOffset, false));
+
+			// Offset verts.
+			const circlePointsOffset = circlePoints.map((p) => add(p, startingWithCircle ? startOffset : endExtrusionOffset));
+			const rectPointsOffset = rectPoints.map((p) => add(p, startingWithCircle ? endExtrusionOffset : startOffset));
+
+			// Circle verts are 0-15, rect verts are 16-19.
+			points = [...circlePointsOffset, ...rectPointsOffset];
+			let transitionFaces: number[][] = [
+				[0, 19, 16], // base
+				[0, 16, 1],
+				[1, 16, 2],
+				[2, 16, 3],
+				[3, 16, 4],
+				[4, 16, 17], // base
+				[4, 17, 5],
+				[5, 17, 6],
+				[6, 17, 7],
+				[7, 17, 8],
+				[8, 17, 18], // base
+				[8, 18, 9],
+				[9, 18, 10],
+				[10, 18, 11],
+				[11, 18, 12],
+				[12, 18, 19], // base
+				[12, 19, 13],
+				[13, 19, 14],
+				[14, 19, 15],
+				[15, 19, 0],
+			];
+			// Revert them in case it's starting with a circle profile, to keep the face
+			// orientation.
+			if (startingWithCircle) {
+				transitionFaces = transitionFaces.map((f) => [...f].reverse());
+			}
+			faces = [...faces, ...transitionFaces];
+		}
+
+		const faceSet = this.polygonalFaceSet(points, faces);
+		transitionItems.push(faceSet);
+
+		const body = getContext(this.file, "Model", "Body", "MODEL_VIEW");
+		if (!body) {
+			throw new Error(
+				"mepTransitionShape: no Model/Body/MODEL_VIEW representation context found (Python: assert body).",
+			);
+		}
+		// Python: `"Tesselation"` (missing the second "l") -- a real Python-source typo
+		// (the real IFC `RepresentationType` enumerant is `"Tessellation"`), preserved
+		// verbatim -- see this file's header comment.
+		const representation = this.getRepresentation(body, transitionItems, "Tesselation");
+
+		const transitionData: MepTransitionData = {
+			startLength,
+			endLength,
+			angle,
+			profileOffset,
+			transitionLength,
+			fullTransitionLength: startLength + transitionLength + endLength,
+		};
+
+		return [representation, transitionData];
+	}
+
+	/**
+	 * Get the transition length for two profile half-dimensions, an angle, and an XY
+	 * offset (`mep_transition_length`).
+	 *
+	 * Unlike `mepTransitionCalculate()`, this method checks that the resulting length
+	 * satisfies the angle constraint from both the start and end profile perspectives.
+	 *
+	 * TODO (matches Python): move to a separate `ShapeBuilder` method so the transition
+	 * length could be checked without creating a representation.
+	 *
+	 * @param startHalfDim Half-dimensions of the start profile, `[halfX, halfY, depth]`.
+	 *   For circular profiles `halfX === halfY === radius`.
+	 * @param endHalfDim Half-dimensions of the end profile, in the same format.
+	 * @param angle Maximum allowed transition angle, in degrees.
+	 * @param profileOffset 2D XY offset between the centrelines of the start and end profiles.
+	 * @param verbose If true, log diagnostic values during calculation (matches Python's
+	 *   own debug-only `print`s, off by default -- enabling them logs on every transition
+	 *   geometry computation).
+	 * @returns Transition length, or `null` if no valid length exists for the given angle
+	 *   and offset.
+	 */
+	mepTransitionLength(
+		startHalfDim: VectorType,
+		endHalfDim: VectorType,
+		angle: number,
+		profileOffset: VectorType = [0.0, 0.0],
+		verbose = false,
+	): number | null {
+		const print: (...args: unknown[]) => void = verbose ? (...args) => console.log(...args) : () => {};
+
+		// Vectors tend to have a bunch of floating-point garbage that can result in
+		// errors when calculating the square root below.
+		const offset = npRoundToPrecision(profileOffset, 1);
+		const diff = [Math.abs(startHalfDim[0] - endHalfDim[0]), Math.abs(startHalfDim[1] - endHalfDim[1])];
+
+		print(`offset = ${JSON.stringify(profileOffset)} / ${JSON.stringify(offset)}`);
+		print(`diff = ${JSON.stringify(diff)}`);
+
+		const checkTransition = (endProfile = false): number | null => {
+			const length = this.mepTransitionCalculate({
+				startHalfDim,
+				endHalfDim,
+				diff,
+				offset,
+				verbose,
+				angle,
+				endProfile,
+			});
+			if (length === null) return null;
+
+			const otherSideAngle = this.mepTransitionCalculate({
+				startHalfDim,
+				endHalfDim,
+				diff,
+				offset,
+				verbose,
+				length,
+				endProfile: !endProfile,
+			});
+			if (otherSideAngle === null) return null;
+
+			// NOTE (matches Python): for now we just hardcode the good value for that case.
+			const sameDimension = isX(endProfile ? diff[0] : diff[1], 0);
+			const requestedAngle = sameDimension && isX(endProfile ? offset[0] : offset[1], 0) ? 90.0 : angle;
+
+			print(`other_side_angle = ${otherSideAngle}, requested_angle = ${requestedAngle}`);
+			// Need to make sure that the worst angle (maximum angle) for this transition
+			// is `requestedAngle`.
+			if (otherSideAngle < requestedAngle || isX(otherSideAngle, requestedAngle)) {
+				print(`final length = ${length}, angle = ${requestedAngle}, other side angle = ${otherSideAngle}`);
+				return length;
+			}
+			return null;
+		};
+
+		// Python: `return check_transition() or check_transition(True)` -- see this
+		// file's header comment for the dormant falsy-short-circuit quirk this preserves.
+		return checkTransition(false) || checkTransition(true);
+	}
+
+	/**
+	 * Calculate MEP transition length from angle, or transition angle from length
+	 * (`mep_transition_calculate`).
+	 *
+	 * Low-level calculation kernel used by `mepTransitionLength()`. Provide either
+	 * `options.angle` or `options.length` (not both); the other value is computed and
+	 * returned. Ported as a single options-object parameter -- see `MepTransitionCalculateOptions`'s
+	 * own doc comment for why.
+	 *
+	 * @returns Transition length (if `angle` was given) or transition angle in degrees
+	 *   (if `length` was given); `null` if the geometry is not feasible for the given
+	 *   inputs, OR if BOTH `length` and `angle` are already non-null on entry -- see this
+	 *   file's header comment for this preserved Python-source quirk.
+	 */
+	mepTransitionCalculate(options: MepTransitionCalculateOptions): number | null {
+		const {
+			startHalfDim,
+			endHalfDim,
+			offset: offsetIn,
+			diff: diffIn = null,
+			endProfile = false,
+			length: lengthIn = null,
+			angle: angleIn = null,
+			verbose = false,
+		} = options;
+		const print: (...args: unknown[]) => void = verbose ? (...args) => console.log(...args) : () => {};
+
+		let diff: readonly [number, number] =
+			diffIn != null
+				? [diffIn[0], diffIn[1]]
+				: [Math.abs(startHalfDim[0] - endHalfDim[0]), Math.abs(startHalfDim[1] - endHalfDim[1])];
+		let offset: readonly [number, number] = [offsetIn[0], offsetIn[1]];
+
+		if (endProfile) {
+			diff = [diff[1], diff[0]];
+			offset = [offset[1], offset[0]];
+		}
+
+		const sameDimension = isX(diff[0], 0);
+		const a = diff[0] + offset[0];
+		const b = diff[0] - offset[0];
+
+		let length = lengthIn;
+		let angle = angleIn;
+
+		if (length === null) {
+			if (!sameDimension) {
+				if (angle === null) {
+					throw new Error(
+						"mepTransitionCalculate: 'angle' is required when 'length' is not given and the profiles have different dimensions (Python: assert angle is not None).",
+					);
+				}
+				const t = Math.tan((angle * Math.PI) / 180);
+				const h0 = a ** 2 + 4 * a * b * t ** 2 + 2 * a * b + b ** 2;
+				if (h0 < 0) {
+					print(
+						`B. Coulndn't calculate transition length for angle = ${angle}, offset = ${JSON.stringify(offset)}, diff = ${JSON.stringify(diff)}`,
+					);
+					return null;
+				}
+				const h = (a + b + Math.sqrt(h0)) / (2 * t);
+				const lengthSquared = h ** 2 - offset[1] ** 2;
+				if (lengthSquared <= 0) {
+					print(`B. angle = ${angle} requires h = ${h} which is not possible with y offset = ${offset[1]}`);
+					return null;
+				}
+				length = Math.sqrt(lengthSquared);
+
+				if (verbose) {
+					const A: number[] = [(endProfile ? endHalfDim : startHalfDim)[0], 0, 0];
+					const endProfileOffset = npTo3d(offset, length);
+					const D0: number[] = [(endProfile ? startHalfDim : endHalfDim)[0], 0, 0];
+					const B = A.map((v) => -v);
+					const C = add(
+						D0.map((v) => -v),
+						endProfileOffset,
+					);
+					const D = add(D0, endProfileOffset);
+					const testedAngle = (npAngle(sub(A, D), sub(B, C)) * 180) / Math.PI;
+					print(`A. length = ${length}, requested angle = ${angle}, tested angle = ${testedAngle}`);
+				}
+			} else if (isX(offset[0], 0)) {
+				// NOTE (matches Python): for now we just hardcode the good value for that case.
+				angle = 90;
+				const h = startHalfDim[0] / Math.tan(((angle / 2) * Math.PI) / 180);
+				const lengthSquared = h ** 2 - offset[1] ** 2;
+				if (lengthSquared <= 0) {
+					print(`B. angle = ${angle} requires h = ${h} which is not possible with y offset = ${offset[1]}`);
+					return null;
+				}
+				length = Math.sqrt(lengthSquared);
+
+				if (verbose) {
+					const O = [0, 0, 0];
+					const A = add([-startHalfDim[0], 0, length], npTo3d(offset));
+					const B = mul(A, [-1, 1, 1]);
+					const testedAngle = (npAngle(sub(A, O), sub(B, O)) * 180) / Math.PI;
+					print(`B. length = ${length}, requested angle = ${angle}, tested angle = ${testedAngle}`);
+				}
+			} else {
+				if (angle === null) {
+					throw new Error(
+						"mepTransitionCalculate: 'angle' is required in this branch (Python: assert angle is not None).",
+					);
+				}
+				const h = offset[0] / Math.tan((angle * Math.PI) / 180);
+				const lengthSquared = h ** 2 - offset[1] ** 2;
+				if (lengthSquared <= 0) {
+					print(`C. angle = ${angle} requires h = ${h} which is not possible with y offset = ${offset[1]}`);
+					return null;
+				}
+				length = Math.sqrt(lengthSquared);
+
+				if (verbose) {
+					const A = [-startHalfDim[0], 0, 0];
+					const H = [A[0], A[1], A[2] + length];
+					H[1] += offset[1];
+					const D = [...H];
+					D[0] += offset[0];
+					const testedAngle = (npAngle(sub(H, A), sub(D, A)) * 180) / Math.PI;
+					print(`C. length = ${length}, requested angle = ${angle}, tested angle = ${testedAngle}`);
+				}
+			}
+			return length as number;
+		}
+
+		if (angle === null) {
+			if (!sameDimension) {
+				if (length === 0) return 0;
+				const h = Math.sqrt(length ** 2 + offset[1] ** 2);
+				const t = (-h * (a + b)) / (a * b - h ** 2);
+				angle = (Math.atan(t) * 180) / Math.PI;
+			} else {
+				const h = Math.sqrt(length ** 2 + offset[1] ** 2);
+				if (isX(offset[0], 0)) {
+					angle = (2 * Math.atan(startHalfDim[0] / h) * 180) / Math.PI;
+				} else {
+					angle = (Math.atan(offset[0] / h) * 180) / Math.PI;
+				}
+			}
+			return angle;
+		}
+
+		// Python: neither branch above executes when both `length` and `angle` are
+		// already non-null on entry -- silently falls off the end and returns `None`, a
+		// genuine, disclosed Python-source quirk preserved verbatim; see this file's
+		// header comment.
+		return null;
+	}
+
+	/**
+	 * Generate a MEP bend shape for the provided segment (`mep_bend_shape`).
+	 *
+	 * **Currently always throws, on every schema and every profile shape** -- a real,
+	 * disclosed blockage (two different causes depending on schema); see this file's
+	 * header comment for the full story. Ported faithfully anyway (every branch below is
+	 * real, correct, verbatim-translated control flow), pinned by dedicated regression
+	 * tests asserting the current, disclosed, blocked behavior.
+	 *
+	 * @param segment IfcFlowSegment for a bend. Note that for a bend, the start and end
+	 *   segment types should match.
+	 * @param angle Bend angle, in radians.
+	 * @param radius Bend radius.
+	 * @param bendVector Offset between start and end segments in local space of the start
+	 *   segment, used mainly to determine the second bend axis and its direction (positive
+	 *   or negative); the actual magnitude of the vector is not important (though near-zero
+	 *   values will be ignored).
+	 * @param flipZAxis Since the Z axis direction cannot be determined from the profile
+	 *   offset alone, this flips it if the bend goes by the start segment's Z- axis.
+	 * @returns A tuple of the Model/Body/MODEL_VIEW `IfcShapeRepresentation` and a
+	 *   bend-shape data object.
+	 */
+	mepBendShape(
+		segment: EntityInstance,
+		startLength: number,
+		endLength: number,
+		angle: number,
+		radius: number,
+		bendVector: VectorType,
+		flipZAxis: boolean,
+	): readonly [EntityInstance, MepBendData] {
+		const siConversion = calculateUnitScale(this.file);
+		const profile = mepGetProfile(segment);
+		if (!profile) {
+			throw new Error("mepBendShape: segment has no supported single-profile material (Python: assert profile).");
+		}
+		const isCircularProfile = profile.isA("IfcCircleProfileDef");
+		const profileDim = mepGetDim(profile, startLength);
+		if (!profileDim) {
+			throw new Error("mepBendShape: unsupported profile type (Python: assert profile_dim is not None).");
+		}
+
+		const roundedBendVector = npRoundToPrecision(bendVector, siConversion);
+		const lateralAxisFound = [0, 1].find((i) => !isX(roundedBendVector[i], 0));
+		if (lateralAxisFound === undefined) {
+			throw new Error(
+				"mepBendShape: bendVector has no significant X or Y component (Python: StopIteration from next()).",
+			);
+		}
+		const lateralAxis = lateralAxisFound;
+		const nonLateralAxis = lateralAxis === 0 ? 1 : 0;
+		const lateralSign = Math.sign(bendVector[lateralAxis]);
+		const zSign = flipZAxis ? -1 : 1;
+
+		const repItems: EntityInstance[] = [];
+
+		// Bend circle center.
+		const O = [0, 0, 0];
+		O[lateralAxis] = (radius + profileDim[lateralAxis]) * lateralSign;
+		const theta = angle;
+
+		/** @param angles Angles, in radians. */
+		const getCirclePoints = (angles: readonly number[], r: number): number[][] => {
+			return angles.map((a) => {
+				const shifted = a - Math.PI / 2;
+				const p = [0, 0, 0];
+				p[2] = zSign * Math.cos(shifted) * r;
+				p[lateralAxis] = lateralSign * Math.sin(shifted) * r;
+				return p;
+			});
+		};
+
+		/** @param a Angle, in radians. @returns Tangent vector. */
+		const getCircleTangent = (a: number): number[] => {
+			const tangent = [0, 0, 0];
+			tangent[2] = Math.cos(a) * zSign;
+			tangent[lateralAxis] = Math.sin(a) * lateralSign;
+			return tangent;
+		};
+
+		const getBendRepresentationItem = (): EntityInstance => {
+			let r = radius;
+			const thetaSegments = [0.0, theta / 2, theta];
+			let points: number[][];
+			let arcPoints: readonly number[];
+			if (isCircularProfile) {
+				r += profileDim[lateralAxis];
+				points = getCirclePoints(thetaSegments, r);
+				arcPoints = [1];
+			} else {
+				const outerR = r + 2 * profileDim[lateralAxis];
+				const outerPoints = getCirclePoints([...thetaSegments].reverse(), outerR);
+				if (isX(r, 0)) {
+					points = getCirclePoints([theta], r);
+					points = [...points, ...outerPoints];
+					arcPoints = [2];
+				} else {
+					const innerPoints = getCirclePoints(thetaSegments, r);
+					points = [...innerPoints, ...outerPoints];
+					arcPoints = [1, 4];
+				}
+			}
+			points = points.map((p) => add(p, O));
+			const offset = [0, 0, 0];
+			offset[2] = zSign * startLength;
+
+			if (isCircularProfile) {
+				const bendPath = this.polyline(points, false, offset, arcPoints);
+				return this.createSweptDiskSolid(bendPath, profileDim[lateralAxis]);
+			}
+			offset[nonLateralAxis] = -profileDim[nonLateralAxis];
+			const extrusionKwargs = this.extrudeKwargs(nonLateralAxis === 0 ? "X" : "Y");
+			const polylinePoints = points.map((p) => [p[lateralAxis], p[2]]);
+			const profileCurve = this.polyline(polylinePoints, true, null, arcPoints);
+			return this.extrude(
+				this.profile(profileCurve),
+				profileDim[nonLateralAxis] * 2,
+				offset,
+				extrusionKwargs.extrusionVector,
+				extrusionKwargs.positionZAxis,
+				extrusionKwargs.positionXAxis,
+			);
+		};
+
+		repItems.push(getBendRepresentationItem());
+		if (startLength) {
+			repItems.push(this.extrude(profile, startLength, undefined, [0, 0, zSign]));
+		}
+		if (endLength) {
+			const circlePointAtTheta = getCirclePoints([theta], radius + profileDim[lateralAxis])[0];
+			let endPosition = add(O, circlePointAtTheta);
+			endPosition = [endPosition[0], endPosition[1], endPosition[2] + startLength * zSign];
+
+			// Define extrusion space for the segment after the bend.
+			const zAxis = getCircleTangent(theta);
+			// Since the tangent involves only two axes, it's safe to assume the
+			// non-lateral axis is untouched.
+			const xAxis = lateralAxis === 0 ? cross3(zAxis, [0, 1, 0]) : [1, 0, 0];
+
+			repItems.push(this.extrude(profile, endLength, endPosition, [0, 0, 1], zAxis, xAxis));
+		}
+
+		const body = getContext(this.file, "Model", "Body", "MODEL_VIEW");
+		if (!body) {
+			throw new Error("mepBendShape: no Model/Body/MODEL_VIEW representation context found (Python: assert body).");
+		}
+		const rep = this.getRepresentation(body, repItems);
+
+		const bendData: MepBendData = {
+			startLength,
+			endLength,
+			radius,
+			angle: (theta * 180) / Math.PI,
+			lateralAxis,
+			lateralSign,
+			zAxisSign: flipZAxis ? -1 : 1,
+			mainProfileDimension: profileDim[lateralAxis],
+		};
+		return [rep, bendData];
+	}
 }
 
 /**
@@ -1833,4 +2567,41 @@ function removeRedundantPoints(
 
 function pointsEqual(a: readonly number[], b: readonly number[]): boolean {
 	return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Shared helper for `mepTransitionShape()`/`mepBendShape()` -- both Python methods define
+ * an identical nested `get_profile(element)` closure; hoisted here to a single
+ * module-private function since neither closes over any enclosing method state (both are
+ * pure functions of their own parameters, calling only the free `get_material()`),
+ * matching `removeRedundantPoints`'s own precedent above -- a disclosed, non-behavioral
+ * simplification, not a deviation.
+ */
+function mepGetProfile(element: EntityInstance): EntityInstance | null {
+	const material = getMaterial(element, true);
+	if (material?.isA("IfcMaterialProfileSet")) {
+		const materialProfiles = material.get("MaterialProfiles") as EntityInstance[];
+		if (materialProfiles.length === 1) {
+			return materialProfiles[0].get("Profile") as EntityInstance | null;
+		}
+	}
+	return null;
+}
+
+/**
+ * Shared helper for `mepTransitionShape()`/`mepBendShape()` -- both Python methods define
+ * an identical nested `get_dim(profile, depth)` closure; hoisted for the same reason as
+ * `mepGetProfile` above.
+ *
+ * TODO (matches Python): support more profile types.
+ */
+function mepGetDim(profile: EntityInstance, depth: number): VectorType | null {
+	if (profile.isA("IfcRectangleProfileDef")) {
+		return [(profile.get("XDim") as number) / 2, (profile.get("YDim") as number) / 2, depth];
+	}
+	if (profile.isA("IfcCircleProfileDef")) {
+		const radius = profile.get("Radius") as number;
+		return [radius, radius, depth];
+	}
+	return null;
 }
