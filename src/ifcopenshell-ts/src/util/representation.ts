@@ -40,7 +40,7 @@
 // against this file's own source/`representation.py`'s real behavior, not ported from an
 // existing Python test.
 //
-// *** Two real, disclosed Python-source findings, both preserved verbatim (matching
+// *** Three real, disclosed Python-source findings, all preserved verbatim (matching
 // this project's "port bugs faithfully, disclose rather than silently fix" convention
 // -- `util/element.ts`'s `getQuantities` "data.class" bug and `util/system.ts`'s
 // "NOTEDEFINED" typo are the established precedents) ***
@@ -90,7 +90,20 @@
 //    middle level) that asserts the real (surprising) discarding behavior, not the
 //    "intended" one.
 //
-// *** A third real, disclosed finding: `guess_type`'s `Dim`-dependent branches are
+// 3. **`get_prioritised_contexts`' `identifier_priority` list spells `"Body-FallBack"`
+//    (capital "B" in "Back"), while this same source file's own `REPRESENTATION_IDENTIFIER`
+//    type declares the officially-documented spelling `"Body-Fallback"` (lowercase
+//    "allback")** -- found by this chunk's own `/code-review` pass, confirmed against
+//    the real Python source (`representation.py` line 41 vs. line 378, the identical
+//    mismatch, not introduced by this port). A context whose `ContextIdentifier` is
+//    really `"Body-Fallback"` never matches `IDENTIFIER_PRIORITY` at all, so
+//    `sortContextKey` (below) silently ranks it at priority `0` -- as low as a
+//    completely unrecognized identifier -- rather than the documented second-highest
+//    priority (right after `"Body"`). Reproduced verbatim (see `IDENTIFIER_PRIORITY`'s
+//    own inline comment below for the full story) and pinned by a dedicated test in
+//    `representation.test.ts`.
+//
+// *** A fourth real, disclosed finding: `guess_type`'s `Dim`-dependent branches are
 // genuinely blocked by a pre-existing, already-disclosed `entityInstance.ts` gap ***
 //
 // `guess_type`'s `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` branches read `i.Dim` --
@@ -126,7 +139,7 @@
 // blocker with a regression test (asserting the real, documented error), not just
 // prose. See `TODOS.md`'s new entry for this.
 //
-// *** A fourth real finding (not a bug, verified against the actual schema, disclosed
+// *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be
 // independently reachable): `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"` are dead
 // code in the real Python source, for a homogeneous single-class items list ***
@@ -507,16 +520,22 @@ export interface ResolvedItemDict {
 	item: EntityInstance;
 }
 
+// Hoisted to module scope (found by this chunk's own `/code-review` pass): the
+// identity matrix `matAllcloseIdentity` compares against is a constant -- allocating a
+// fresh `mat4.create()` on every call is wasted work on `resolveItems`' own recursive
+// hot path (one call per `IfcMappedItem` in a representation graph), with no
+// correctness benefit (nothing ever mutates this array).
+const IDENTITY_MAT4: MatrixType = mat4.create();
+
 /**
  * Python's `numpy.allclose(a, np.eye(4))` for a `gl-matrix` `mat4`, using numpy's own
  * default tolerances (`rtol=1e-05`, `atol=1e-08`): `|a - b| <= atol + rtol * |b|` for
  * every element. Not exported -- only `resolveItems` below needs this.
  */
 function matAllcloseIdentity(m: MatrixType): boolean {
-	const identity = mat4.create();
 	for (let i = 0; i < 16; i++) {
 		const a = m[i] as number;
-		const b = identity[i] as number;
+		const b = IDENTITY_MAT4[i] as number;
 		if (Math.abs(a - b) > 1e-8 + 1e-5 * Math.abs(b)) return false;
 	}
 	return true;
@@ -598,6 +617,22 @@ export function resolveBaseItems(representation: EntityInstance): EntityInstance
 }
 
 const TYPE_PRIORITY: readonly string[] = ["Model", "Plan", "Annotation"];
+// **Real, disclosed, verbatim-preserved Python-source bug** (found by this chunk's own
+// `/code-review` pass): `"Body-FallBack"` (capital "B" in "Back") here does NOT match
+// this file's own `RepresentationIdentifier` type's `"Body-Fallback"` (lowercase
+// "allback") a few dozen lines above -- confirmed against the real Python source
+// (`representation.py` line 41 declares `REPRESENTATION_IDENTIFIER`'s
+// `"Body-Fallback"`; line 378's `identifier_priority` list declares `"Body-FallBack"`
+// -- the identical casing mismatch, not introduced by this port). A real
+// `IfcGeometricRepresentationSubContext` with `ContextIdentifier == "Body-Fallback"`
+// (the officially-documented spelling) therefore never matches this list at all,
+// falling through to priority `0` (the "not found" default) in `sortContextKey` below
+// -- ranked as if it were an unrecognized identifier, well below `"Axis"`/`"Box"`/etc.,
+// rather than second-highest as the documented priority order intends. Reproduced
+// verbatim (not "corrected" to `"Body-Fallback"`), matching this file's established
+// "preserve real Python bugs, disclose rather than silently fix" convention (see this
+// file's header comment, findings #1/#2) -- pinned by a dedicated test in
+// `representation.test.ts` asserting the real (surprising) low-priority ranking.
 const IDENTIFIER_PRIORITY: readonly string[] = [
 	"Body",
 	"Body-FallBack",
@@ -676,10 +711,19 @@ export function getPrioritisedContexts(ifcFile: IfcFile): EntityInstance[] {
 	// `Array.prototype.sort` is guaranteed stable (ES2019+); a comparator computing
 	// `compare(keyB, keyA)` (descending) directly, with no index tiebreaker, achieves
 	// the exact same "stable descending" semantics as Python's `reverse=True`.
-	return ifcFile
+	//
+	// A Schwartzian transform (decorate-sort-undecorate) -- found by this chunk's own
+	// `/code-review` pass: an earlier version called `sortContextKey` directly inside
+	// the comparator, recomputing each context's key (multiple `EntityInstance.get()`
+	// calls, each crossing the native N-API boundary) on every pairwise comparison
+	// (O(n log n) key computations) rather than once per context (O(n)), unlike
+	// Python's own `sorted(..., key=sort_context)`, which evaluates `key` exactly once
+	// per element.
+	const decorated = ifcFile
 		.byType("IfcGeometricRepresentationContext")
-		.slice()
-		.sort((a, b) => compareTuplesAsc(sortContextKey(b), sortContextKey(a)));
+		.map((context) => ({ context, key: sortContextKey(context) }));
+	decorated.sort((a, b) => compareTuplesAsc(b.key, a.key));
+	return decorated.map((d) => d.context);
 }
 
 /**

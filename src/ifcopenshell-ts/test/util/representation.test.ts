@@ -14,7 +14,7 @@
 // `.set(...)`), matching `test/util/element.test.ts`'s/`test/util/placement.test.ts`'s
 // own established pattern for this exact gap.
 //
-// Three real, disclosed Python-source/primitive-layer findings are each pinned by a
+// Four real, disclosed Python-source/primitive-layer findings are each pinned by a
 // dedicated test here, not just described in prose (see `representation.ts`'s own header
 // comment for the full story on each):
 // 1. `getPartOfProduct`'s real `"IFX2X3"` typo -- a dedicated IFC2X3 test asserts the
@@ -23,7 +23,12 @@
 // 2. `resolveItems`'s asymmetric identity-shortcut -- a dedicated 3-level nested
 //    `IfcMappedItem` test (identity transform in the middle level) asserts the caller's
 //    accumulated matrix is silently discarded, not composed through.
-// 3. `guessType`'s `Dim`-dependent branches (`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`)
+// 3. `getPrioritisedContexts`' `IDENTIFIER_PRIORITY`'s real `"Body-FallBack"` vs.
+//    `REPRESENTATION_IDENTIFIER`'s `"Body-Fallback"` casing mismatch (found by this
+//    chunk's own `/code-review` pass) -- a dedicated test asserts a real
+//    `"Body-Fallback"`-identified context is ranked BELOW `"Axis"`, not second (right
+//    after `"Body"`) as the documented priority order intends.
+// 4. `guessType`'s `Dim`-dependent branches (`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`)
 //    are blocked by the pre-existing `entityInstance.ts` "no EXPRESS DERIVED attribute"
 //    gap -- a dedicated test asserts the real, documented error for an `IfcLine` item,
 //    rather than silently skipping coverage of that branch.
@@ -560,6 +565,27 @@ describe("util.representation getPrioritisedContexts", () => {
 		// `findIndex` ambiguous between them; `.id()` is always unique per entity.
 		const idx = (e: EntityInstance) => prioritised.findIndex((c) => c.id() === e.id());
 		expect(idx(first)).toBeLessThan(idx(second));
+	});
+
+	// **DISCLOSED BUG, found by this chunk's own `/code-review` pass** (real Python
+	// source, `representation.py` line 41 vs. line 378 -- see `representation.ts`'s
+	// own header comment, finding #3, and `IDENTIFIER_PRIORITY`'s own inline comment):
+	// `IDENTIFIER_PRIORITY` spells `"Body-FallBack"`; the officially-documented
+	// spelling (this same source file's own `REPRESENTATION_IDENTIFIER` type) is
+	// `"Body-Fallback"`. A context with the real, documented spelling therefore never
+	// matches the priority list, and is ranked as low as a totally unrecognized
+	// identifier -- reproduced verbatim, not "corrected".
+	test('DISCLOSED BUG: a real "Body-Fallback" ContextIdentifier doesn\'t match IDENTIFIER_PRIORITY\'s "Body-FallBack" casing, so it\'s ranked last, not second', () => {
+		const file = createTestFile("IFC4");
+		const bodyFallback = subContext(file, "Model", "Body-Fallback", "MODEL_VIEW");
+		const axis = subContext(file, "Model", "Axis", "MODEL_VIEW");
+
+		const prioritised = subject.getPrioritisedContexts(file);
+		const idx = (e: EntityInstance) => prioritised.findIndex((c) => c.id() === e.id());
+		// Documented intent: "Body-Fallback" should rank ABOVE "Axis" (second only to
+		// "Body" in IDENTIFIER_PRIORITY). Real (verbatim-preserved) behavior: it ranks
+		// BELOW "Axis", since the casing mismatch makes it match nothing at all.
+		expect(idx(bodyFallback)).toBeGreaterThan(idx(axis));
 	});
 });
 
