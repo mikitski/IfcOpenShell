@@ -710,6 +710,21 @@ other phase's work. Low urgency for most of this port's other consumers (most ca
 existing values, never construct a loose simple-type value with an initial value from scratch), but
 directly blocks full `Migrator` fidelity for any file containing SELECT-typed attribute values.
 
+**UPDATE 2026-09-12 (Phase 3's `util.cost` chunk):** found a second, independent consequence of this
+exact same gate -- it also breaks `Transaction.unserialiseValue`'s undo/redo REPLAY path (`file.ts`)
+for any transaction that creates a brand-new standalone simple/defined-type value (e.g. a fresh
+`IfcMonetaryMeasure` `AppliedValue`). `Transaction.serialiseValue` round-trips such a value (one with
+no STEP id) as `{type: inst.isA(), value: inst.getByIndex(0)}`; `unserialiseValue` reconstructs it via
+`file.createEntity(dict.type, dict.value)` on `redo()`/replay -- which hits the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this entry already
+documents. Confirmed empirically while building `test/util/cost.test.ts`'s undo/redo regression test
+for the parse-a-formula-then-apply-it workflow (`ifcopenshell.api.cost.edit_cost_value_formula`'s real
+`Usecase.edit_cost_value`, which always creates a fresh `IfcMonetaryMeasure` for `AppliedValue` on
+every call, would hit this on `redo()` for that exact reason) -- that test was narrowed to only
+exercise reference/scalar `.set()` mutations on already-existing entities (no new typed-value creation
+inside the transaction under test), with this cross-reference in place of exercising the blocked path.
+No `util/cost.ts` code changes as a result -- same fix as above resolves this consequence too.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
