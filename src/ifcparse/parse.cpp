@@ -472,10 +472,19 @@ boost::logic::tribool token::as_logical() {
     if (type != Token_BOOL) {
         throw invalid_token_exception(start_pos, to_string(), "logical");
     }
-    if (value_int == 'F') {
+    // @nb same union-member-confusion bug class as as_string() above: a Token_BOOL
+    // token is only ever constructed via the `char`-based constructor (value_char),
+    // never value_int (see as_bool() just above, which correctly reads value_char).
+    // Reading value_int here used to read 7 indeterminate bytes past the single byte
+    // that was actually set, which is undefined behavior and, in practice, would
+    // make a genuine '.T.'/'.F.' token compare unequal to both 'F' and 'T' below and
+    // fall through to `indeterminate` -- currently masked because this function's
+    // only caller (dispatch_token_direct) checks is_bool() first, which intercepts
+    // every '.T.'/'.F.' token before it can reach as_logical().
+    if (value_char == 'F') {
         return false;
     }
-    if (value_int == 'T') {
+    if (value_char == 'T') {
         return true;
     }
     return boost::logic::indeterminate;
@@ -495,7 +504,13 @@ double token::as_float() {
 }
 
 const std::string& token::as_string() {
-    if (is_string() || is_enumeration() || is_binary() || is_keyword()) {
+    // @nb deliberately not is_enumeration(): that predicate also matches
+    // Token_BOOL (see its own "a bit confusing?" comment above), but a
+    // Token_BOOL token stores its payload in the union's value_char member,
+    // not value_string -- reading value_string for it is undefined behavior
+    // (caught by UBSan). Only a genuine Token_ENUMERATION token has
+    // value_string set among the "is this a dot-enclosed literal" cases.
+    if (is_string() || type == Token_ENUMERATION || is_binary() || is_keyword()) {
         // @todo quotes
         return *value_string;
     }
@@ -550,12 +565,14 @@ std::string token::to_string() {
         // above), and "#" + id matches this codebase's existing entity-reference
         // formatting convention (e.g. file::to_string() at parse.cpp:3416). Fixes a
         // real ASan-caught stack-overflow (found by the ifcopenshell-ts fuzz job via
-        // mutation, not the raw seed corpus): as_string() throws for any type outside
-        // {STRING, ENUMERATION, BOOL, BINARY, KEYWORD} and builds its exception
-        // message via to_string() -- for Token_IDENTIFIER (and Token_NONE below),
-        // to_string()'s own "everything else" branch used to call as_string() right
-        // back, so the two functions recursed into each other with no base case until
-        // the stack overflowed.
+        // mutation, not the raw seed corpus): as_string() throws for any type it
+        // doesn't accept (STRING, ENUMERATION, BINARY, KEYWORD -- BOOL included prior
+        // to this file's own as_string()/is_enumeration() union-confusion fix, see
+        // that function's comment above) and builds its exception message via
+        // to_string() -- for Token_IDENTIFIER (and Token_NONE below), to_string()'s
+        // own "everything else" branch used to call as_string() right back, so the
+        // two functions recursed into each other with no base case until the stack
+        // overflowed.
         result = "#" + std::to_string(value_int);
     } else if (type == Token_NONE) {
         // Same reasoning as Token_IDENTIFIER above, and for the same reason must not
