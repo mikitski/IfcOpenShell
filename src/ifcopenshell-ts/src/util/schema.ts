@@ -25,6 +25,14 @@
 // already-open `IfcFile`" capability for its own `ifcopenshell.schema_by_name(schema)`
 // port, and this is a direct, narrow reuse rather than a re-derivation.
 //
+// UPDATED (`util.doc` chunk): `entityName` (previously module-private, backing
+// `getSubtypes`'s workaround only) is now `export`ed too -- `util/doc.ts`'s
+// `getInverseAttributes` needs the exact same "read `.name()` off a bare `entity`
+// handle, which the TS `entity` class itself doesn't expose" capability (see that
+// function's own doc comment for the full reinterpret-cast story, already established
+// below). Second real consumer, same "export narrowly once one exists" precedent as
+// `getSchemaDefinition` above.
+//
 // Naming note (flagged per this chunk's own task brief): Python's `schema.is_a(decl,
 // ifc_class)` operates on a *schema declaration* object, not an `entity_instance` --
 // semantically different from (and easily confusable with) this project's own
@@ -145,8 +153,11 @@ function entitySchema(entity: NativeEntity): NativeSchemaDefinition {
  * disclosed pointer-reinterpret technique as `entitySchema` above (and
  * `entityInstance.ts`'s `getInverseAttribute`) to reach it from a bare `entity`
  * handle.
+ *
+ * Exported (`util.doc` chunk) for reuse by `util/doc.ts`'s `getInverseAttributes` --
+ * see this file's own header comment for the "second real consumer" precedent.
  */
-function entityName(entity: NativeEntity): string {
+export function entityName(entity: NativeEntity): string {
 	return new NativeDeclarationCtor(entity._handle).name();
 }
 
