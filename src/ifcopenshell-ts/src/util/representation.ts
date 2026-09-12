@@ -17,14 +17,11 @@
 // `get_part_of_product` (as `getPartOfProduct`), `get_item_shape_aspect` (as
 // `getItemShapeAspect`), `get_material_style` (as `getMaterialStyle`).
 //
-// `get_reference_line` (as `getReferenceLine`) is ported in full for its primary
-// (`IfcPolyline`/`IfcIndexedPolyCurve` axis-representation) path; its
-// `ifcopenshell.util.shape.get_base_extrusions` fallback branch is a genuine,
-// disclosed hard blocker (see that function's own doc comment below and "Genuinely
-// blocked" section further down) -- `util.shape` is a separate, not-yet-ported Tier B
-// module, matching this project's established "only throw when Python itself would
-// need the missing piece" pattern (`selector.ts`'s `throwPositionalKeyBlocked`
-// precedent).
+// `get_reference_line` (as `getReferenceLine`) is ported in full, including its
+// `ifcopenshell.util.shape.get_base_extrusions` fallback branch -- see "RESOLVED" note
+// in the "Genuinely blocked" section further down: this branch was a genuine, disclosed
+// hard blocker at the time this file was first ported (`util.shape` wasn't ported yet),
+// now wired up for real since `util.shape`'s `getBaseExtrusions` has landed.
 //
 // *** A real, disclosed finding: no Python test file exists for this module ***
 //
@@ -209,8 +206,8 @@
 // (element))`/`list(resolve_base_items(representation))` call site sees identical
 // values either way.
 //
-// *** Genuinely blocked (disclosed, not stubbed): `get_reference_line`'s
-// `ifcopenshell.util.shape.get_base_extrusions` fallback ***
+// *** RESOLVED (`util.shape` chunk): `get_reference_line`'s
+// `ifcopenshell.util.shape.get_base_extrusions` fallback is now wired up for real ***
 //
 // `get_reference_line`'s Python source is `if axis := get_representation(...): ...
 // elif extrusions := ifcopenshell.util.shape.get_base_extrusions(wall): ...`. Because
@@ -223,12 +220,25 @@
 // `get_base_extrusions` branch (`axis` was truthy, so the `elif` is unconditionally
 // skipped regardless of what happened inside the `if`-branch's own `for` loop).
 // `getReferenceLine` below reproduces this exact fall-through shape (a real, verified
-// control-flow subtlety, not assumed): the disclosed blocker below throws only in the
-// one case that mirrors Python's own `elif` branch actually executing -- no matching
-// "Plan"/"Axis"/"GRAPH_VIEW" representation exists at all. `ifcopenshell.util.shape` is
-// a separate, not-yet-ported Tier B module (`PROGRESS.md`), so this cannot be
-// implemented until that module lands; per this chunk's own task brief, `util.shape`
-// itself is explicitly out of scope here. See `TODOS.md`'s updated entry.
+// control-flow subtlety, not assumed): the `else` branch below only ever runs in the one
+// case that mirrors Python's own `elif` branch actually executing -- no matching
+// "Plan"/"Axis"/"GRAPH_VIEW" representation exists at all.
+//
+// This branch was previously a genuine, disclosed hard blocker (thrown error) because
+// `ifcopenshell.util.shape` -- specifically `get_base_extrusions` -- wasn't ported yet.
+// Now that `./shape`'s `getBaseExtrusions` exists (a real, faithful port, no kernel
+// dependency -- see `shape.ts`'s own header comment), this branch is a real
+// implementation, not a stub: for each base extrusion, it reads `SweptArea.OuterCurve`
+// (soft attribute access, `getattr(profile, "OuterCurve", None)` -- most profile classes
+// other than `IfcArbitraryClosedProfileDef` don't declare `OuterCurve` at all) and, for
+// an `IfcPolyline`/`IfcIndexedPolyCurve` outer curve, returns the min/max X coordinate
+// of its points as a 2D reference line along +X. **A real Python truthiness subtlety,
+// verified and preserved**: `elif extrusions := get_base_extrusions(wall):` treats an
+// *empty* list as falsy (Python's own `if []:` is `False`) -- unlike a plain JS
+// `if (extrusions)`, which is `true` for `[]` -- so `getReferenceLine` below explicitly
+// checks `extrusions.length > 0`, not just `extrusions != null`, to match Python's exact
+// "no base extrusions at all" vs. "one or more base extrusions, possibly all
+// non-matching" distinction.
 //
 // *** Cross-file updates in this PR (both disclosed pre-existing gaps this chunk
 // unblocks) ***
@@ -257,6 +267,7 @@ import { EntityInstance } from "../entityInstance";
 import type { IfcFile } from "../file";
 import { getMappeditemTransformation } from "./placement";
 import type { MatrixType } from "./placement";
+import { getBaseExtrusions } from "./shape";
 
 export type { MatrixType };
 
@@ -860,14 +871,13 @@ export function getMaterialStyle(
  * usage. From that base line, the layer thicknesses will offset again, and be extruded
  * to form the body representation.
  *
- * **Genuinely blocked (disclosed, not stubbed)**: Python's `get_base_extrusions`
- * fallback (`ifcopenshell.util.shape`, a separate, not-yet-ported Tier B module) is
- * only reached when `wall` has NO "Plan"/"Axis"/"GRAPH_VIEW" representation at all --
- * see this file's header comment for the full, verified `if`/`elif` control-flow
- * reasoning. `getReferenceLine` throws a clear, descriptive error only in that one
- * case; every wall WITH a real axis representation (even one whose `Items` contain no
- * `IfcPolyline`/`IfcIndexedPolyCurve`, matching Python's own fall-through) works fully,
- * unaffected.
+ * Falls back to `ifcopenshell.util.shape.get_base_extrusions` (via `./shape`'s
+ * `getBaseExtrusions`) when `wall` has NO "Plan"/"Axis"/"GRAPH_VIEW" representation at
+ * all -- see this file's header comment for the full, verified `if`/`elif` control-flow
+ * reasoning (including a real Python empty-list-is-falsy subtlety, preserved here). Every
+ * wall WITH a real axis representation (even one whose `Items` contain no
+ * `IfcPolyline`/`IfcIndexedPolyCurve`, matching Python's own fall-through) never reaches
+ * the extrusion-based fallback at all, unaffected.
  *
  * @param wall ifcopenshell.entity_instance.
  * @param fallbackLength If there is no reference axis, assume it starts at the object
@@ -895,13 +905,32 @@ export function getReferenceLine(wall: EntityInstance, fallbackLength = 1.0): [r
 		}
 	} else {
 		// Python's `elif extrusions := ifcopenshell.util.shape.get_base_extrusions
-		// (wall):` -- only reached when `axis` is falsy, see this function's own doc
-		// comment. `util.shape` is not ported yet (out of this chunk's scope).
-		throw new Error(
-			'getReferenceLine: wall has no "Plan"/"Axis"/"GRAPH_VIEW" representation -- Python would fall back to ' +
-				"`ifcopenshell.util.shape.get_base_extrusions(wall)` here, but `util.shape` is not ported yet in this TS " +
-				"port (a separate Tier B module; see TODOS.md). Not stubbed or partially implemented.",
-		);
+		// (wall):` -- only reached when `axis` is falsy (see this function's own doc
+		// comment). `extrusions.length > 0` (not just non-null) matches Python's own
+		// empty-list-is-falsy semantics -- see this file's header comment.
+		const extrusions = getBaseExtrusions(wall);
+		if (extrusions && extrusions.length > 0) {
+			for (const extrusion of extrusions) {
+				const profile = extrusion.get("SweptArea") as EntityInstance;
+				// Python: `getattr(profile, "OuterCurve", None)` -- soft access, most
+				// profile classes (e.g. IfcCircleProfileDef/IfcRectangleProfileDef) don't
+				// declare `OuterCurve` at all.
+				const curve = attrOrNull(profile, "OuterCurve") as EntityInstance | null;
+				if (!curve) continue;
+				let x: number[];
+				if (curve.isA("IfcPolyline")) {
+					x = (curve.get("Points") as EntityInstance[]).map((p) => (p.getByIndex(0) as number[])[0]);
+				} else if (curve.isA("IfcIndexedPolyCurve")) {
+					x = ((curve.get("Points") as EntityInstance).get("CoordList") as number[][]).map((p) => p[0]);
+				} else {
+					continue;
+				}
+				return [
+					[Math.min(...x), 0.0],
+					[Math.max(...x), 0.0],
+				];
+			}
+		}
 	}
 	return [
 		[0.0, 0.0],

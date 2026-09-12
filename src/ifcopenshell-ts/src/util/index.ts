@@ -6,12 +6,17 @@
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
 // port more `util` modules; `alignment`/`attribute`/`classification`/`constraint`/`cost`/
 // `date`/`doc`/`element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/`pset`/
-// `representation`/`resource`/`schema`/`selector`/`shapeBuilder`/`system`/`type`/`unit`
-// are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4). `shapeBuilder` is
-// now `util/shape_builder.py` in full (landed across two PRs given its unusual size -- see
-// `shapeBuilder.ts`'s own header comment for the split). `alignment` ports only
-// `stationAsString` for real -- its other three functions are genuine, disclosed hard
-// blockers (thin throwing stubs), see `alignment.ts`'s own header comment.
+// `representation`/`resource`/`schema`/`selector`/`shape`/`shapeBuilder`/`system`/`type`/
+// `unit` are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4).
+// `shapeBuilder` is now `util/shape_builder.py` in full (landed across two PRs given its
+// unusual size -- see `shapeBuilder.ts`'s own header comment for the split). `alignment`
+// ports only `stationAsString` for real -- its other three functions are genuine,
+// disclosed hard blockers (thin throwing stubs), see `alignment.ts`'s own header comment.
+// `shape` ports only 4 of `util/shape.py`'s 43 functions for real (`isX`/`getProfiles`/
+// `getExtrusions`/`getBaseExtrusions`) -- the other 39 are a genuine, disclosed
+// `ifcopenshell.geom` (native geometry-kernel) hard blocker, documented as a single named
+// gap rather than 39 near-identical throwing stubs, see `shape.ts`'s own header comment
+// and `TODOS.md`.
 export * as alignment from "./alignment";
 export * as attribute from "./attribute";
 export * as classification from "./classification";
@@ -30,6 +35,7 @@ export * as representation from "./representation";
 export * as resource from "./resource";
 export * as schema from "./schema";
 export * as selector from "./selector";
+export * as shape from "./shape";
 export * as shapeBuilder from "./shapeBuilder";
 export * as system from "./system";
 export * as type from "./type";
