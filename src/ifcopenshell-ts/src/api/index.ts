@@ -24,3 +24,14 @@ export * from "./hooks";
 // own header comments for this chunk's exact scope and design decisions.
 export * as root from "./root";
 export * as owner from "./owner";
+
+// Phase 6, `api.spatial` chunk: all 4 `api.spatial` functions
+// (`assign_container`/`unassign_container`/`reference_structure`/
+// `dereference_structure`), plus two small direct dependencies this chunk also ports:
+// `owner.update_owner_history` (added to the `api.owner` barrel above -- see
+// `owner/updateOwnerHistory.ts`) and `aggregate.unassign_object` (a new, minimal
+// `api.aggregate` barrel -- see `aggregate/unassignObject.ts` for why only this one
+// function, not the full `api.aggregate` module, is in scope here). Namespaced as
+// `api.spatial.assignContainer`/etc., `api.aggregate.unassignObject`.
+export * as spatial from "./spatial";
+export * as aggregate from "./aggregate";
