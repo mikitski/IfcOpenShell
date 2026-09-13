@@ -53,3 +53,17 @@ export * as unit from "./unit";
 // `type/unassignType.ts`'s own header comment for this chunk's exact scope and a real,
 // disclosed upstream bug ported verbatim.
 export * as type from "./type";
+
+// Phase 6, `api.context` chunk: all 3 `api.context` functions (`add_context`/
+// `edit_context`/`remove_context`), completing that module, plus two small direct
+// dependencies this chunk also ports into a new, deliberately partial `api.geometry`
+// barrel: `unassign_representation`/`remove_representation` (real Python:
+// `remove_context`'s top-level-context branch calls both). `api.geometry` itself is
+// NOT fully ported -- `edit_object_placement` (the already-disclosed `api.spatial`/
+// `api.aggregate` blocker, see `TODOS.md`) and every other function in that module
+// remain future work. Namespaced as `api.context.addContext`/etc.,
+// `api.geometry.unassignRepresentation`/`api.geometry.removeRepresentation` -- see
+// `context/addContext.ts`'s and `geometry/unassignRepresentation.ts`'s own header
+// comments for this chunk's exact scope.
+export * as context from "./context";
+export * as geometry from "./geometry";

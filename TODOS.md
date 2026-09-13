@@ -1255,3 +1255,127 @@ not a new one, when `api.aggregate.assign_object` was ported (2026-09-12): `assi
 step calls the identical unported `edit_object_placement` function for the identical reason.
 
 **Depends on / blocked by:** `ifcopenshell.api.geometry` (Phase 6, not yet started).
+
+**UPDATE 2026-09-13 (Phase 6's `api.context` chunk):** `ifcopenshell.api.geometry` is no
+longer entirely unstarted -- `unassign_representation`/`remove_representation` have landed as
+a minimal, direct dependency of `api.context.removeContext` (see
+`src/ifcopenshell-ts/src/api/geometry/index.ts`'s own header comment for the exact scope).
+`edit_object_placement` itself remains fully unported -- this entry, and the gap it
+describes, are unaffected either way.
+
+---
+
+### Native primitive-layer bug: clearing an entity/aggregate-of-entity attribute to `null` via `.set()` leaves a stale (unregistered-but-still-counted) inverse-index entry
+
+**What:** `EntityInstance.set(name, null)` (or `.setByIndex(index, null)`), for an attribute
+whose *old* value referenced one or more other entities (a single entity-typed attribute, or
+an aggregate-of-entities-typed one), does NOT unregister those old references from the file's
+inverse index (`byref_excl_` in the C++ core) -- `IfcFile.getInverse`/`getTotalInverses` on the
+*previously*-referenced entity keep reporting it as still referenced, even though the clearing
+entity's own attribute correctly reads back as `null`/`[]` afterward. Confirmed directly against
+this worktree's own built native addon (not assumed), via a real repro: clearing
+`IfcTypeProduct.RepresentationMaps` (an aggregate-of-`IfcRepresentationMap`) to `null` left the
+just-cleared `IfcRepresentationMap` reporting 1 remaining inverse (the very attribute that was
+just cleared), causing `util/element.ts`'s `removeDeep2` (which starts with a
+`getTotalInverses(element) > 0` early-return guard) to silently refuse to remove it at all -- not
+a crash, a silent no-op.
+
+**Root cause, found by reading the real C++ core directly, not guessed:** the N-API shim's
+`set_attribute_value_variant` (`src/wrappergen/shim/attribute_value_shim.cpp`) handles a JS
+`null` write via its `ATTRIBUTE_VALUE_KIND_NULL` case, which calls
+`express::base::unset_attribute_value(index)` (`src/ifcparse/parse.cpp`). That function is a
+two-line wrapper: `data()->set_attribute_value(index, blank{})` -- it calls the underlying
+storage object's `set_attribute_value` *directly*, bypassing `express::base::set_attribute_
+value<T>`'s own templated overload entirely (the one at `parse.cpp` ~line 1630), which is the
+*only* place the inverse-index register/unregister bookkeeping (`register_inverse_visitor`/
+`unregister_inverse_visitor`) actually runs. Real Python's own `entity_instance.__setattr__`
+path for `value = None` does NOT hit this gap: `src/ifcwrap/IfcParseWrapper.i`'s
+`set_attribute_value_py` calls `self->set_attribute_value(i, blank{})` directly -- the exact
+overload *with* the bookkeeping (`blank` is one of the types explicitly handled by both the
+unregister *and* -- vacuously, nothing to register -- register halves of that function's own
+`if constexpr` dispatch). So this is a genuine, TS-port-specific primitive-layer bug in the
+N-API shim's own dispatch, not a shared-core bug real Python also has -- verified by reading
+both code paths side by side, not assumed from symmetry.
+
+**Why this matters, concretely:** any `api.*` usecase (already-shipped or future) that clears an
+entity- or aggregate-of-entity-typed attribute to `null` (Python's own `attr = None` /
+`[...] or None` idiom, ported as `.set(name, null)`) and then expects the *old* referenced
+entity/entities to become fully unreferenced (for a subsequent `removeDeep2` call, or any other
+`getInverse`/`getTotalInverses`-based liveness check) will get a silently wrong answer -- the
+old value looks live forever from the inverse-index's point of view, even after every real
+forward reference to it is gone. This chunk's own `api.geometry.unassignRepresentation` (the
+`IfcTypeProduct` branch, `unassignTypeRepresentation`) is a confirmed, real hit, not a
+theoretical one -- worked around locally there (see that function's own doc comment: assign an
+empty array first, which *does* correctly route through the register/unregister-bearing
+overload since a non-`blank` `T`, then assign the real final `null` value immediately after).
+**Every previously-shipped chunk that ever calls `.set(someEntityOrAggregateAttr, null)` should
+be treated as a suspect for this exact same latent bug** until audited -- not confirmed broken
+(most such calls happen right before deleting the entity that held the attribute, or don't
+depend on the *old* referenced entity's own liveness afterward, so the actual blast radius may
+be small), but not yet checked either.
+
+**Fix:** In `attribute_value_shim.cpp`'s `set_attribute_value_variant`, change the
+`ATTRIBUTE_VALUE_KIND_NULL` case from `instance.unset_attribute_value(attribute_index)` to
+directly call the templated `set_attribute_value` overload with a `blank{}` value (i.e. mirror
+`express::base::unset_attribute_value`'s own one-line body inline, or simply stop routing
+through `unset_attribute_value` and call `instance.set_attribute_value(attribute_index,
+blank{})` directly) -- a small, narrowly-scoped, well-understood one-line change, directly
+verified correct by comparing against Python's own real, working code path side by side. **Not
+applied directly in this chunk**: this sandbox has no `cmake`/full C++ toolchain (the same
+long-standing, repeatedly-disclosed constraint noted throughout this file's other entries), so
+a native-core change here could not be locally rebuilt and verified end-to-end before landing --
+unlike the small, local, immediately-testable TS-level workaround this chunk actually shipped.
+Whoever picks up the native fix should also then simplify/remove `unassignRepresentation.ts`'s
+own workaround (the redundant empty-array pre-assignment), once the root cause is confirmed
+fixed by CI.
+
+**Context:** Found while porting `api.context.removeContext`/`api.geometry.unassignRepresentation`
+(2026-09-13) -- `unassignTypeRepresentation`'s own real Python test
+(`test_unassigning_a_type_product_representation`) failed with the just-cleared
+`IfcRepresentationMap` never actually being removed, traced step by step (via `getTotalInverses`/
+`getInverse` calls at each intermediate step, not assumed) down to this exact root cause, then
+confirmed against the real C++ source for both this port's N-API shim and real Python's own SWIG
+binding side by side. Pinned by a dedicated regression test,
+`test/api/geometry/unassignRepresentation.test.ts`'s "undo restores the purged representation
+map (type product path) ... also pins the disclosed inverse-index workaround".
+
+**Depends on / blocked by:** Nothing blocks other work landing -- the TS-level workaround already
+in place is safe and correct regardless of whether/when the native fix lands. The native fix
+itself needs a real `cmake` build environment to verify (this sandbox's own repeatedly-disclosed
+constraint) -- pick up alongside any other native-core primitive-layer fix that has real CI/local
+build access.
+
+---
+
+### `api.unit.addMonetaryUnit`/`editMonetaryUnit` tests use `"ZWL"`/`"DOLLARYDOO"` currency codes that don't exist in IFC2X3's `IfcCurrencyEnum` -- another `SCHEMA_VERSIONS=4`-only silent-skip casualty
+
+**What:** `test/api/unit/addMonetaryUnit.test.ts`/`editMonetaryUnit.test.ts` (already-landed, PR
+#74) use `describe.each(AVAILABLE_SCHEMAS)` and hardcode currency strings `"ZWL"`/`"DOLLARYDOO"`
+for `IfcMonetaryUnit.Currency`. In IFC4+, `Currency` is a free-form `IfcLabel` (any string
+accepted); in IFC2X3, it's a strict `IfcCurrencyEnum` with a fixed real-world-currency list that
+does NOT include either string -- so these 3 test cases genuinely fail against a real IFC2X3
+schema (`"Unable to find keyword in schema: ZWL"`/`"...DOLLARYDOO"`), not a flake.
+
+**Why this was invisible until now:** `ci-ifcopenshell-ts.yml` builds the C++ core with
+`-DSCHEMA_VERSIONS=4` (IFC4-only), so `AVAILABLE_SCHEMAS` silently filters IFC2X3 out of every
+`describe.each(AVAILABLE_SCHEMAS)` suite in real CI today -- the exact, already-documented,
+already-tracked gap in this file's own `"CI: SCHEMA_VERSIONS=4-only means IFC2X3/IFC4X3-
+parameterized tests are silently skipped, not run"` entry above (dated 2026-09-09). This is a
+second, concrete, real instance of that same documented pattern, not a new category of problem --
+found only because this chunk's own local verification used a multi-schema-built native addon
+(borrowed from a sibling worktree, see this chunk's own PR description) rather than the
+IFC4-only one real CI builds.
+
+**Fix:** Change the two IFC2X3-incompatible currency literals to a real `IfcCurrencyEnum` member
+(e.g. `"USD"`) that's valid on all 3 schemas, or schema-parameterize the literal the same way
+`createEntity.test.ts`'s own `IfcDoorStyle`/`IfcWindowStyle` IFC4X3 guard does (`if (schema !==
+"IFC2X3") { ... }`) if exercising an intentionally-invalid-on-IFC2X3 value is itself the point.
+
+**Context:** Found incidentally while independently verifying this chunk's own (`api.context`/
+`api.geometry`) test suite against a real multi-schema native addon, 2026-09-13 -- confirmed via
+`git stash` that this failure is 100% pre-existing (present on `v0.9.0`/PR #74's own landed
+commit, unrelated to anything this chunk touched).
+
+**Depends on / blocked by:** None -- trivial, standalone fix whenever someone has a multi-schema
+addon to verify against (or picks up the broader `SCHEMA_VERSIONS` widening this file's other
+entry already tracks).
