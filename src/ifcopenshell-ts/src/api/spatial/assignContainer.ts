@@ -36,8 +36,10 @@
 //
 // --- `aggregate.unassign_object`: ported, as a small standalone dependency ---
 //
-// `ifcopenshell.api.aggregate` is a separate, not-yet-started Phase 6 chunk (2
-// functions: `assign_object`/`unassign_object`). Rather than leave this call
+// `ifcopenshell.api.aggregate` was, at the time this file was written, a separate,
+// not-yet-started Phase 6 chunk (2 functions: `assign_object`/`unassign_object`) --
+// since landed in full as its own chunk, `../aggregate/assignObject.ts` completing
+// `../aggregate/unassignObject.ts` below. Rather than leave this call
 // unported (which would silently break this function's own "a product may only be in
 // one hierarchical relation -- aggregation OR containment -- at a time" invariant,
 // the one non-containment invariant `assign_container` itself is responsible for
