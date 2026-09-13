@@ -100,17 +100,33 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.createEntity (%s)", (schema) => {
 		let element = createEntity(file, { ifcClass: "IfcWallType", name: "Foo" });
 		expect(element.get("PredefinedType")).toBe("NOTDEFINED");
 
-		element = createEntity(file, { ifcClass: "IfcDoorStyle", name: "Foo" });
-		expect(element.get("OperationType")).toBe("NOTDEFINED");
-		expect(element.get("ConstructionType")).toBe("NOTDEFINED");
-		expect(element.get("ParameterTakesPrecedence")).toBe(false);
-		expect(element.get("Sizeable")).toBe(false);
+		// `IfcDoorStyle`/`IfcWindowStyle` are IFC4-only deprecated leftovers, per
+		// `createEntity.ts`'s own `handle4Defaults` header comment -- genuinely absent
+		// from the IFC4X3 schema entirely (confirmed: no `IfcDoorStyle`/`IfcWindowStyle`
+		// interface exists anywhere in `src/generated/ifc4x3.d.ts`), not merely
+		// discouraged there. Real Python's own `test_setting_default_values_for_validity`
+		// (`test/api/root/test_create_entity.py`) is only ever run against IFC4/IFC2X3
+		// (`TestCreateEntity(test.bootstrap.IFC4)` / `TestCreateEntityIFC2X3`) -- never
+		// IFC4X3 -- so this guard, found and fixed incidentally while working on a later
+		// chunk (`api.spatial`, see `planning/ifcopenshell-ts/PROGRESS.md`), restores this
+		// already-landed test to that same real scope rather than the unguarded
+		// `describe.each(AVAILABLE_SCHEMAS)` extension incorrectly asserting on a class
+		// that can't be created on IFC4X3 at all (`createEntity` would throw
+		// "Entity with name 'IfcDoorStyle' not found in schema" before ever reaching this
+		// assertion).
+		if (schema !== "IFC4X3") {
+			element = createEntity(file, { ifcClass: "IfcDoorStyle", name: "Foo" });
+			expect(element.get("OperationType")).toBe("NOTDEFINED");
+			expect(element.get("ConstructionType")).toBe("NOTDEFINED");
+			expect(element.get("ParameterTakesPrecedence")).toBe(false);
+			expect(element.get("Sizeable")).toBe(false);
 
-		element = createEntity(file, { ifcClass: "IfcWindowStyle", name: "Foo" });
-		expect(element.get("OperationType")).toBe("NOTDEFINED");
-		expect(element.get("ConstructionType")).toBe("NOTDEFINED");
-		expect(element.get("ParameterTakesPrecedence")).toBe(false);
-		expect(element.get("Sizeable")).toBe(false);
+			element = createEntity(file, { ifcClass: "IfcWindowStyle", name: "Foo" });
+			expect(element.get("OperationType")).toBe("NOTDEFINED");
+			expect(element.get("ConstructionType")).toBe("NOTDEFINED");
+			expect(element.get("ParameterTakesPrecedence")).toBe(false);
+			expect(element.get("Sizeable")).toBe(false);
+		}
 
 		if (schema !== "IFC2X3") {
 			element = createEntity(file, { ifcClass: "IfcDoorType", name: "Foo" });

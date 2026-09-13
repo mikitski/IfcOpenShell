@@ -1203,3 +1203,48 @@ by a network proxy allowlist on the GitHub Actions log-blob-storage host).
 **Depends on / blocked by:** Nothing -- this specific fix (retiring the leg) is independent and
 already applied. The `build_osx.yml` follow-up decision noted above is a separate, not-yet-scheduled
 piece of work.
+
+---
+
+### `api.spatial.assignContainer` skips the placement-relocalization step (`api.geometry.edit_object_placement` unported)
+
+**What:** Real Python's `ifcopenshell.api.spatial.assign_container` finishes by calling
+`ifcopenshell.api.geometry.edit_object_placement` on every product it moved, so a product's absolute
+world position doesn't visually shift when reparented between two containers whose own placements
+differ. `ifcopenshell.api.geometry` has no TS port of any kind yet (confirmed by grep, matching
+`util/shape.ts`'s own disclosed geometry-kernel gap for an unrelated reason). This TS port's
+`assignContainer` (`src/ifcopenshell-ts/src/api/spatial/assignContainer.ts`) performs the full
+containment-relationship surgery correctly and independently, but simply does not invoke the
+placement step -- not stubbed to throw (which would make `assignContainer` itself fail on every call
+moving a product with an `IfcLocalPlacement`, a worse regression than a stale placement).
+
+**Why:** `edit_object_placement` (201 LOC: 4x4 matrix math, `ShapeBuilder.create_axis2_placement_3d`,
+a recursive "move my children too" traversal, `util.unit.calculate_unit_scale` conversion) is real,
+independent design work -- per `research/02-python-api-inventory.md` §3, `geometry` is one of the
+seven subpackages "where real design decisions are needed," not a small CRUD dependency. Inlining a
+partial port of it under `api.spatial`'s much narrower review scope risked a subtly wrong matrix-math
+port landing under the wrong chunk's review. (Contrast `aggregate.unassign_object`, `assignContainer`'s
+*other* real dependency: that one was small enough, 75 LOC and fully self-contained, to port for real
+in the same chunk -- see `src/ifcopenshell-ts/src/api/aggregate/unassignObject.ts`.)
+
+**Impact:** After calling `assignContainer` to move a product with an `IfcLocalPlacement` between two
+containers, the product's raw `ObjectPlacement` matrix is left exactly as it was (still relative to
+whatever `PlacementRelTo` it already had) -- it does NOT visually shift in its own `PlacementRelTo`
+frame, but WILL be visually shifted in absolute world space if the old and new containers sit at
+different absolute locations. `test_not_updating_placement_if_placement_is_not_relative` (ported, in
+`assignContainer.test.ts`) is unaffected -- Python's own `is_a("IfcLocalPlacement")` guard already
+skips non-local placements regardless of this gap.
+`test_assigning_a_container_does_not_shift_object_placements` (real Python's test that exercises
+exactly this gap) is NOT ported for this reason.
+
+**Fix:** Port `ifcopenshell.api.geometry.edit_object_placement` as its own chunk (it has several other
+callers across `api.*` beyond `assign_container`, so it's independently valuable, not
+`spatial`-specific), then wire its call back into `assignContainer`'s final loop and port the one
+skipped test above.
+
+**Context:** Surfaced during the `api.spatial` chunk (2026-09-12), scoped and verified directly
+against the real Python source (not assumed from the research doc, which describes `spatial` as having
+"No geometry, no numpy" -- true for 3 of `spatial`'s 4 functions, not `assign_container`; see
+`assignContainer.ts`'s own header comment for the full correction).
+
+**Depends on / blocked by:** `ifcopenshell.api.geometry` (Phase 6, not yet started).
