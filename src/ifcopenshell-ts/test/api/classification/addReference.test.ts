@@ -165,6 +165,32 @@ describe.each(AVAILABLE_SCHEMAS)("api.classification.addReference (%s)", (schema
 		expect((first as EntityInstance).equals(second as EntityInstance)).toBe(true);
 	});
 
+	test("reuses an existing reference when identification is omitted entirely (not just null/matching)", () => {
+		// Regression test: this specifically omits the `identification` key (leaving it
+		// `undefined`) rather than passing `identification: null` or a matching value --
+		// that's the exact path that was broken, since JS `undefined` (an omitted field)
+		// didn't compare equal to the `null` that `.get("Identification")` returns for an
+		// unset attribute, causing a duplicate reference to be created every time.
+		const file = createTestFile(schema);
+		const element = createEntity(file, { ifcClass: "IfcWall" });
+		const element2 = createEntity(file, { ifcClass: "IfcWall" });
+		const classification = addClassification(file, { classification: "Name" });
+
+		const first = addReference(file, {
+			products: [element],
+			name: "Foobar",
+			classification,
+		});
+		const second = addReference(file, {
+			products: [element2],
+			name: "Foobar",
+			classification,
+		});
+
+		expect(file.byType("IfcClassificationReference").length).toBe(1);
+		expect((first as EntityInstance).equals(second as EntityInstance)).toBe(true);
+	});
+
 	test("adding the same reference to already-assigned products is a no-op", () => {
 		const file = createTestFile(schema);
 		const element = createEntity(file, { ifcClass: "IfcWall" });
