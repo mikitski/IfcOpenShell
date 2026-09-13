@@ -104,3 +104,15 @@ export * as pset from "./pset";
 // `classification/index.ts`'s own header comment for this chunk's exact scope,
 // including two real, disclosed IFC2X3-vs-IFC4+ schema differences.
 export * as classification from "./classification";
+
+// Phase 6, `api.document` chunk: all 8 `api.document` functions (`add_information`/
+// `add_reference`/`assign_document`/`edit_information`/`edit_reference`/
+// `remove_information`/`remove_reference`/`unassign_document`), completing that module
+// -- manages `IfcDocumentInformation`/`IfcDocumentReference` via
+// `IfcRelAssociatesDocument`. No unported dependency of any kind. Namespaced as
+// `api.document.addInformation`/etc. -- see `document/index.ts`'s own header comment for
+// this chunk's exact scope, including a real, disclosed asymmetry with the structurally
+// similar `api.classification` module (`assignDocument`/`unassignDocument` don't support
+// non-`IfcRoot` resource objects at all) and 2 disclosed IFC2X3-vs-IFC4+ schema
+// differences.
+export * as document from "./document";
