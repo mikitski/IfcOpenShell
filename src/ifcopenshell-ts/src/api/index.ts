@@ -36,6 +36,15 @@ export * as owner from "./owner";
 export * as spatial from "./spatial";
 export * as aggregate from "./aggregate";
 
+// Phase 6, `api.unit` chunk: all 11 functions of `ifcopenshell.api.unit` (~790 lines
+// total) -- a real, self-contained, cohesive module (no geometry-kernel or other
+// unported hard dependency anywhere in it). Namespaced as `api.unit.addSiUnit`/etc.
+// One real, disclosed, pre-existing primitive-layer gap (first surfaced by
+// `util/migrator.ts`) blocks `unit.addConversionBasedUnit` entirely and
+// `unit.assignUnit`'s imperial-synthesis branch only -- see `unit/index.ts`'s and
+// `unit/addConversionBasedUnit.ts`'s own header comments for the full writeup.
+export * as unit from "./unit";
+
 // Phase 6, `api.type` chunk: only `unassign_type`, the one small, well-scoped function
 // of this module per `research/02-api-layer.md` SS3's own early-target recommendation --
 // `assign_type` (319 lines, the largest file in this group) and
