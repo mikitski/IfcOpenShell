@@ -77,3 +77,17 @@ export * as geometry from "./geometry";
 // chunk's two disclosed findings (a pre-existing LOGICAL-attribute round-trip gap, and
 // a real Python-source bug in `unassign_layer` reproduced verbatim).
 export * as layer from "./layer";
+
+// Phase 6, `api.group` chunk: all 6 `api.group` functions (`add_group`/`assign_group`/
+// `edit_group`/`remove_group`/`unassign_group`/`update_group_products`), completing
+// that module -- manages `IfcGroup` via `IfcRelAssignsToGroup`, a generic non-spatial
+// grouping mechanism. Plus one small direct dependency this chunk also ports into a
+// new, deliberately partial `api.pset` barrel: `remove_pset` (real Python:
+// `remove_group`'s cleanup step calls it on any pset assigned directly to the group
+// being removed). `api.pset` itself is NOT fully ported -- `add_pset`/`edit_pset`/etc.
+// remain future work. Namespaced as `api.group.addGroup`/etc., `api.pset.removePset`
+// -- see `group/index.ts`'s and `pset/index.ts`'s own header comments for this chunk's
+// exact scope, including a noteworthy finding about `remove_group`'s reliance on
+// `IfcFile.remove`'s own automatic aggregate-reference cleanup.
+export * as group from "./group";
+export * as pset from "./pset";
