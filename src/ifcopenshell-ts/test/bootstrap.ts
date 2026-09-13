@@ -10,6 +10,7 @@
 
 import type { IfcFile } from "../src/file";
 import * as template from "../src/template";
+import * as elementUtil from "../src/util/element";
 
 export type Schema = "IFC2X3" | "IFC4" | "IFC4X3";
 
@@ -87,5 +88,38 @@ export function stripOwnerBootstrap(file: IfcFile): void {
 	}
 	for (const user of file.byType("IfcPersonAndOrganization")) {
 		file.remove(user);
+	}
+}
+
+/**
+ * Removes the `createTestFile` template's pre-populated `IfcProject` (and, via
+ * `util.element.removeDeep2`'s ordinary "delete anything left with zero remaining
+ * inverses" cascade, everything the template only keeps alive *through* that
+ * project: its `UnitsInContext` `IfcUnitAssignment` and member units, its
+ * `RepresentationContexts`, and -- since `IfcProject.OwnerHistory` is the template's
+ * only reference to `IfcOwnerHistory`, which is in turn the template's only
+ * reference to `IfcPersonAndOrganization`/`IfcApplication`, which are in turn the
+ * only references to `IfcPerson`/`IfcOrganization` -- the entire default person/
+ * organization/application/owner-history chain too), for tests that need a truly
+ * project-and-unit-free file. Added for the `api.unit` chunk: unlike every previously
+ * landed `api.*` chunk, `api.unit`'s `assignUnit`/`unassignUnit`/`removeUnit` are the
+ * first functions to actually read/write `IfcProject.UnitsInContext`, and the real
+ * Python test suite's own fixture (`test/bootstrap.py`'s `IFC4`/`IFC2X3`/`IFC4X3`
+ * classes: `self.file = ifcopenshell.api.project.create_file(...)`) is genuinely
+ * blank -- `create_file` is NOT `ifcopenshell.template.create` (confirmed by reading
+ * `api/project/create_file.py`: it's a bare `ifcopenshell.file(schema=version)` plus
+ * cosmetic header metadata, no entities at all) -- unlike `createTestFile` here,
+ * which intentionally uses the richer `template.create` port for other chunks'
+ * needs (`stripOwnerBootstrap`'s own header comment above already documents this
+ * same real fixture-shape gap for the owner/person/organization/application slice;
+ * this is the same gap's `IfcProject`/unit-assignment slice, not a new one). Every
+ * real Python `test/api/unit/test_*.py` test that needs a project calls
+ * `self.file.createIfcProject()` itself against that genuinely blank file -- this
+ * port's tests do the same against a file stripped with this helper first, reaching
+ * the same "one project, no pre-existing units" starting state.
+ */
+export function stripProjectBootstrap(file: IfcFile): void {
+	for (const project of file.byType("IfcProject")) {
+		elementUtil.removeDeep2(file, project);
 	}
 }

@@ -201,6 +201,28 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 		expect("GlobalId" in info).toBe(true);
 	});
 
+	// Real, disclosed bug found and fixed while building the `api.unit` Phase 6 chunk
+	// (`planning/ifcopenshell-ts/PROGRESS.md`) -- see `getInfo()`'s own updated header
+	// comment for the full root-cause writeup. `IfcSIUnit` re-declares its inherited
+	// `IfcNamedUnit.Dimensions` (attribute index 0) as EXPRESS `DERIVE`, so the real
+	// STEP-level attribute list still reserves index 0 for it even though it's
+	// excluded from `.get()`/`.set()`'s FORWARD-attribute name resolution -- a real
+	// class with a non-FORWARD attribute interleaved among its FORWARD ones, which the
+	// previous `getInfo()` implementation zipped incorrectly (see the header comment
+	// for the exact wrong output it used to produce).
+	test("getInfo(): a class with an interleaved DERIVE attribute (IfcSIUnit.Dimensions) maps names to the correct real indices", () => {
+		const file = newFile();
+		// Leading `null` placeholder for the derived `Dimensions` slot -- positional
+		// creation matches `src/api/unit/addSiUnit.ts`'s own documented layout.
+		const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", "MILLI", "METRE");
+		const info = unit.getInfo();
+		expect(info.UnitType).toBe("LENGTHUNIT");
+		expect(info.Prefix).toBe("MILLI");
+		expect(info.Name).toBe("METRE");
+		expect("undefined" in info).toBe(false);
+		expect(Object.keys(info).sort()).toEqual(["Name", "Prefix", "UnitType", "id", "type"].sort());
+	});
+
 	test("walk(): pure tree-transform helper", () => {
 		const file = newFile();
 		const wall = file.createEntity("IfcWall");

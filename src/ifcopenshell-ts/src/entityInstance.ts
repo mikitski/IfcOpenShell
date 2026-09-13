@@ -481,19 +481,47 @@ export class EntityInstance {
 		// Sources attribute names from this chunk's attribute-metadata cache
 		// (`_resolveTypeInfo`) instead of a fresh `entityDeclaration.all_attributes()`
 		// walk per call -- the same one-bulk-call-per-(schema,class) cache the Proxy
-		// trap consults, now with a second consumer. `list` is FORWARD entries followed
-		// by INVERSE ones (`attributeCache.ts`'s `buildClassAttributeCache`), each
-		// FORWARD entry's position among just the FORWARD entries equal to its own
-		// `index` field, so filtering preserves the exact name-by-index ordering
-		// `get_all_attribute_values()` returns values in.
-		const names = this._resolveTypeInfo()
-			.cache.list.filter((meta) => meta.category === AttributeCategory.FORWARD)
-			.map((meta) => meta.name);
+		// trap consults, now with a second consumer.
+		//
+		// *** Real, disclosed bug fixed here (found while building the `api.unit`
+		// chunk, `planning/ifcopenshell-ts/PROGRESS.md`): the previous version zipped
+		// `rawValues[i]` against `names[i]` -- i.e. assumed each FORWARD attribute's
+		// position *within the FORWARD-only filtered name list* equals its real
+		// positional index into `get_all_attribute_values()`'s full per-class value
+		// array. That assumption holds for a class whose FORWARD attributes are
+		// contiguous from index 0, but is FALSE whenever a non-FORWARD (EXPRESS
+		// `DERIVE`) attribute is interleaved among them, reserving a real STEP-level
+		// slot the FORWARD-only name list has no entry for -- confirmed concretely for
+		// `IfcSIUnit`: `IfcNamedUnit.Dimensions` (attribute 0) is re-declared `DERIVE`
+		// on `IfcSIUnit` specifically (`addSiUnit.ts`'s own header comment), so
+		// `all_attributes()` still reserves index 0 for it (excluded from the FORWARD
+		// list by the `!== FORWARD` `continue` below), leaving `UnitType`/`Prefix`/
+		// `Name` at REAL indices 1/2/3 -- but the old code zipped them against
+		// `rawValues[0..2]` (positions 0/1/2 in the FORWARD-name list), silently
+		// shifting every value one slot early and leaving a spurious `"undefined"` key
+		// for `rawValues[3]`. Reproduced empirically against this exact worktree's own
+		// built native addon before fixing: `getInfo()` on a fresh, positionally-
+		// created `IfcSIUnit` returned `{"UnitType":null,"Prefix":"LENGTHUNIT",
+		// "Name":null,"undefined":"METRE"}` instead of the correct
+		// `{"UnitType":"LENGTHUNIT","Prefix":null,"Name":"METRE"}`. This silently
+		// corrupted `Transaction.storeCreate`'s serialisation (`serialiseEntityInstance`
+		// calls `getInfo()`) for any positionally-created `IfcSIUnit` -- redoing such a
+		// creation (`Transaction.commit`, which replays `getInfo()`'s dict via
+		// `element.set(name, value)`) silently restored the WRONG attribute values.
+		// Fixed by indexing `rawValues` with each `AttributeMeta`'s own real `.index`
+		// field directly (already correctly computed by `attributeCache.ts`'s
+		// `buildClassAttributeCache`, which this bug never actually needed to touch --
+		// `meta.index` there is exactly `all_attributes()`'s own real positional
+		// index, gaps and all) instead of the filtered array's own by-order position.
+		// Pinned by a dedicated regression test, `entityInstance.test.ts`'s "getInfo on
+		// a class with an interleaved DERIVE attribute" case. ***
+		const forwardMetas = this._resolveTypeInfo().cache.list.filter(
+			(meta) => meta.category === AttributeCategory.FORWARD,
+		);
 		const rawValues = this.native.get_all_attribute_values() as unknown[];
-		for (let index = 0; index < rawValues.length; index++) {
-			const name = names[index];
-			if (ignore.includes(name)) continue;
-			let value = this.wrapValue(rawValues[index]);
+		for (const meta of forwardMetas) {
+			if (ignore.includes(meta.name)) continue;
+			let value = this.wrapValue(rawValues[meta.index]);
 			if (recursive) {
 				value = EntityInstance.walk(
 					(v) => v instanceof EntityInstance,
@@ -501,7 +529,7 @@ export class EntityInstance {
 					value,
 				);
 			}
-			info[name] = value;
+			info[meta.name] = value;
 		}
 		return info;
 	}
