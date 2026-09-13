@@ -35,3 +35,12 @@ export * as owner from "./owner";
 // `api.spatial.assignContainer`/etc., `api.aggregate.unassignObject`.
 export * as spatial from "./spatial";
 export * as aggregate from "./aggregate";
+
+// Phase 6, `api.type` chunk: only `unassign_type`, the one small, well-scoped function
+// of this module per `research/02-api-layer.md` SS3's own early-target recommendation --
+// `assign_type` (319 lines, the largest file in this group) and
+// `map_type_representations` (a fan-out over every occurrence of a type) remain
+// future, separate chunks. Namespaced as `api.type.unassignType` -- see
+// `type/unassignType.ts`'s own header comment for this chunk's exact scope and a real,
+// disclosed upstream bug ported verbatim.
+export * as type from "./type";
