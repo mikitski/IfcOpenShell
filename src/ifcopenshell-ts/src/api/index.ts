@@ -67,3 +67,13 @@ export * as type from "./type";
 // comments for this chunk's exact scope.
 export * as context from "./context";
 export * as geometry from "./geometry";
+
+// Phase 6, `api.layer` chunk: all 6 `api.layer` functions (`add_layer`/
+// `add_layer_with_style`/`assign_layer`/`edit_layer`/`remove_layer`/`unassign_layer`),
+// completing that module -- a real, self-contained module with no unported dependency
+// of any kind (every file only ever imports bare `ifcopenshell`). Manages
+// `IfcPresentationLayerAssignment`/`IfcPresentationLayerWithStyle`. Namespaced as
+// `api.layer.addLayer`/etc. -- see `layer/index.ts`'s own header comment for this
+// chunk's two disclosed findings (a pre-existing LOGICAL-attribute round-trip gap, and
+// a real Python-source bug in `unassign_layer` reproduced verbatim).
+export * as layer from "./layer";
