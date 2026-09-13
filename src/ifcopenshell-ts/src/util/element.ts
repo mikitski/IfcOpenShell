@@ -36,9 +36,13 @@
 //
 // Explicitly NOT in this chunk's scope (see the task brief this was built from):
 // `get_shape_aspects` (calls `ifcopenshell.util.representation`, a not-yet-ported Tier B
-// module) and `get_referenced_elements` (see chunk 2's header comment below for why) --
-// both remain unported; every other function in `element.py` is now ported across
-// chunks 1-3.
+// module) -- still unported. `get_referenced_elements` (see chunk 2's header comment
+// below for why it was originally deferred out of this chunk) has SINCE been added,
+// appended just after chunk 2's `has_openings` -- see that addition's own doc comment
+// for the full story: `ifcopenshell.api.classification`'s `add_reference`/
+// `remove_reference` are its first real callers, so it landed alongside that chunk
+// instead of waiting for a hypothetical future `util.classification`/`util.document`
+// chunk (`util.classification` itself, landed since, never needed it).
 //
 // Two real, disclosed findings surfaced while building this chunk (both flagged in this
 // chunk's PR description/final report, neither "fixed" by adding a new native primitive
@@ -1175,6 +1179,15 @@ export function getElementsByRepresentation(
 // future chunks' own design decisions) or leaving it half-implemented; left for a later
 // chunk instead.
 //
+// **UPDATE (`api.classification` chunk):** that later chunk arrived -- `add_reference`/
+// `remove_reference` both genuinely call `get_referenced_elements`, and by then
+// `util.classification` (landed since) turned out not to need it after all. Rather than
+// leave those two `api.classification` functions blocked on a hypothetical
+// `util.document` chunk that may never materialize, `get_referenced_elements` (plus its
+// backing `REFERENCE_TYPES` table, ported in full -- not narrowed to just the
+// `IfcClassification*` entries this module's own callers exercise) is appended just
+// after `has_openings` below, keeping this file's function order matching Python's own.
+//
 // Both Python `Generator`-returning functions in this chunk's scope (`get_controls`,
 // `get_openings`) are ported as plain eager `EntityInstance[]`-returning functions, not
 // TS generator functions -- every other list/set-returning function in this module
@@ -1532,6 +1545,119 @@ export function getOpenings(element: EntityInstance): EntityInstance[] {
  */
 export function hasOpenings(element: EntityInstance): boolean {
 	return getOpenings(element).length > 0;
+}
+
+/**
+ * Python: `ReferenceData = namedtuple("ReferenceData", "inverse_attribute, rel_class,
+ * relating_element_attribute")` / `REFERENCE_TYPES: dict[str, ReferenceData]`.
+ *
+ * Maps an IFC "reference"/"information" class -- a classification, document, or library
+ * entry that can be assigned to arbitrary elements via an `IfcRelAssociates*`
+ * relationship -- to: the IFC4+ inverse attribute name declared on the reference/
+ * information entity itself (e.g. `ClassificationRefForObjects`), the `IfcRelAssociates*`
+ * relationship class that carries the association, and the forward attribute on that
+ * relationship pointing back at the reference/information (used only by the IFC2X3
+ * code path below, which has no such inverse attribute at all).
+ *
+ * Ported in full (all 6 entries), not narrowed to just the `IfcClassification`/
+ * `IfcClassificationReference` rows `ifcopenshell.api.classification` (this function's
+ * first real caller in this port) actually exercises -- matching Python's own module-
+ * level table exactly.
+ */
+interface ReferenceData {
+	readonly inverseAttribute: string;
+	readonly relClass: string;
+	readonly relatingElementAttribute: string;
+}
+
+const REFERENCE_TYPES: Readonly<Record<string, ReferenceData>> = {
+	IfcClassificationReference: {
+		inverseAttribute: "ClassificationRefForObjects",
+		relClass: "IfcRelAssociatesClassification",
+		relatingElementAttribute: "RelatingClassification",
+	},
+	IfcDocumentReference: {
+		inverseAttribute: "DocumentRefForObjects",
+		relClass: "IfcRelAssociatesDocument",
+		relatingElementAttribute: "RelatingDocument",
+	},
+	IfcLibraryReference: {
+		inverseAttribute: "LibraryRefForObjects",
+		relClass: "IfcRelAssociatesLibrary",
+		relatingElementAttribute: "RelatingLibrary",
+	},
+	IfcClassification: {
+		inverseAttribute: "ClassificationForObjects",
+		relClass: "IfcRelAssociatesClassification",
+		relatingElementAttribute: "RelatingClassification",
+	},
+	IfcDocumentInformation: {
+		inverseAttribute: "DocumentInfoForObjects",
+		relClass: "IfcRelAssociatesDocument",
+		relatingElementAttribute: "RelatingDocument",
+	},
+	IfcLibraryInformation: {
+		inverseAttribute: "LibraryInfoForObjects",
+		relClass: "IfcRelAssociatesLibrary",
+		relatingElementAttribute: "RelatingLibrary",
+	},
+};
+
+/**
+ * Python: `get_referenced_elements(reference: entity_instance) -> set[entity_instance]`.
+ *
+ * Get all elements with `reference` (an `IfcClassificationReference`/`IfcClassification`/
+ * `IfcDocumentReference`/`IfcDocumentInformation`/`IfcLibraryReference`/
+ * `IfcLibraryInformation`) assigned.
+ *
+ * IFC2X3 has no inverse attribute for these associations at all, so that branch instead
+ * scans every `IfcRelAssociates*` instance of the right class and compares its forward
+ * `RelatingClassification`/`RelatingDocument`/`RelatingLibrary` attribute against
+ * `reference` by identity (`entityEquals`, not `===` -- see this file's own chunk 1
+ * doc comment on why reference equality never works across separately-minted
+ * `EntityInstance` wrapper objects). IFC4+ instead reads the inverse attribute directly:
+ * `IfcExternalReference` subtypes (which is_a check includes `IfcClassificationReference`/
+ * `IfcDocumentReference`/`IfcLibraryReference`, but NOT the three `*Information` classes)
+ * additionally carry `ExternalReferenceForResources`, covering non-`IfcRoot` "resource"
+ * objects (e.g. `IfcProfileDef`, `IfcMaterial`) that an `IfcRelAssociates*` relationship
+ * cannot target -- ported verbatim as a second, additive source of related objects, not
+ * an either/or with the `REFERENCE_TYPES` lookup below it.
+ */
+export function getReferencedElements(reference: EntityInstance): Set<EntityInstance> {
+	const relatedObjects = new EntityInstanceSet();
+	const ifcFile = reference.file as IfcFile;
+	const ifcClass = reference.isA();
+
+	if (ifcFile.schema === "IFC2X3") {
+		const referenceData = REFERENCE_TYPES[ifcClass];
+		if (referenceData) {
+			for (const rel of ifcFile.byType(referenceData.relClass)) {
+				if (entityEquals(rel.get(referenceData.relatingElementAttribute) as EntityInstance | null, reference)) {
+					relatedObjects.update(rel.get("RelatedObjects") as EntityInstance[]);
+				}
+			}
+		}
+	} else {
+		if (reference.isA("IfcExternalReference")) {
+			// Python: `reference.ExternalReferenceForResources` -- no `getattr` default,
+			// matching chunk 2's own "no default in Python means a direct `.get(...)` here"
+			// convention (see this file's chunk 2 header comment).
+			for (const externalRel of reference.get("ExternalReferenceForResources") as EntityInstance[]) {
+				relatedObjects.update(externalRel.get("RelatedResourceObjects") as EntityInstance[]);
+			}
+		}
+
+		const referenceData = REFERENCE_TYPES[ifcClass];
+		if (referenceData) {
+			// Python: `getattr(reference, reference_data.inverse_attribute)` -- likewise no
+			// default.
+			for (const rel of reference.get(referenceData.inverseAttribute) as EntityInstance[]) {
+				relatedObjects.update(rel.get("RelatedObjects") as EntityInstance[]);
+			}
+		}
+	}
+
+	return relatedObjects.toSet();
 }
 
 // --- Structural editing helpers (chunk 3 of 3) ---

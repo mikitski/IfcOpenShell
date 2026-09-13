@@ -91,3 +91,16 @@ export * as layer from "./layer";
 // `IfcFile.remove`'s own automatic aggregate-reference cleanup.
 export * as group from "./group";
 export * as pset from "./pset";
+
+// Phase 6, `api.classification` chunk: all 6 `api.classification` functions
+// (`add_classification`/`add_reference`/`edit_classification`/`edit_reference`/
+// `remove_classification`/`remove_reference`), completing that module -- manages
+// `IfcClassification`/`IfcClassificationReference` via `IfcRelAssociatesClassification`
+// (rooted objects) / `IfcExternalReferenceRelationship` (non-rooted resource objects,
+// IFC4+ only). No unported dependency of any kind, though `util/element.ts`'s
+// `get_referenced_elements` (previously deliberately deferred out of that file's own
+// 3-chunk port) is added here, in full, as this module's first genuine caller.
+// Namespaced as `api.classification.addClassification`/etc. -- see
+// `classification/index.ts`'s own header comment for this chunk's exact scope,
+// including two real, disclosed IFC2X3-vs-IFC4+ schema differences.
+export * as classification from "./classification";

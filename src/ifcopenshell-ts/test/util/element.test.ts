@@ -6,9 +6,12 @@
 // query functions (container/decomposition/aggregation/nesting/grouping/void
 // relationships), and chunk 3's structural-editing helpers (`copy`/`copyDeep`/
 // `removeDeep`/`removeDeep2`/`batchRemoveDeep2`/`unbatchRemoveDeep2`/
-// `replaceElement`/`replaceAttribute`). `get_shape_aspects`/`get_referenced_elements`
-// remain unported (see `element.ts`'s own header comment for why) and have no tests
-// here.
+// `replaceElement`/`replaceAttribute`). `get_shape_aspects` remains unported (see
+// `element.ts`'s own header comment for why) and has no tests here.
+// `get_referenced_elements` WAS originally unported/untested here too, but has since
+// landed (added alongside the `api.classification` chunk, its first genuine caller --
+// see `element.ts`'s own updated header comment) -- covered below, just after
+// `getOpenings`/`hasOpenings`, matching Python's own function ordering.
 //
 // Python's own test suite builds its fixtures via `ifcopenshell.api.*` (`api.root
 // .create_entity`, `api.pset.add_pset`, `api.material.assign_material`,
@@ -51,6 +54,7 @@
 import { describe, expect, test } from "vitest";
 import { EntityInstance } from "../../src/entityInstance";
 import type { IfcFile } from "../../src/file";
+import * as guid from "../../src/guid";
 import { native } from "../../src/native/native_loader";
 import * as subject from "../../src/util/element";
 import { AVAILABLE_SCHEMAS, type Schema, createTestFile } from "../bootstrap";
@@ -1875,6 +1879,49 @@ describe("util.element getOpenings / hasOpenings (IFC4)", () => {
 		expect(subject.hasOpenings(wall)).toBe(false);
 	});
 });
+
+// No Python test class exists for `get_referenced_elements` (`test_element.py` has no
+// dedicated test for it -- confirmed by reading that file directly) -- original
+// coverage. Added alongside the `api.classification` chunk (`add_reference`/
+// `remove_reference`'s first genuine callers of this function) -- see this file's own
+// header comment for the disclosure.
+describe.each(AVAILABLE_SCHEMAS)("util.element getReferencedElements (%s)", (schema) => {
+	test("a rooted product via IfcRelAssociatesClassification", () => {
+		const file = createTestFile(schema);
+		const wall = file.createEntity("IfcWall");
+		const classification = file.createEntity("IfcClassification", null, null, null, "Name");
+		const reference = file.createEntity("IfcClassificationReference", null, null, null, classification);
+		file.createEntity("IfcRelAssociatesClassification", guid.new(), null, null, null, [wall], reference);
+
+		const referenced = subject.getReferencedElements(reference);
+		expect(referenced.size).toBe(1);
+		expect([...referenced][0].id()).toBe(wall.id());
+	});
+
+	test("no relationship at all", () => {
+		const file = createTestFile(schema);
+		const classification = file.createEntity("IfcClassification", null, null, null, "Name");
+		const reference = file.createEntity("IfcClassificationReference", null, null, null, classification);
+		expect(subject.getReferencedElements(reference).size).toBe(0);
+	});
+});
+
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4"))(
+	"util.element getReferencedElements -- IFC4+-only ExternalReferenceForResources path (IFC4)",
+	() => {
+		test("a non-rooted resource object via IfcExternalReferenceRelationship", () => {
+			const file = createTestFile("IFC4");
+			const material = file.createEntity("IfcMaterial");
+			const classification = file.createEntity("IfcClassification", null, null, null, "Name");
+			const reference = file.createEntity("IfcClassificationReference", null, null, null, classification);
+			file.createEntity("IfcExternalReferenceRelationship", null, null, reference, [material]);
+
+			const referenced = subject.getReferencedElements(reference);
+			expect(referenced.size).toBe(1);
+			expect([...referenced][0].id()).toBe(material.id());
+		});
+	},
+);
 
 // --- Structural editing helpers (chunk 3 of 3) ---
 
