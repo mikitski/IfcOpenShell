@@ -23,6 +23,9 @@
 // source files are themselves near-identical for the same reason (both manage a
 // single-related-element STEP relationship class), not a coincidence introduced by
 // this port.
+//
+// Update: `assign_object` has since landed too, as `./assignObject.ts` -- `api.aggregate`
+// is now fully ported. See that file's own header comment for its own porting notes.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
