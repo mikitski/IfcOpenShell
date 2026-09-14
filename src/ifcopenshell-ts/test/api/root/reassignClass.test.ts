@@ -2,33 +2,36 @@
 //
 // TS counterpart to `test/api/root/test_reassign_class.py` (src/ifcopenshell-python,
 // `TestReassignClass`/`TestReassignClassIFC4X3`/`TestReassignClassIFC2X3`). Every real
-// Python test that doesn't depend on `api.geometry.assignRepresentation` is ported for
-// real below -- confirmed directly against `../../../src/api/root/reassignClass.ts`'s
-// own header comment, `simpleReassignment` and the non-representation half of
-// `switchBetweenClassTypes` have no blocked dependency at all.
+// Python test is now ported for real below -- confirmed directly against
+// `../../../src/api/root/reassignClass.ts`'s own header comment, `simpleReassignment`
+// and BOTH directions of `switchBetweenClassTypes` are portable, now that
+// `api.geometry.assignRepresentation` has landed (this project's `api.geometry` chunk
+// 2). Only ONE direction remains genuinely blocked:
 //
-// 2 real Python tests (`test_keeping_representations_switching_from_occurrence_class
-// _to_type_class`/`..._from_type_class_to_occurrence_class`) are genuinely blocked --
-// both set up their fixture via real Python's own `ifcopenshell.api.geometry
-// .assign_representation` (itself not ported here either) and then rely on this
-// function's own internal `assign_representation` call to carry the representation
-// across the switch. Pinned instead as dedicated "throws the disclosed blocked error"
-// regression tests, matching `removeProduct.test.ts`'s established precedent -- not
-// silently dropped. The fixture for these 2 pins is built directly (a bare
-// `IfcProductDefinitionShape`/`RepresentationMaps` assignment via `.set()`, bypassing
-// the unported `assignRepresentation` usecase entirely, matching `removeProduct
-// .test.ts`'s own `withAttrs`-based substitution precedent) since the actual behavior
-// under test (this function throwing once it discovers a non-empty representations
-// list) doesn't depend on how the representation got attached in the first place.
+//   - `test_keeping_representations_switching_from_occurrence_class_to_type_class`
+//     (`occurrence_to_type`): now ported for real (no more blocked pin) -- real
+//     Python's own fixture (`ifcopenshell.api.geometry.assign_representation`) is used
+//     directly, since that function is now a real, exported `assignRepresentation`.
+//   - `test_keeping_representations_switching_from_type_class_to_occurrence_class`
+//     (`type_to_occurrence`): still genuinely blocked -- needs the still-unported
+//     `api.geometry.editObjectPlacement` (see `reassignClass.ts`'s own header comment
+//     for the precise, narrowed guard: ONLY this direction, with representations,
+//     still throws). Pinned as a dedicated "throws the disclosed blocked error"
+//     regression test, matching `removeProduct.test.ts`'s established precedent -- not
+//     silently dropped. Its fixture uses the same real `assignRepresentation` this
+//     chunk landed (no more bare `.set()` substitution needed, unlike this file's own
+//     pre-`api.geometry`-chunk-2 version).
 
 import { describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
+import { assignRepresentation } from "../../../src/api/geometry/assignRepresentation";
 import { addPset } from "../../../src/api/pset/addPset";
 import { reassignClass } from "../../../src/api/root/reassignClass";
 import { assignContainer } from "../../../src/api/spatial/assignContainer";
 import { assignType } from "../../../src/api/type/assignType";
 import type { EntityInstance } from "../../../src/entityInstance";
 import * as elementUtil from "../../../src/util/element";
+import * as representationUtil from "../../../src/util/representation";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS)("api.root.reassignClass (%s)", (schema) => {
@@ -199,6 +202,25 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.reassignClass (%s)", (schema) => {
 		expect(file.byType("IfcWallType")).toHaveLength(0);
 		expect(file.byType("IfcSlab")).toHaveLength(1);
 	});
+
+	// Real Python: `test_keeping_representations_switching_from_occurrence_class_to_type_class`
+	// -- now fully portable (`api.geometry.assignRepresentation` has landed). See
+	// `../../../src/api/root/reassignClass.ts`'s own header comment: an
+	// `occurrence_to_type` switch never reaches the still-unported
+	// `edit_object_placement` call, unlike the opposite direction (below).
+	test("keeps representations when switching from an occurrence class to a type class", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const representation = file.createEntity("IfcShapeRepresentation", context);
+		assignRepresentation(file, { product: element, representation });
+
+		const newElement = reassignClass(file, { product: element, ifcClass: "IfcSlabType" });
+
+		expect(representationUtil.getRepresentation(newElement, context)?.equals(representation)).toBe(true);
+		expect(file.byType("IfcWall")).toHaveLength(0);
+		expect(file.byType("IfcSlabType")).toHaveLength(1);
+	});
 });
 
 // IFC2X3-specific: providing an explicit `occurrenceClass` (real Python's own
@@ -228,37 +250,28 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))("api.root.reassignClass -
 	});
 });
 
-// --- Disclosed blocker: reassigning between occurrence/type classes when the element
-// has at least one representation needs `api.geometry.assignRepresentation`/
-// `.editObjectPlacement`, neither ported. See `../../../src/api/root/reassignClass.ts`'s
-// own header comment and `TODOS.md`. ---
+// --- Disclosed, NARROWED blocker: only a `type_to_occurrence` switch (a TYPE
+// reassigned to an OCCURRENCE class) with at least one representation still throws --
+// needs `api.geometry.editObjectPlacement`, not ported. The opposite direction
+// (`occurrence_to_type`) now fully succeeds (see the real, ported
+// "keeps representations when switching from an occurrence class to a type class" test
+// above) since `api.geometry.assignRepresentation` has landed. See
+// `../../../src/api/root/reassignClass.ts`'s own header comment and `TODOS.md`. ---
 
 describe.each(AVAILABLE_SCHEMAS)("api.root.reassignClass -- disclosed blocker (%s)", (schema) => {
-	test("switching from an occurrence class to a type class with a representation throws (api.geometry.assignRepresentation not ported)", () => {
+	// Real Python: `test_keeping_representations_switching_from_type_class_to_occurrence_class`
+	// -- still genuinely blocked (needs `edit_object_placement`), so this pins the throw
+	// rather than the real Python assertions.
+	test("switching from a type class to an occurrence class with a representation throws (api.geometry.editObjectPlacement not ported)", () => {
 		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWall");
+		const elementType = file.createEntity("IfcWallType");
 		const context = file.createEntity("IfcGeometricRepresentationContext");
-		const representation = file.createEntity("IfcShapeRepresentation");
-		representation.set("ContextOfItems", context);
-		element.set("Representation", file.createEntity("IfcProductDefinitionShape", null, null, [representation]));
-
-		expect(() => reassignClass(file, { product: element, ifcClass: "IfcSlabType" })).toThrow(
-			/api\.geometry\.assignRepresentation/,
-		);
-	});
-
-	test("switching from a type class to an occurrence class with a representation throws (api.geometry.assignRepresentation not ported)", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWallType");
-		const context = file.createEntity("IfcGeometricRepresentationContext");
-		const representation = file.createEntity("IfcShapeRepresentation");
-		representation.set("ContextOfItems", context);
+		const representation = file.createEntity("IfcShapeRepresentation", context);
 		representation.set("Items", [file.createEntity("IfcExtrudedAreaSolid")]);
-		const mappingOrigin = file.createEntity("IfcAxis2Placement3D");
-		element.set("RepresentationMaps", [file.createEntity("IfcRepresentationMap", mappingOrigin, representation)]);
+		assignRepresentation(file, { product: elementType, representation });
 
-		expect(() => reassignClass(file, { product: element, ifcClass: "IfcSlab" })).toThrow(
-			/api\.geometry\.assignRepresentation/,
+		expect(() => reassignClass(file, { product: elementType, ifcClass: "IfcSlab" })).toThrow(
+			/api\.geometry\.editObjectPlacement/,
 		);
 	});
 });
@@ -308,5 +321,39 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.reassignClass Transaction/undo-redo (
 		file.redo();
 		expect(file.byId(elementId).isA("IfcSlabType")).toBe(true);
 		expect(file.byType("IfcRelContainedInSpatialStructure")).toHaveLength(0);
+	});
+
+	// New real behavior this chunk enables (`occurrence_to_type` now carries
+	// representations across the switch via the real `api.geometry.assignRepresentation`
+	// -- see `../../../src/api/root/reassignClass.ts`'s own header comment).
+	test("undo restores the occurrence's representation; redo re-applies the type's carried-over representation", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const representation = file.createEntity("IfcShapeRepresentation", context);
+		assignRepresentation(file, { product: element, representation });
+		const elementId = element.id();
+		const representationId = representation.id();
+
+		file.beginTransaction();
+		reassignClass(file, { product: element, ifcClass: "IfcSlabType" });
+		file.endTransaction();
+
+		expect(file.byId(elementId).isA("IfcSlabType")).toBe(true);
+		expect(
+			representationUtil.getRepresentation(file.byId(elementId), context)?.equals(file.byId(representationId)),
+		).toBe(true);
+
+		file.undo();
+		expect(file.byId(elementId).isA("IfcWall")).toBe(true);
+		expect(
+			representationUtil.getRepresentation(file.byId(elementId), context)?.equals(file.byId(representationId)),
+		).toBe(true);
+
+		file.redo();
+		expect(file.byId(elementId).isA("IfcSlabType")).toBe(true);
+		expect(
+			representationUtil.getRepresentation(file.byId(elementId), context)?.equals(file.byId(representationId)),
+		).toBe(true);
 	});
 });

@@ -1327,6 +1327,23 @@ completes the full switch normally. Pinned by 2 dedicated regression tests in
 `..._from_type_class_to_occurrence_class`, whose own fixtures themselves depend on the
 unported `assign_representation` too).
 
+**UPDATE 2026-09-14 (`api.geometry` chunk 2 -- `assign_representation`/`map_representation`):**
+`assign_representation` landed for real (see `src/ifcopenshell-ts/src/api/geometry/
+assignRepresentation.ts`'s own header comment) -- NARROWING, not fully resolving, this
+entry. Re-reading `switch_between_class_types`'s own final `if` verbatim (not assumed)
+shows the still-unported `edit_object_placement` call is reached ONLY `if switch_type ==
+"type_to_occurrence" and representations:` -- never for `occurrence_to_type`. So
+`reassignClass.ts` now only throws for a `type_to_occurrence` switch with a non-empty
+`representations` (citing ONLY `editObjectPlacement` now, not `assignRepresentation` too,
+which is real); an `occurrence_to_type` switch with representations now fully succeeds,
+using the real `assignRepresentation` to carry the representations across. Updated
+`reassignClass.test.ts`: `test_keeping_representations_switching_from_occurrence_class_to
+_type_class` is now ported for real (no longer a disclosed-throw pin);
+`test_keeping_representations_switching_from_type_class_to_occurrence_class` remains a
+disclosed-throw pin, now citing only `editObjectPlacement`. This entry's OWN top-level
+`edit_object_placement` gap (the `assignContainer`/`assignObject` placement-relocalization
+step) is UNCHANGED -- still fully blocked, unrelated call sites.
+
 ---
 
 ### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet) -- **RESOLVED 2026-09-14, see UPDATE below**
@@ -1495,9 +1512,27 @@ directly against the real 193-line `copy_class.py` source.
 
 ---
 
-### `api.type.assignType`/`mapTypeRepresentations` skip representation mapping (`api.geometry.map_representation`/`.assign_representation` unported)
+### `api.type.assignType`/`mapTypeRepresentations` skip representation mapping (`api.geometry.map_representation`/`.assign_representation` unported) -- **RESOLVED 2026-09-14, see UPDATE below**
 
-**What:** Real Python's `ifcopenshell.api.type.map_type_representations` -- called directly by
+**RESOLVED 2026-09-14 (`api.geometry` chunk 2 -- `assign_representation`/`map_representation`):**
+Both blocked functions this entry tracks are now real, exported functions
+(`src/ifcopenshell-ts/src/api/geometry/assignRepresentation.ts`/`mapRepresentation.ts`),
+landed retroactively specifically to unblock this entry and the `api.root.reassignClass`
+entry above. `mapTypeRepresentations.ts` now ports real Python's full two-loop body (strip
+existing representations, then map+assign each of the type's own `RepresentationMaps`) --
+no throw left at all; a type with no `RepresentationMaps` remains the same real no-op it
+already was. `assignType.ts`'s own header comment (which cited this same blocker) is
+updated to match. Replaced the previous disclosed-throw pins with the real Python test
+assertions this entry's own "Fix" section already named:
+`test_doing_nothing_if_the_type_has_no_representation_maps` (the no-op guard, was already
+portable) and `test_removing_existing_element_representations_and_mapping_type_
+representations` (the real two-loop body, newly portable) in `mapTypeRepresentations
+.test.ts`; `assignType.test.ts`'s own disclosed-throw test for this path is likewise
+replaced with real assertions. `test_do_not_map_representation_if_type_was_assigned_
+previously` -- flagged in the "Fix" section below as needing a *successful* prior call to
+construct its precondition -- is now reachable and ported for real too.
+
+**What (historical, kept for context):** Real Python's `ifcopenshell.api.type.map_type_representations` -- called directly by
 `assign_type` for every newly-typed occurrence whenever `should_map_representations` is `True`
 (the default) AND the type's own `RepresentationMaps` is non-empty -- has two halves: the FIRST
 (strip every representation currently on the occurrence, via

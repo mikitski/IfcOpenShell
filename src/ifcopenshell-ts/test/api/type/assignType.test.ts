@@ -6,66 +6,35 @@
 // (computed once at collection time, so it's already CI-safe when only IFC4 is
 // registered -- see `../../bootstrap.ts`).
 //
-// --- One remaining real, load-bearing dependency on an unported module: adapted, not
-// silently dropped -- see `../../../src/api/type/assignType.ts`'s own header comment ---
+// --- RESOLVED: `api.geometry.assignRepresentation`/`.mapRepresentation` have landed ---
 //
-// `test_map_representation` is pinned below (in its own "disclosed, currently
-// blocked" describe block) as a dedicated "throws the disclosed blocked error"
-// regression test, matching this project's established
-// `addConversionBasedUnit.test.ts`/`editPset.test.ts` precedent for exactly this
-// situation (still blocked on `api.geometry.mapRepresentation`/`.assignRepresentation`,
-// neither ported).
-//
-// `test_do_not_map_representation_if_type_was_assigned_previously` is NOT ported, even
-// adapted: it tests a strictly *deeper* behavior (idempotency on a *second* call, once
-// an occurrence is already mapped from a *first*, successful call) that is
-// fundamentally unreachable while `api.geometry.mapRepresentation` is blocked -- the
-// first call itself throws before ever reaching that state, so there is no "already
-// mapped" precondition this port could ever construct to pin against. This is a real
-// gap, not a silent omission: once `api.geometry.mapRepresentation` lands, this test
-// should be ported for real (its assertions are unaffected by anything in this chunk).
+// `test_map_representation`/`test_do_not_map_representation_if_type_was_assigned_
+// previously` USED to be blocked (pinned as a "throws the disclosed blocked error"
+// regression test in their own describe block) because `assignType`'s own
+// `mapTypeRepresentations` call threw unconditionally whenever the type had
+// `RepresentationMaps` -- see `../../../src/api/type/mapTypeRepresentations.ts`'s own
+// header comment. Both `api.geometry.assignRepresentation`/`.mapRepresentation` are now
+// real, exported functions (this project's `api.geometry` chunk 2), so both real Python
+// tests are ported for real below, in the main `describe.each` block -- no more
+// "disclosed, currently blocked" describe block in this file at all.
 //
 // `test_map_material_usages`/`test_do_not_reassign_material_if_it_was_assigned_
-// previously` USED to be in the same "blocked, can't even construct the precondition"
-// situation as the representation-mapping tests above -- `api.material` had no TS
-// port of any kind when this file was first written. Both are now ported FOR REAL
-// below (in the main `describe.each` block, not the "disclosed, currently blocked"
-// one) -- `api.material` chunk 1 landed `assignMaterial`/`unassignMaterial`/
-// `copyMaterial` (`../../../src/api/material/index.ts`), and `assignMaterial`'s own
-// `"...Usage"` branches (the exact ones `mapMaterialUsages` needs) have no sibling
-// blocker of their own (see `assignMaterial.ts`'s own header comment), so both real
-// Python assertions -- including the "do not reassign" idempotency one, now
-// genuinely reachable -- are ported verbatim.
+// previously` were already ported for real in an earlier chunk (`api.material` chunk 1
+// landed `assignMaterial`/`unassignMaterial`/`copyMaterial`).
 //
-// `test_map_representation_disabled` IS fully portable -- `should_map_representations:
-// false` short-circuits both the (still-)blocked representation-mapping path and the
-// (now-real) material-usage-mapping path entirely -- and is ported below verbatim,
-// doubling as this chunk's concrete demonstration that the non-blocked majority of
-// `assign_type` works end to end even when the type actually has a representation and
-// a material.
+// `test_map_representation_disabled` -- `should_map_representations: false`
+// short-circuits both mapping paths entirely -- is ported below verbatim, doubling as
+// this chunk's concrete demonstration that the non-blocked majority of `assign_type`
+// works end to end even when the type actually has a representation and a material.
 
 import { describe, expect, test } from "vitest";
+import { assignRepresentation } from "../../../src/api/geometry/assignRepresentation";
 import { assignMaterial } from "../../../src/api/material/assignMaterial";
 import { assignType } from "../../../src/api/type/assignType";
 import type { EntityInstance } from "../../../src/entityInstance";
-import type { IfcFile } from "../../../src/file";
 import { getMaterial, getType } from "../../../src/util/element";
 import { getRepresentation } from "../../../src/util/representation";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
-
-function withAttrs(file: IfcFile, type: string, attrs: Record<string, unknown> = {}): EntityInstance {
-	const entity = file.createEntity(type);
-	for (const [name, value] of Object.entries(attrs)) {
-		entity.set(name, value);
-	}
-	return entity;
-}
-
-/** Real Python: `ifcopenshell.api.geometry.assign_representation(file, product=<a type>, representation=rep)` -- not ported (see this file's own header comment), so test fixtures build the resulting `RepresentationMaps` entry directly, matching `../geometry/unassignRepresentation.test.ts`'s own established `withAttrs`-based fixture-building precedent. */
-function assignTypeRepresentationMap(file: IfcFile, type: EntityInstance, representation: EntityInstance): void {
-	const repMap = file.createEntity("IfcRepresentationMap", file.createEntity("IfcAxis2Placement3D"), representation);
-	type.set("RepresentationMaps", [repMap]);
-}
 
 describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 	test("assigning a type", () => {
@@ -132,12 +101,12 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 		expect(() => file.byId(relId)).toThrow();
 	});
 
-	test("map representation disabled (should_map_representations: false avoids the blocked geometry dependency and material-usage mapping)", () => {
+	test("map representation disabled (should_map_representations: false skips both representation- and material-usage mapping)", () => {
 		const file = createTestFile(schema);
 		const elementType = file.createEntity("IfcWallType");
 		const context = file.createEntity("IfcGeometricRepresentationContext");
-		const rep = withAttrs(file, "IfcShapeRepresentation", { ContextOfItems: context });
-		assignTypeRepresentationMap(file, elementType, rep);
+		const rep = file.createEntity("IfcShapeRepresentation", context);
+		assignRepresentation(file, { product: elementType, representation: rep });
 		assignMaterial(file, { products: [elementType], type: "IfcMaterialLayerSet" });
 
 		const element = file.createEntity("IfcWall");
@@ -152,6 +121,51 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 		// No representation mapping and no material usage.
 		expect(getRepresentation(element, context)).toBeNull();
 		expect(getMaterial(element, false, false)).toBeNull();
+	});
+
+	// Real Python: `test_map_representation`. Ported for real now that
+	// `api.geometry.assignRepresentation`/`.mapRepresentation` exist (this used to be
+	// this file's sole disclosed-blocker test -- see this file's own header comment).
+	test("mapping representations when the type has RepresentationMaps", () => {
+		const file = createTestFile(schema);
+		const elementType = file.createEntity("IfcWallType");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const rep = file.createEntity("IfcShapeRepresentation", context);
+		assignRepresentation(file, { product: elementType, representation: rep });
+		const element = file.createEntity("IfcWall");
+
+		assignType(file, { relatedObjects: [element], relatingType: elementType });
+
+		const mappedRep = getRepresentation(element, context);
+		expect(mappedRep?.get("RepresentationType")).toBe("MappedRepresentation");
+		const items = mappedRep?.get("Items") as EntityInstance[];
+		expect((items[0]?.get("MappingSource") as EntityInstance).get("MappedRepresentation")).toBeTruthy();
+		expect(
+			((items[0]?.get("MappingSource") as EntityInstance).get("MappedRepresentation") as EntityInstance).equals(rep),
+		).toBe(true);
+	});
+
+	// Real Python: `test_do_not_map_representation_if_type_was_assigned_previously` --
+	// genuinely unreachable while `assignType`'s own representation mapping was blocked
+	// (see this file's own header comment), now ported for real.
+	test("does not remap representation if the type was already assigned previously", () => {
+		const file = createTestFile(schema);
+		const elementType = file.createEntity("IfcWallType");
+		const context = file.createEntity("IfcGeometricRepresentationContext");
+		const rep = file.createEntity("IfcShapeRepresentation", context);
+		assignRepresentation(file, { product: elementType, representation: rep });
+		const element1 = file.createEntity("IfcWall");
+		assignType(file, { relatedObjects: [element1], relatingType: elementType });
+		const mappedRep1 = getRepresentation(element1, context);
+		expect(mappedRep1).not.toBeNull();
+		const mappedRepId = (mappedRep1 as EntityInstance).id();
+
+		// Use 2 elements to trigger the "already typed" reassignment code path.
+		const element2 = file.createEntity("IfcWall");
+		assignType(file, { relatedObjects: [element1, element2], relatingType: elementType });
+		const mappedRep2 = getRepresentation(element1, context);
+		expect(mappedRep2).not.toBeNull();
+		expect((mappedRep2 as EntityInstance).id()).toBe(mappedRepId);
 	});
 
 	// Real Python: `test_map_material_usages`. Ported for real now that
@@ -283,38 +297,6 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 		const anyType = file.createEntity("IfcWallType");
 
 		expect(() => assignType(file, { relatedObjects: [opening], relatingType: anyType })).toThrow(TypeError);
-	});
-});
-
-// --- One remaining real, load-bearing dependency on an unported module: disclosed,
-// pinned. (`test_map_material_usages` USED to be a second one here, but is now ported
-// for real above, in the main describe block -- see this file's own header comment.) ---
-//
-// See this file's own header comment and `../../../src/api/type/assignType.ts`'s own
-// header comment for the full writeup, and `TODOS.md` for the tracked entry.
-
-describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s) -- disclosed, currently blocked", (schema) => {
-	test("mapping representations when the type has RepresentationMaps -- blocked on " +
-		"api.geometry.mapRepresentation/assignRepresentation (real Python: test_map_representation)", () => {
-		const file = createTestFile(schema);
-		const elementType = file.createEntity("IfcWallType");
-		const context = file.createEntity("IfcGeometricRepresentationContext");
-		const rep = withAttrs(file, "IfcShapeRepresentation", { ContextOfItems: context });
-		assignTypeRepresentationMap(file, elementType, rep);
-		const element = file.createEntity("IfcWall");
-
-		expect(() => assignType(file, { relatedObjects: [element], relatingType: elementType })).toThrow(
-			/needs api\.geometry\.mapRepresentation\/api\.geometry\.assignRepresentation/,
-		);
-
-		// Disclosed, real-Python-matching partial mutation: the `IfcRelDefinesByType`
-		// surgery (this function's own non-blocked majority) always runs BEFORE the
-		// blocked representation-mapping call, so it's already committed by the time
-		// the throw happens -- exactly what would happen if the real
-		// `api.geometry.map_representation` call itself raised partway through, not a
-		// TS-specific regression. See `assignType.ts`'s own header comment.
-		expect(file.byType("IfcRelDefinesByType").length).toBe(1);
-		expect(getType(element)?.equals(elementType)).toBe(true);
 	});
 });
 
