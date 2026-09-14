@@ -116,3 +116,18 @@ export * as classification from "./classification";
 // non-`IfcRoot` resource objects at all) and 2 disclosed IFC2X3-vs-IFC4+ schema
 // differences.
 export * as document from "./document";
+
+// Phase 6, `api.library` chunk: all 8 `api.library` functions (`add_library`/
+// `add_reference`/`assign_reference`/`edit_library`/`edit_reference`/`remove_library`/
+// `remove_reference`/`unassign_reference`), completing that module -- the third sibling
+// in the `classification`/`document`/`library` family (all 3 now fully ported). Manages
+// `IfcLibraryInformation`/`IfcLibraryReference` via `IfcRelAssociatesLibrary`. No
+// unported dependency of any kind. Namespaced as `api.library.addLibrary`/etc. -- see
+// `library/index.ts`'s own header comment for this chunk's exact scope, including 3
+// disclosed IFC2X3-vs-IFC4+ schema differences (one genuinely new: `VersionDate` is an
+// `IfcCalendarDate` entity on IFC2X3 but a plain `IfcDateTime` string on IFC4+) and a
+// disclosed asymmetry between `library.removeReference`'s IFC2X3 branch and
+// `document.removeReference`'s own (despite both modules otherwise sharing
+// `assignReference`/`unassignReference`'s exact shape with `document`'s
+// `assignDocument`/`unassignDocument`, per real Python's own cross-referencing comment).
+export * as library from "./library";
