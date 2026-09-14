@@ -22,12 +22,14 @@
 // `removePersonAndOrganisation`) had real, load-bearing dependencies on
 // `remove_role`/`remove_address` (this chunk's own files, not yet landed at the time)
 // and `api.root.remove_product` (a much larger, entirely separate future chunk) --
-// `./internalCascadeHelpers.ts`'s own header comment covers how those dependencies were
-// resolved at the time (private, disclosed, verified-against-the-real-source
-// reproductions), and how `removeRoleCascade`/`removeAddressCascade` were retired now
-// that this chunk's own `./removeRole.ts`/`./removeAddress.ts` are real, exported ports
-// that `removePerson`/`removeOrganisation` call directly. `root.remove_product` is
-// still a future chunk; `removeProductCascade` remains as a private reproduction.
+// resolved at the time via a private, disclosed, since-deleted `./internalCascadeHelpers
+// .ts` (verified-against-the-real-source reproductions of each dependency's generic
+// behavior). `removeRoleCascade`/`removeAddressCascade` were retired once this chunk's
+// own `./removeRole.ts`/`./removeAddress.ts` landed as real, exported ports; the same
+// file's `removeProductCascade` was retired once the "`api.root` -- `remove_product`"
+// chunk landed the real, exported `../root/removeProduct.ts` -- see that file's own
+// header comment for the full retirement writeup. All three `remove*` functions above
+// now call the real, exported ports directly.
 export { addActor } from "./addActor";
 export type { ActorType, AddActorSettings } from "./addActor";
 export { addAddress } from "./addAddress";

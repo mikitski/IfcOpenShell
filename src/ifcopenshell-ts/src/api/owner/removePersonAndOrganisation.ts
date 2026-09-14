@@ -6,9 +6,10 @@
 // itself (real Python's own docstring: "the underlying person and organisation is not
 // removed, only the 'person and organisation' group"). Cleans up 4 kinds of inverse
 // reference: `IfcDocumentInformation.Editors`, `IfcActor`/`IfcOccupant` wrapping this
-// user (full removal, via `./internalCascadeHelpers.ts`'s `removeProductCascade` --
-// see that file's own header comment for why it's not a call into a real, exported
-// `api.root.removeProduct`), `IfcResourceLevelRelationship` (IFC4+ only), and --
+// user (full removal, via `../root/removeProduct.ts`'s real, exported port -- this file
+// previously called a private, since-deleted `removeProductCascade` reproduction from
+// `./internalCascadeHelpers.ts`, see `../root/removeProduct.ts`'s own header comment
+// for the full retirement writeup), `IfcResourceLevelRelationship` (IFC4+ only), and --
 // unlike `./removePerson.ts`/`./removeOrganisation.ts`, neither of which touch
 // `IfcOwnerHistory` at all -- every `IfcOwnerHistory` whose `OwningUser` is this
 // pairing is unconditionally deleted outright (real Python: `elif inverse.is_a(
@@ -20,7 +21,7 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { wrapUsecase } from "../hooks";
-import { removeProductCascade } from "./internalCascadeHelpers";
+import { removeProduct } from "../root/removeProduct";
 
 export interface RemovePersonAndOrganisationSettings {
 	/** The `IfcPersonAndOrganization` to remove. */
@@ -37,7 +38,7 @@ function removePersonAndOrganisationUsecase(file: IfcFile, settings: RemovePerso
 				inverse.set("Editors", null);
 			}
 		} else if (inverse.isA("IfcActor")) {
-			removeProductCascade(file, inverse);
+			removeProduct(file, { product: inverse });
 		} else if (inverse.isA("IfcResourceLevelRelationship")) {
 			const related = (inverse.get("RelatedResourceObjects") as EntityInstance[] | null) ?? [];
 			if (related.length === 1 && related[0].equals(personAndOrganisation)) {

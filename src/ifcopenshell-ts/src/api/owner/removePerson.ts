@@ -13,16 +13,20 @@
 // fully removed; every `IfcResourceLevelRelationship` (IFC4+ only) solely referencing
 // this person is removed.
 //
-// `remove_role`/`remove_address` are now called via their real, exported ports
+// `remove_role`/`remove_address` are called via their real, exported ports
 // (`./removeRole.ts`/`./removeAddress.ts`, landed by the "actor/role/address" chunk) --
 // this file previously called private `removeRoleCascade`/`removeAddressCascade`
-// reproductions from `./internalCascadeHelpers.ts`, since deleted (see that file's own
-// header comment). `root.remove_product` is STILL a much larger, entirely separate
-// future chunk -- `removeProductCascade` (from `./internalCascadeHelpers.ts`) remains
-// the disclosed, narrow, private reproduction described there.
+// reproductions from a since-deleted `./internalCascadeHelpers.ts`. `root.remove_product`
+// is likewise now called via its own real, exported port (`../root/removeProduct.ts`,
+// landed by the "root -- remove_product" chunk) -- this file previously called that
+// same now-deleted file's own private `removeProductCascade` reproduction (see
+// `../root/removeProduct.ts`'s own header comment for the full retirement writeup).
+// Since this function only ever calls it on an `IfcActor` or (IFC2X3-only)
+// `IfcInventory` -- never a genuine `IfcProduct`/`IfcTypeProduct` -- the swap changes
+// no observable behavior here (confirmed by re-running this file's own test suite).
 //
 // No id-collect-then-refetch defensive pattern here (unlike `../group/removeGroup.ts`/
-// `internalCascadeHelpers.ts`'s own `removeProductCascade`) -- real Python's
+// `../root/removeProduct.ts`) -- real Python's
 // `remove_person.py` iterates `file.get_inverse(person)` directly with no such
 // precaution, so this port doesn't add one either (bug-compatible: if a future change
 // to an earlier iteration ever invalidates a later `inverse` before this port reaches
@@ -31,7 +35,7 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { wrapUsecase } from "../hooks";
-import { removeProductCascade } from "./internalCascadeHelpers";
+import { removeProduct } from "../root/removeProduct";
 import { removeAddress } from "./removeAddress";
 import { removePersonAndOrganisation } from "./removePersonAndOrganisation";
 import { removeRole } from "./removeRole";
@@ -71,7 +75,7 @@ function removePersonUsecase(file: IfcFile, settings: RemovePersonSettings): voi
 				// every other branch here, which DOES clear the OPTIONAL attribute on IFC4+ --
 				// ported verbatim, not "fixed" to also clear it).
 				if (file.schema === "IFC2X3") {
-					removeProductCascade(file, inverse);
+					removeProduct(file, { product: inverse });
 				}
 			}
 		} else if (inverse.isA("IfcDocumentInformation")) {
@@ -82,7 +86,7 @@ function removePersonUsecase(file: IfcFile, settings: RemovePersonSettings): voi
 		} else if (inverse.isA("IfcPersonAndOrganization")) {
 			removePersonAndOrganisation(file, { personAndOrganisation: inverse });
 		} else if (inverse.isA("IfcActor")) {
-			removeProductCascade(file, inverse);
+			removeProduct(file, { product: inverse });
 		} else if (inverse.isA("IfcResourceLevelRelationship")) {
 			const related = (inverse.get("RelatedResourceObjects") as EntityInstance[] | null) ?? [];
 			if (related.length === 1 && related[0].equals(person)) {
