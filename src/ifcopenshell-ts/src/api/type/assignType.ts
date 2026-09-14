@@ -210,10 +210,10 @@ export interface AssignTypeSettings {
 /**
  * Python: `Usecase.map_material_usages(related_objects, relating_type)`.
  *
- * See this file's own header comment ("two real, load-bearing dependencies") -- throws
- * only if `relating_type`'s own material actually resolves to an
- * `IfcMaterialLayerSet`/`IfcMaterialProfileSet` (i.e. only when real Python would
- * actually have called the unported `api.material.assign_material`).
+ * Calls the real `api.material.assignMaterial` only if `relating_type`'s own material
+ * actually resolves to an `IfcMaterialLayerSet`/`IfcMaterialProfileSet` (i.e. only when
+ * real Python would actually have called `ifcopenshell.api.material.assign_material`)
+ * -- see this file's own header comment.
  */
 function mapMaterialUsages(
 	file: IfcFile,
@@ -390,10 +390,10 @@ function assignTypeUsecase(file: IfcFile, settings: AssignTypeSettings): EntityI
  * class for `relatingType` in this file's schema -- see this file's own header comment
  * for the three-layer validation this performs. Rejects the WHOLE call without
  * mutating anything.
- * @throws {Error} if `shouldMapRepresentations` is `true` (the default) and either
- * `relatingType` has a non-empty `RepresentationMaps`, or its own material resolves to
- * an `IfcMaterialLayerSet`/`IfcMaterialProfileSet` -- both paths need `api.geometry`/
- * `api.material` functions not ported yet. See this file's own header comment and
- * `TODOS.md`.
+ * @throws {Error} if `shouldMapRepresentations` is `true` (the default) and
+ * `relatingType` has a non-empty `RepresentationMaps` -- needs `api.geometry`
+ * functions not ported yet. See this file's own header comment and `TODOS.md`. (A
+ * material-usage-mapping throw here is no longer possible -- `api.material
+ * .assignMaterial` is real, see `mapMaterialUsages`'s own doc comment.)
  */
 export const assignType = wrapUsecase("type.assign_type", assignTypeUsecase);
