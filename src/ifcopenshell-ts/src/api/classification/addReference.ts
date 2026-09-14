@@ -214,7 +214,12 @@ function addFromIdentification(
 	rootedProducts: EntityInstanceSet,
 	nonRootedProducts: EntityInstanceSet,
 ): EntityInstance {
-	let reference = getExistingReference(file, settings.identification);
+	// `settings.identification` is JS `undefined` when the caller omits the field, but
+	// Python's own default (`identification: Optional[str] = None`) makes it an explicit
+	// `None` -- and `.get(...)` on an unset attribute returns `null`, not `undefined` --
+	// so without this normalization `null === undefined` would fail to match an existing
+	// identification-less reference and create a duplicate on every call.
+	let reference = getExistingReference(file, settings.identification ?? null);
 	if (!reference) {
 		// `IfcClassificationReference`: Location(0), Identification|ItemReference(1),
 		// Name(2), ReferencedSource(3) -- see this file's header comment on the
