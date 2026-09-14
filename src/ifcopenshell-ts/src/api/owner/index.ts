@@ -4,29 +4,34 @@
 // `ifcopenshell/api/owner/` package) -- the `api.root`/`api.owner` chunk ported
 // `create_owner_history` (`./createOwnerHistory.ts`) and the `settings`
 // monkeypatch-replacement hook (`./settings.ts`); the `api.spatial` chunk added
-// `update_owner_history` (`./updateOwnerHistory.ts`). This chunk (chunk 1 of 2 covering
-// the remaining 22 real-Python files) ports the "person/organisation/application"
-// family -- all 11 files/functions that manage `IfcPerson`/`IfcOrganization`/
-// `IfcPersonAndOrganization`/`IfcApplication`: `add_person`/`edit_person`/
-// `remove_person`, `add_organisation`/`edit_organisation`/`remove_organisation`,
-// `add_person_and_organisation`/`remove_person_and_organisation` (real Python has no
-// `edit_person_and_organisation.py` -- none is added here either), and
-// `add_application`/`edit_application`/`remove_application`. Namespaced per this
-// project's `util/index.ts` per-submodule convention: `api.owner.addPerson`, etc.
+// `update_owner_history` (`./updateOwnerHistory.ts`). Chunk 1 of 2 ported the
+// "person/organisation/application" family -- 11 files/functions that manage
+// `IfcPerson`/`IfcOrganization`/`IfcPersonAndOrganization`/`IfcApplication`:
+// `add_person`/`edit_person`/`remove_person`, `add_organisation`/`edit_organisation`/
+// `remove_organisation`, `add_person_and_organisation`/`remove_person_and_organisation`
+// (real Python has no `edit_person_and_organisation.py` -- none is added here either),
+// and `add_application`/`edit_application`/`remove_application`. This chunk (chunk 2 of
+// 2, completing `api.owner`'s full 25-file/function surface) ports the remaining
+// "actor/role/address" family -- `add_actor`/`edit_actor`/`remove_actor`/
+// `assign_actor`/`unassign_actor` (IfcActor/IfcOccupant), `add_role`/`edit_role`/
+// `remove_role` (IfcActorRole), and `add_address`/`edit_address`/`remove_address`
+// (IfcPostalAddress/IfcTelecomAddress). Namespaced per this project's `util/index.ts`
+// per-submodule convention: `api.owner.addPerson`, `api.owner.addActor`, etc.
 //
-// The remaining 11 files (`add_actor`/`edit_actor`/`remove_actor`/`assign_actor`/
-// `unassign_actor`, `add_role`/`edit_role`/`remove_role`, `add_address`/`edit_address`/
-// `remove_address` -- the "actor/role/address" family) are chunk 2 of 2, landing as a
-// separate PR against the same base branch; see `planning/ifcopenshell-ts/PROGRESS.md`'s
-// Phase 6 table.
-//
-// Three of this chunk's own functions (`removePerson`/`removeOrganisation`/
-// `removePersonAndOrganisation`) have real, load-bearing dependencies on
-// `remove_role`/`remove_address` (chunk 2's own files) and `api.root.remove_product`
-// (a much larger, entirely separate future chunk) -- none of the three are exposed
-// here; see `./internalCascadeHelpers.ts`'s own header comment for how those
-// dependencies were resolved (private, disclosed, verified-against-the-real-source
-// reproductions, not real exported ports of either).
+// Three of chunk 1's own functions (`removePerson`/`removeOrganisation`/
+// `removePersonAndOrganisation`) had real, load-bearing dependencies on
+// `remove_role`/`remove_address` (this chunk's own files, not yet landed at the time)
+// and `api.root.remove_product` (a much larger, entirely separate future chunk) --
+// `./internalCascadeHelpers.ts`'s own header comment covers how those dependencies were
+// resolved at the time (private, disclosed, verified-against-the-real-source
+// reproductions), and how `removeRoleCascade`/`removeAddressCascade` were retired now
+// that this chunk's own `./removeRole.ts`/`./removeAddress.ts` are real, exported ports
+// that `removePerson`/`removeOrganisation` call directly. `root.remove_product` is
+// still a future chunk; `removeProductCascade` remains as a private reproduction.
+export { addActor } from "./addActor";
+export type { ActorType, AddActorSettings } from "./addActor";
+export { addAddress } from "./addAddress";
+export type { AddAddressSettings, AddressType } from "./addAddress";
 export { addApplication } from "./addApplication";
 export type { AddApplicationSettings } from "./addApplication";
 export { addOrganisation } from "./addOrganisation";
@@ -35,14 +40,28 @@ export { addPerson } from "./addPerson";
 export type { AddPersonSettings } from "./addPerson";
 export { addPersonAndOrganisation } from "./addPersonAndOrganisation";
 export type { AddPersonAndOrganisationSettings } from "./addPersonAndOrganisation";
+export { addRole } from "./addRole";
+export type { AddRoleSettings } from "./addRole";
+export { assignActor } from "./assignActor";
+export type { AssignActorSettings } from "./assignActor";
 export { createOwnerHistory } from "./createOwnerHistory";
 export type { CreateOwnerHistorySettings } from "./createOwnerHistory";
+export { editActor } from "./editActor";
+export type { EditActorSettings } from "./editActor";
+export { editAddress } from "./editAddress";
+export type { EditAddressSettings } from "./editAddress";
 export { editApplication } from "./editApplication";
 export type { EditApplicationSettings } from "./editApplication";
 export { editOrganisation } from "./editOrganisation";
 export type { EditOrganisationSettings } from "./editOrganisation";
 export { editPerson } from "./editPerson";
 export type { EditPersonSettings } from "./editPerson";
+export { editRole } from "./editRole";
+export type { EditRoleSettings } from "./editRole";
+export { removeActor } from "./removeActor";
+export type { RemoveActorSettings } from "./removeActor";
+export { removeAddress } from "./removeAddress";
+export type { RemoveAddressSettings } from "./removeAddress";
 export { removeApplication } from "./removeApplication";
 export type { RemoveApplicationSettings } from "./removeApplication";
 export { removeOrganisation } from "./removeOrganisation";
@@ -51,7 +70,11 @@ export { removePerson } from "./removePerson";
 export type { RemovePersonSettings } from "./removePerson";
 export { removePersonAndOrganisation } from "./removePersonAndOrganisation";
 export type { RemovePersonAndOrganisationSettings } from "./removePersonAndOrganisation";
+export { removeRole } from "./removeRole";
+export type { RemoveRoleSettings } from "./removeRole";
 export { ownerSettings } from "./settings";
 export type { GetApplication, GetUser } from "./settings";
+export { unassignActor } from "./unassignActor";
+export type { UnassignActorSettings } from "./unassignActor";
 export { updateOwnerHistory } from "./updateOwnerHistory";
 export type { UpdateOwnerHistorySettings } from "./updateOwnerHistory";

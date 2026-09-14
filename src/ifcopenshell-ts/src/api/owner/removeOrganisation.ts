@@ -28,16 +28,21 @@
 // discipline of preserving a real Python source's own logic shape even when a piece of
 // it is provably dead.
 //
-// `remove_role`/`remove_address`/`root.remove_product` -- see `./removePerson.ts`'s own
-// header comment (identical reasoning, not repeated here) for why these come from
-// `./internalCascadeHelpers.ts` instead of separate exported files.
+// `remove_role`/`remove_address` -- see `./removePerson.ts`'s own header comment
+// (identical reasoning, not repeated here): both now come from their real, exported
+// ports (`./removeRole.ts`/`./removeAddress.ts`), not `./internalCascadeHelpers.ts`.
+// `root.remove_product` remains a much larger, entirely separate future chunk, still
+// reproduced narrowly and privately via `./internalCascadeHelpers.ts`'s own
+// `removeProductCascade`.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { wrapUsecase } from "../hooks";
-import { removeAddressCascade, removeProductCascade, removeRoleCascade } from "./internalCascadeHelpers";
+import { removeProductCascade } from "./internalCascadeHelpers";
+import { removeAddress } from "./removeAddress";
 import { removeApplication } from "./removeApplication";
 import { removePersonAndOrganisation } from "./removePersonAndOrganisation";
+import { removeRole } from "./removeRole";
 
 export interface RemoveOrganisationSettings {
 	/** The `IfcOrganization` to remove. */
@@ -49,12 +54,12 @@ function removeOrganisationUsecase(file: IfcFile, settings: RemoveOrganisationSe
 
 	for (const role of (organisation.get("Roles") as EntityInstance[] | null) ?? []) {
 		if (file.getTotalInverses(role) === 1) {
-			removeRoleCascade(file, role);
+			removeRole(file, { role });
 		}
 	}
 	for (const address of (organisation.get("Addresses") as EntityInstance[] | null) ?? []) {
 		if (file.getTotalInverses(address) === 1) {
-			removeAddressCascade(file, address);
+			removeAddress(file, { address });
 		}
 	}
 
