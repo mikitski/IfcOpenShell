@@ -7,32 +7,23 @@
 // this file. ***
 //
 // Real `remove_person.py`/`remove_organisation.py`/`remove_person_and_organisation.py`
-// each call three functions this chunk was explicitly told NOT to port:
-// `ifcopenshell.api.owner.remove_role` / `.remove_address` (both real files in
-// `ifcopenshell/api/owner/`, assigned to a SEPARATE, concurrently-in-flight chunk --
-// the "actor/role/address family" -- landing as its own PR against the same base branch)
-// and `ifcopenshell.api.root.remove_product` (a real, 223-line file in
-// `ifcopenshell/api/root/`, itself a future, much larger chunk of its own: it fans out
-// into `api.boundary`/`api.feature`/`api.grid`/`api.material`, none of which are ported
-// at all yet, plus `api.pset`/`api.type`/`api.geometry`, which are only ever PARTIALLY
-// ported so far).
+// each call three functions this chunk (chunk 1 of 2, the "person/organisation/
+// application family") was explicitly told NOT to port: `ifcopenshell.api.owner.
+// remove_role`/`.remove_address` (both real files in `ifcopenshell/api/owner/`,
+// assigned to chunk 2, the "actor/role/address family") and `ifcopenshell.api.root.
+// remove_product` (a real, 223-line file in `ifcopenshell/api/root/`, itself a future,
+// much larger chunk of its own: it fans out into `api.boundary`/`api.feature`/
+// `api.grid`/`api.material`, none of which are ported at all yet, plus `api.pset`/
+// `api.type`/`api.geometry`, which are only ever PARTIALLY ported so far).
 //
-// Creating real, exported `./removeRole.ts`/`./removeAddress.ts` files here would
-// collide directly (same file paths) with the concurrently-in-flight actor/role/address
-// chunk's own PR the moment both land -- exactly what this chunk's task brief says not
-// to risk. Creating a real, exported `../root/removeProduct.ts` here would require
-// pulling in 4 entirely unported sibling modules just to support one narrow cascade
-// case, far outside this chunk's own scope. Given both are real, load-bearing
-// dependencies of 3 of THIS chunk's 11 assigned files (not optional), the resolution
-// used throughout this file: reproduce each dependency's ACTUAL, CURRENT behavior
-// (verified line-by-line against the real Python source below) as a small, private,
-// unexported local helper, scoped to exactly what `removePerson`/`removeOrganisation`/
-// `removePersonAndOrganisation` need -- NOT a substitute for either future chunk's own
-// full, exported, independently-tested port. When the actor/role/address chunk lands,
-// `removeRoleCascade`/`removeAddressCascade` below should be deleted in favor of a
-// direct call to the real, exported `removeRole`/`removeAddress`; when a future
-// `api.root` "remove_product" chunk lands, `removeProductCascade` below should likewise
-// be deleted in favor of calling the real, exported `root.removeProduct`.
+// UPDATE (chunk 2 landed): `remove_role`/`remove_address` are now real, exported ports
+// -- `./removeRole.ts`/`./removeAddress.ts` -- verified line-by-line identical to this
+// file's own former `removeRoleCascade`/`removeAddressCascade` helpers, which have been
+// deleted; `./removePerson.ts`/`./removeOrganisation.ts` now call the real exports
+// directly instead. `root.remove_product` is STILL a future, unported chunk -- this
+// file's own `removeProductCascade` (below) remains the disclosed, narrow, private
+// reproduction described in its own doc comment, to be deleted in favor of the real,
+// exported `root.removeProduct` once that future chunk lands.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
@@ -53,67 +44,6 @@ function attrOr<T>(instance: EntityInstance, name: string, fallback: T): T {
 	} catch {
 		return fallback;
 	}
-}
-
-/**
- * Python: `ifcopenshell.api.owner.remove_role` (`ifcopenshell/api/owner/
- * remove_role.py`, 47 lines) -- ported verbatim (see this file's own header comment for
- * why it lives here, privately, rather than as its own exported `./removeRole.ts`).
- *
- * ```python
- * def remove_role(file, role):
- *     for inverse in file.get_inverse(role):
- *         if inverse.is_a() in ("IfcOrganization", "IfcPerson", "IfcPersonAndOrganization"):
- *             if inverse.Roles == (role,):
- *                 inverse.Roles = None
- *         elif inverse.is_a("IfcResourceLevelRelationship"):
- *             if inverse.RelatedResourceObjects == (role,):
- *                 file.remove(inverse)
- *     file.remove(role)
- * ```
- */
-export function removeRoleCascade(file: IfcFile, role: EntityInstance): void {
-	for (const inverse of file.getInverse(role) as Set<EntityInstance>) {
-		const type = inverse.isA();
-		if (type === "IfcOrganization" || type === "IfcPerson" || type === "IfcPersonAndOrganization") {
-			const roles = (inverse.get("Roles") as EntityInstance[] | null) ?? [];
-			if (roles.length === 1 && roles[0].equals(role)) {
-				inverse.set("Roles", null);
-			}
-		} else if (inverse.isA("IfcResourceLevelRelationship")) {
-			const related = (inverse.get("RelatedResourceObjects") as EntityInstance[] | null) ?? [];
-			if (related.length === 1 && related[0].equals(role)) {
-				file.remove(inverse);
-			}
-		}
-	}
-	file.remove(role);
-}
-
-/**
- * Python: `ifcopenshell.api.owner.remove_address` (`ifcopenshell/api/owner/
- * remove_address.py`, 40 lines) -- ported verbatim (see this file's own header comment).
- *
- * ```python
- * def remove_address(file, address):
- *     for inverse in file.get_inverse(address):
- *         if inverse.is_a() in ("IfcOrganization", "IfcPerson"):
- *             if inverse.Addresses == (address,):
- *                 inverse.Addresses = None
- *     file.remove(address)
- * ```
- */
-export function removeAddressCascade(file: IfcFile, address: EntityInstance): void {
-	for (const inverse of file.getInverse(address) as Set<EntityInstance>) {
-		const type = inverse.isA();
-		if (type === "IfcOrganization" || type === "IfcPerson") {
-			const addresses = (inverse.get("Addresses") as EntityInstance[] | null) ?? [];
-			if (addresses.length === 1 && addresses[0].equals(address)) {
-				inverse.set("Addresses", null);
-			}
-		}
-	}
-	file.remove(address);
 }
 
 function removeWithOwnerHistory(file: IfcFile, instance: EntityInstance): void {

@@ -13,13 +13,13 @@
 // fully removed; every `IfcResourceLevelRelationship` (IFC4+ only) solely referencing
 // this person is removed.
 //
-// `remove_role`/`remove_address`/`root.remove_product` are NOT imported from separate
-// exported files here -- see `./internalCascadeHelpers.ts`'s own header comment for why
-// (a concurrently-in-flight sibling chunk owns `remove_role`/`remove_address`'s real,
-// exported home; `root.remove_product` is a much larger, entirely separate future
-// chunk). `removeRoleCascade`/`removeAddressCascade`/`removeProductCascade` below
-// reproduce their exact real-Python behavior, verified line-by-line against the actual
-// source (see that file for the inlined Python transcripts).
+// `remove_role`/`remove_address` are now called via their real, exported ports
+// (`./removeRole.ts`/`./removeAddress.ts`, landed by the "actor/role/address" chunk) --
+// this file previously called private `removeRoleCascade`/`removeAddressCascade`
+// reproductions from `./internalCascadeHelpers.ts`, since deleted (see that file's own
+// header comment). `root.remove_product` is STILL a much larger, entirely separate
+// future chunk -- `removeProductCascade` (from `./internalCascadeHelpers.ts`) remains
+// the disclosed, narrow, private reproduction described there.
 //
 // No id-collect-then-refetch defensive pattern here (unlike `../group/removeGroup.ts`/
 // `internalCascadeHelpers.ts`'s own `removeProductCascade`) -- real Python's
@@ -31,8 +31,10 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { wrapUsecase } from "../hooks";
-import { removeAddressCascade, removeProductCascade, removeRoleCascade } from "./internalCascadeHelpers";
+import { removeProductCascade } from "./internalCascadeHelpers";
+import { removeAddress } from "./removeAddress";
 import { removePersonAndOrganisation } from "./removePersonAndOrganisation";
+import { removeRole } from "./removeRole";
 
 export interface RemovePersonSettings {
 	/** The `IfcPerson` to remove. */
@@ -44,12 +46,12 @@ function removePersonUsecase(file: IfcFile, settings: RemovePersonSettings): voi
 
 	for (const role of (person.get("Roles") as EntityInstance[] | null) ?? []) {
 		if (file.getTotalInverses(role) === 1) {
-			removeRoleCascade(file, role);
+			removeRole(file, { role });
 		}
 	}
 	for (const address of (person.get("Addresses") as EntityInstance[] | null) ?? []) {
 		if (file.getTotalInverses(address) === 1) {
-			removeAddressCascade(file, address);
+			removeAddress(file, { address });
 		}
 	}
 
