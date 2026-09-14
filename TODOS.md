@@ -1303,6 +1303,30 @@ a minimal, direct dependency of `api.context.removeContext` (see
 `edit_object_placement` itself remains fully unported -- this entry, and the gap it
 describes, are unaffected either way.
 
+**UPDATE 2026-09-14 (`api.root` -- `reassign_class` chunk):** A second, independent blocked
+call site on `edit_object_placement`, this time paired with the SAME `assign_representation`
+gap the entry immediately below already tracks: real Python's `ifcopenshell.api.root
+.reassign_class`'s own `switch_between_class_types` (switching a product between an
+occurrence class and a type class, e.g. `IfcWindowType` -> `IfcWindow`) needs
+`ifcopenshell.api.geometry.assign_representation` to carry any of the element's own
+representations across the switch, and -- ONLY for a type-to-occurrence switch that actually
+had representations -- also `edit_object_placement` immediately after, to keep
+`PlacementForShapeRepresentation` valid. `src/ifcopenshell-ts/src/api/root/reassignClass.ts`
+performs the entire rest of this function (the "simple" same-`IfcTypeProduct`-ness
+reassignment path, and every part of the type<->occurrence switch that doesn't touch
+representations: unassigning/reassigning the type, container, aggregate, and psets) correctly
+and independently, but throws a clear, disclosed error the moment it discovers the element
+being switched has ANY representation at all -- checked immediately, before any of this
+function's own mutations (see that file's own header comment for why "throw before mutating"
+applies here too: doing the type/container/pset unwiring first, then discovering the
+representation-reassignment step is blocked, would leave the element in a strictly worse
+half-switched state than refusing the call outright). An element/type with no representations
+completes the full switch normally. Pinned by 2 dedicated regression tests in
+`reassignClass.test.ts` (adapted from real Python's own
+`test_keeping_representations_switching_from_occurrence_class_to_type_class`/
+`..._from_type_class_to_occurrence_class`, whose own fixtures themselves depend on the
+unported `assign_representation` too).
+
 ---
 
 ### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet)
@@ -1370,6 +1394,75 @@ the material association dangling -- see that file's own header comment and
 duplicate of this entry's own `assignType` blocker (a different function, a different half of
 `api.material`'s surface) -- cross-referenced here rather than given its own separate entry
 since both track the exact same root cause (`api.material` has no TS port at all).
+
+**UPDATE 2026-09-14 (`api.root` -- `copy_class` chunk):** A third independent blocked call
+site, this time on `ifcopenshell.api.material.copy_material` (a different half of
+`api.material`'s surface again, not `assign_material`/`unassign_material`): real Python's
+`ifcopenshell.api.root.copy_class` duplicates a product's `IfcRelAssociatesMaterial`
+association differently depending on the material's own class -- a plain `IfcMaterial`/
+`IfcMaterialList` is shared as-is (no copy needed), a parametric `IfcMaterialLayerSetUsage`/
+`IfcMaterialProfileSetUsage` is shallow-copied via the already-portable `util.element.copy`,
+but a genuine `IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
+material SET needs `api.material.copy_material` to duplicate the whole set (layers/profiles/
+constituents and all). `src/ifcopenshell-ts/src/api/root/copyClass.ts` ports every other real
+behavior of this function (placement, psets, ports -- see the new `api.system` entry below --
+aggregation, containment, type, voids, the other 2 material cases, groups) correctly and
+independently, throwing a clear, disclosed error only the moment it actually finds a `*Set`
+material association, before copying/mutating anything for that specific relationship. A
+product with no material, a plain `IfcMaterial`/`IfcMaterialList`, or a parametric usage is
+entirely unaffected. Pinned by a dedicated regression test in `copyClass.test.ts` (adapted
+from real Python's own `test_copying_material_sets_for_type_elements_only`).
+
+---
+
+### `api.root.copyClass` skips distribution-port copying (`api.system` unported -- has no TS port of any kind yet)
+
+**What:** Real Python's `ifcopenshell.api.root.copy_class`, when the product being copied has
+at least one nested `IfcDistributionPort` (via `IfcRelNests` in IFC4+, `IfcRelConnectsPortToElement`
+in IFC2X3), recursively `copy_class`-es every port, builds a fresh nest/connection relationship
+pointing the copies at the new element, then for each new port calls `ifcopenshell.api.system
+.unassign_port`/`.disconnect_port` (severing whatever port-to-port connections the recursive
+copy's own generic-fallback branch carried over) and `ifcopenshell.api.geometry
+.edit_object_placement` (resetting the copied port's own placement to the same absolute matrix
+the original had, since it now sits under a different `PlacementRelTo` parent). `ifcopenshell
+.api.system` has NO TS port of any kind (confirmed by directory listing -- a brand-new blocked
+module for this project, distinct from every other module this file already tracks) and
+`edit_object_placement` is the same pre-existing `api.geometry` blocker this file's very first
+entry tracks. `src/ifcopenshell-ts/src/api/root/copyClass.ts` performs every other real
+behavior of this function correctly and independently, but throws a clear, disclosed error the
+moment it discovers the product being copied actually has at least one nested port -- before
+recursively copying any of them, before creating any new relationship. A product with no ports
+is entirely unaffected.
+
+**Why:** `api.system` (per `research/02-python-api-inventory.md`) is itself a real,
+independent future chunk (manages `IfcDistributionPort`/`IfcSystem`/port-to-port connections) --
+inlining even its 2 needed functions (`unassign_port`/`disconnect_port`) under `api.root`'s own
+narrower review scope risked a partial/wrong port of a module with real design decisions of its
+own landing under the wrong chunk's review, exactly the same reasoning already established for
+every other genuinely-separate-future-module entry in this file.
+
+**Impact:** Calling `copyClass` on a product with at least one nested distribution port throws
+`"copyClass: copying <Class>#<id>'s N nested distribution port(s) needs api.system
+.unassignPort/.disconnectPort and api.geometry.editObjectPlacement, none ported yet -- see
+TODOS.md."` -- BEFORE any mutation for that specific relationship (this function's OTHER real
+behavior for the SAME product -- placement/psets/aggregation/containment/type/voids/materials/
+groups -- still completes normally regardless, since each inverse relationship is handled
+independently in its own loop iteration). Pinned by a dedicated regression test in
+`copyClass.test.ts` (adapted from real Python's own `test_copying_distribution_ports`, for
+both IFC4+'s `IfcRelNests`-based and IFC2X3's `IfcRelConnectsPortToElement`-based port
+mechanisms).
+
+**Fix:** Port `ifcopenshell.api.system` as its own future chunk (at minimum `unassign_port`/
+`disconnect_port`, though the whole module -- `add_port`/`assign_port`/`connect_port`/etc. --
+is a natural single chunk per the research doc's own framing), then wire the real calls back
+into `copyClass`'s ports branch and restore real Python's own `test_copying_distribution_ports`
+assertions (currently pinned as a "throws" test instead).
+
+**Context:** Surfaced during the `api.root` -- `copy_class` chunk (2026-09-14), verified
+directly against the real 193-line `copy_class.py` source.
+
+**Depends on / blocked by:** `ifcopenshell.api.system` (Phase 6, not yet started),
+`ifcopenshell.api.geometry.editObjectPlacement` (this file's own first entry, above).
 
 ---
 
