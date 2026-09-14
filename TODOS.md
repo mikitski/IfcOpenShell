@@ -725,6 +725,23 @@ exercise reference/scalar `.set()` mutations on already-existing entities (no ne
 inside the transaction under test), with this cross-reference in place of exercising the blocked path.
 No `util/cost.ts` code changes as a result -- same fix as above resolves this consequence too.
 
+**UPDATE 2026-09-13 (Phase 6's `api.owner` person/organisation/application chunk):** found a third,
+independent consequence -- `ifcopenshell.api.owner.add_application`'s IFC4X3-only branch (no
+`application_developer` given: real Python builds a default "IfcOpenShell" `IfcOrganization`,
+wrapped in an `IfcActor` with a "PEnum_AddressType" `IfcPropertySet` attached, since `IfcTelecomAddress`
+is deprecated on IFC4X3) needs `edit_pset`'s own `nominal_value = self.file.create_entity("IfcLabel",
+value)` call to build each property's `IfcPropertySingleValue.NominalValue` -- the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this entry already
+documents. Confirmed empirically against this exact worktree's own built native addon before writing
+`addApplication.ts`. Ported the whole IFC4X3 branch faithfully anyway, up through constructing the
+actor/pset/rel (all real entities, unaffected by this gap) and throwing at the exact point a standalone
+`IfcLabel` would need to be built -- `test/api/owner/addApplication.test.ts` pins this CURRENT, disclosed,
+blocked behavior with a dedicated IFC4X3 test (matching `util/cost.test.ts`'s own precedent above), not
+silently skipped. The IFC2X3/IFC4 default-organisation path, and the "`application_developer` explicitly
+given" path on all 3 schemas, need no standalone defined-type instance at all and work correctly today.
+See `src/api/owner/addApplication.ts`'s own header comment for the full writeup. No further consequences
+found elsewhere in this chunk's own 11 files.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
