@@ -148,3 +148,20 @@ export * as library from "./library";
 // exist on IFC2X3, and real Python has no guard against it, ported verbatim), and a
 // disclosed `.d.ts`-generation-artifact finding on `IfcObjective.BenchmarkValues`.
 export * as constraint from "./constraint";
+
+// Phase 6, `api.project` chunk: 3 of `api.project`'s 4 real files (`create_file`/
+// `assign_declaration`/`unassign_declaration`) -- `append_asset.py` (827 lines,
+// importing a whole asset from a library file into the active model) is deliberately
+// NOT ported, a much larger, separate future chunk (matching the partial-completion
+// pattern of `api.type`/`api.pset`/`api.geometry`'s own `PROGRESS.md` rows).
+// `createFile` reuses `template.ts`'s `create()` (extended with a new, purely
+// additive `blank`/`authorization`/`description` option set, see `template.ts`'s own
+// updated header comment) rather than reimplementing STEP-header templating from
+// scratch. `assignDeclaration`/`unassignDeclaration` manage `IfcRelDeclares` --
+// confirmed IFC4+-only (absent from `ifc2x3.d.ts` entirely), no runtime guard added,
+// matching real Python. Namespaced as `api.project.createFile`/`.assignDeclaration`/
+// `.unassignDeclaration` -- see `project/createFile.ts`'s and
+// `project/assignDeclaration.ts`'s own header comments for the full reuse-decision
+// writeup and a real, disclosed Python quirk in `unassign_declaration.py` (its own
+// `relatingContext` parameter is accepted but never actually consulted).
+export * as project from "./project";
