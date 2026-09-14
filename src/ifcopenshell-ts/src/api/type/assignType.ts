@@ -8,29 +8,14 @@
 // *sibling* `unassign_type.py`, not reproduced here -- `assign_type.py` has no
 // equivalent shadowing bug of its own, verified directly).
 //
-// --- One real, load-bearing dependency remains on a module this project has NOT
-// ported at all: disclosed as a loud, descriptive throw, not silently skipped or
-// reimplemented (see `TODOS.md`) ---
+// --- RESOLVED: `map_type_representations`'s own real dependency has landed ---
 //
 // `map_type_representations` (`./mapTypeRepresentations.ts`) calls
-// `ifcopenshell.api.geometry.map_representation`/`.assign_representation`, neither
-// ported yet (only `unassign_representation`/`remove_representation` have landed, an
-// unrelated `api.context.removeContext` dependency). Only fires when
-// `should_map_representations` is true AND `relating_type.RepresentationMaps` is
-// non-empty -- see `mapTypeRepresentations.ts`'s own header comment for the full
-// disclosure of that function's own blocked half.
-//
-// This throw happens only once the real code path that needs the missing module is
-// actually reached (not proactively on every call) -- matching this project's
-// established "throw rather than silently skip real cleanup logic" discipline
-// (`../owner/internalCascadeHelpers.ts`'s own `removeProductCascade` header comment,
-// this chunk's own cited precedent). Note this means the blocked call CAN throw after
-// this function has already mutated file state (the `IfcRelDefinesByType`
-// assign/reuse/merge step always runs first, matching real Python's own exact
-// ordering) -- this reproduces exactly what would happen if `api.geometry` genuinely
-// existed but that call itself raised partway through, not a TS-specific regression.
-// `objectsToChange`/the whole earlier surgery step complete correctly and are pinned
-// by dedicated tests either way.
+// `ifcopenshell.api.geometry.map_representation`/`.assign_representation` -- both are
+// now real, exported functions (this project's `api.geometry` chunk 2), so this call
+// site (only reached when `should_map_representations` is true AND `relating_type
+// .RepresentationMaps` is non-empty) is fully portable, no throw. See
+// `mapTypeRepresentations.ts`'s own header comment for the full resolution writeup.
 //
 // `map_material_usages` (this file's own final helper, ported below as
 // `mapMaterialUsages`) USED to be a second such disclosed blocker (it calls
