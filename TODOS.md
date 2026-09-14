@@ -1305,9 +1305,28 @@ describes, are unaffected either way.
 
 ---
 
-### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet)
+### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet) -- **RESOLVED 2026-09-14, see UPDATE below**
 
-**What:** Real Python's `ifcopenshell.api.type.assign_type` finishes (when
+**RESOLVED 2026-09-14 (`api.material` chunk 1 -- `assign_material`/`unassign_material`/`copy_material`):**
+Both blocked call sites this entry tracks (`assignType`'s own `mapMaterialUsages`, and the
+`removeProduct` cross-reference in the UPDATE below) are now real. `api.material` chunk 1 landed
+`assignMaterial`/`unassignMaterial`/`copyMaterial` (`src/ifcopenshell-ts/src/api/material/
+index.ts`) -- `assignMaterial`'s own `"...Usage"` branches (the exact ones `mapMaterialUsages`
+needs) turned out to have NO sibling blocker of their own once actually read line-by-line (the
+chunk-planning speculation that they might need still-unported `add_layer`/`add_profile`-style
+helpers was wrong -- the real 364-line source builds the Usage entity directly via
+`create_entity`, with the only actual `ifcopenshell.api.material.*` call being `unassign_material`,
+itself in the same chunk). `assignType.ts`'s `mapMaterialUsages` now calls the real, exported
+`assignMaterial` directly; `assignType.test.ts`'s own disclosed-throw test has been replaced with
+the real, previously-unreachable `test_map_material_usages`/`test_do_not_reassign_material_if_
+it_was_assigned_previously` assertions (the latter WAS this entry's own stated "one genuine gap"
+-- it needed a *successful* prior mapping call to construct its precondition, unreachable while
+blocked; now reachable and ported for real). The rest of `assignType.ts`'s own header comment
+(the three-layer occurrence/type validation, the `PredefinedType`/`ObjectType` double-typing
+cleanup, etc.) is unaffected. The sibling `api.geometry.mapRepresentation`/`.assignRepresentation`
+blocker (the NEXT entry in this file) is UNCHANGED -- still blocked, unrelated module.
+
+**What (historical, kept for context):** Real Python's `ifcopenshell.api.type.assign_type` finishes (when
 `should_map_representations` is `True`, the default) by calling its own `map_material_usages`
 helper, which -- only if the type's own material (`ifcopenshell.util.element.get_material`,
 already landed) resolves to an `IfcMaterialLayerSet`/`IfcMaterialProfileSet` -- calls
@@ -1370,6 +1389,17 @@ the material association dangling -- see that file's own header comment and
 duplicate of this entry's own `assignType` blocker (a different function, a different half of
 `api.material`'s surface) -- cross-referenced here rather than given its own separate entry
 since both track the exact same root cause (`api.material` has no TS port at all).
+
+**UPDATE 2026-09-14 (`api.material` chunk 1, same day, later):** RESOLVED -- see the top of this
+entry. `removeProduct.ts`'s `IfcRelAssociatesMaterial` branch now calls the real `unassignMaterial`
+directly; `removeProduct.test.ts`'s own disclosed-throw test for this branch has been replaced
+with the real `test_removing_all_material_relationships_of_an_element` assertions. A THIRD,
+independent blocked call site on the same module surfaced in the meantime (`api.root.copyClass`'s
+`*Set` material-association branch, needing `api.material.copyMaterial`) but that file
+(`copyClass.ts`, from PR #92/`ts-api-root-completion`) had not yet landed in the `api.material`
+chunk 1 worktree's `v0.9.0` base -- `copyMaterial` is real and ready, but wiring it into
+`copyClass.ts` is left for the orchestrating session's own follow-up once PR #92 merges (no
+`TODOS.md` entry could be added for a file that doesn't exist yet in that worktree).
 
 ---
 
@@ -1681,3 +1711,54 @@ very low practical risk. Not independently exercised against a real IFC2X3 file 
 
 **Depends on / blocked by:** None -- a trivial, one-line defensive fix whenever someone picks up
 a small `api.pset` follow-up chunk.
+
+---
+
+### `util.element.copyDeep`/`copy` cannot copy a "simple"/defined-type instance (e.g. `IfcLabel`) at all
+
+**What:** `src/ifcopenshell-ts/src/util/element.ts`'s `copy`/`copyDeep` both throw ("No forward
+attribute at index 0 for instance of type '<Class>'") when asked to copy a "simple"/defined-type
+EXPRESS instance (e.g. a standalone `IfcLabel("bar")`, `IfcText(...)`) -- whether passed directly
+as the top-level argument, or reached indirectly via `copyDeep`'s own recursion into a forward
+attribute that happens to hold one (e.g. an `IfcPropertySingleValue.NominalValue`). Confirmed by
+direct repro against the built addon: `copy(file, createTypedValue(file, "IfcLabel", "bar"))`
+throws on its own, in isolation, with no other code involved.
+
+**Root cause:** Both functions call `attributeNameAt(result, i)` (to detect the `GlobalId` slot
+needing regeneration) for every attribute index they iterate. `attributeNameAt` resolves via
+`attributeCache.ts`'s `getClassAttributeMeta`, which is built from `entity.all_attributes()` --
+an ENTITY-declaration-only schema introspection call. A defined/simple type (an EXPRESS `TYPE`
+declaration, not an `ENTITY` one) has no such attribute-metadata entry to look up its own single
+wrapped-value "attribute" by name against, so the lookup always fails for one, regardless of
+which attribute index or what real value it wraps.
+
+**Impact:** Any already-landed or future `api.*` function that calls `copy`/`copyDeep` on
+something that could recurse into a populated simple-type leaf value hits this. Confirmed NOT
+already hit by any of the 3 pre-existing call sites (`util/shapeBuilder.ts`'s 4 geometry-curve/
+item copies, `api/pset/editPset.ts`'s single `EnumerationReference` copy) -- none of those ever
+recurse into a populated simple-type attribute. First surfaced by `api/material/copyMaterial.ts`
+(chunk 1 of `api.material`, this same session): `copyMaterialWithInverses`'s `IfcMaterialProperties`
+branch calls `copyDeep(file, pset)` for each of a material's own property sets, matching real
+Python's `copy_deep(file, pset)` exactly -- this works for a pset whose properties have no value
+yet (`NominalValue: null`, an attribute value of `null` is skipped entirely before ever reaching
+`attributeNameAt`), but throws the moment a property's `NominalValue` is an actual, populated
+value. `copyMaterial.ts` itself is not at fault -- the throw comes from the shared utility.
+Real Python's own `test_copy_a_material_with_properties` (`test/api/material/test_copy_material.py`)
+needs this to work to pass for real; this port's own `copyMaterial.test.ts` splits that test in
+two, porting the structural half (a pset WITH a property attached, just no value yet) for real
+and pinning the value-copying half as a dedicated "throws" regression test instead.
+
+**Fix:** Teach `copy`/`copyDeep` to special-case a simple/defined-type instance (detectable via
+the native `declaration`'s own type-vs-entity introspection, or by checking `attributeCount() ===
+1` combined with a failed/absent entity-declaration lookup) and copy its single wrapped value
+directly via `getByIndex(0)`/`setByIndex(0, ...)`, bypassing the by-name `GlobalId`-detection path
+entirely for that case (a defined type can never be `IfcRoot`-derived, so there is no `GlobalId`
+concern to begin with).
+
+**Context:** Surfaced during the `api.material` chunk 1 (`assign_material`/`unassign_material`/
+`copy_material`, 2026-09-14), confirmed by direct, isolated repro against the built addon (not
+assumed from the stack trace alone) before writing this entry.
+
+**Depends on / blocked by:** None -- a self-contained fix to `util/element.ts`'s existing
+`copy`/`copyDeep`, whenever someone picks up a follow-up chunk touching either function (or wants
+to fully unblock `copyMaterial.test.ts`'s pinned "throws" test above).

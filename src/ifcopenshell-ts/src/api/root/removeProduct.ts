@@ -73,16 +73,20 @@
 // before mutating, don't leave a worse partial state than refusing outright" discipline
 // (`../type/mapTypeRepresentations.ts`'s own header comment is the direct precedent).
 //
-// --- The generic inverse-cascade tail's own 2 already-disclosed unported branches,
-// carried over unchanged from `internalCascadeHelpers.ts`'s own `removeProductCascade` ---
+// --- The generic inverse-cascade tail's own unported branch, carried over unchanged
+// from `internalCascadeHelpers.ts`'s own `removeProductCascade` ---
 //
-// `IfcRelAssociatesMaterial` -> `ifcopenshell.api.material.unassign_material`
-// (`api.material` has no TS port at all -- same module already tracked by `TODOS.md`'s
-// `api.type.assignType` entry, this is a new, additional blocked call site, cross-
-// referenced there rather than duplicated) and `IfcRelSpaceBoundary` ->
-// `ifcopenshell.api.boundary.remove_boundary` (`api.boundary` has no TS port at all --
-// a brand-new `TODOS.md` entry). Both throw a clear, disclosed error rather than
-// silently leaving a dangling/incorrect relationship.
+// `IfcRelSpaceBoundary` -> `ifcopenshell.api.boundary.remove_boundary` (`api.boundary`
+// has no TS port at all -- a `TODOS.md` entry) throws a clear, disclosed error rather
+// than silently leaving a dangling/incorrect relationship.
+//
+// `IfcRelAssociatesMaterial` -> `ifcopenshell.api.material.unassign_material` USED to
+// be a second disclosed-throw branch here (`api.material` had no TS port at all when
+// this file was first written), but is now a real call: `api.material` chunk 1 landed
+// `unassignMaterial`/`assignMaterial`/`copyMaterial` (`../material/index.ts`), and
+// this branch was updated to call the real, exported `unassignMaterial(file,
+// { products: [product] })` -- matching real Python's own exact call shape
+// (`ifcopenshell.api.material.unassign_material(file, products=[product])`).
 //
 // --- Self-recursion and the `element_exists`/id-collect-then-refetch defensive pattern
 // -- ported verbatim, matching `internalCascadeHelpers.ts`'s own already-verified
@@ -122,6 +126,7 @@ import * as elementUtil from "../../util/element";
 import { removeRepresentation } from "../geometry/removeRepresentation";
 import { unassignRepresentation } from "../geometry/unassignRepresentation";
 import { wrapUsecase } from "../hooks";
+import { unassignMaterial } from "../material/unassignMaterial";
 import { removePset } from "../pset/removePset";
 import { unassignType } from "../type/unassignType";
 
@@ -263,9 +268,7 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
 		if (inverse.isA("IfcRelDefinesByProperties")) {
 			removePset(file, { product, pset: inverse.get("RelatingPropertyDefinition") as EntityInstance });
 		} else if (inverse.isA("IfcRelAssociatesMaterial")) {
-			throw new Error(
-				"removeProduct: IfcRelAssociatesMaterial cleanup needs api.material.unassignMaterial, not ported yet -- see TODOS.md.",
-			);
+			unassignMaterial(file, { products: [product] });
 		} else if (inverse.isA("IfcRelDefinesByType")) {
 			const relatingType = inverse.get("RelatingType") as EntityInstance | null;
 			if (relatingType?.equals(product)) {
@@ -391,10 +394,11 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
  *
  * **Disclosed, real blockers** (throws, see this file's own header comment and
  * `TODOS.md`): removing an element with `HasOpenings` (needs `api.feature`), removing
- * an `IfcGrid` with axes (needs `api.grid`), a material association (needs
- * `api.material.unassignMaterial`), or a space boundary (needs `api.boundary
- * .removeBoundary`) -- none of those 4 modules have any TS port yet. Every other
- * relationship this function cleans up is fully ported.
+ * an `IfcGrid` with axes (needs `api.grid`), or a space boundary (needs `api.boundary
+ * .removeBoundary`) -- none of those 3 modules have any TS port yet. A material
+ * association is no longer one of these -- `api.material.unassignMaterial` is real
+ * (see `../material/index.ts`). Every other relationship this function cleans up is
+ * fully ported.
  *
  * @example
  * ```ts

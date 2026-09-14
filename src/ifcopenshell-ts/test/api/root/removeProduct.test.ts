@@ -23,21 +23,26 @@
 // does) -- the underlying relationship-cascade behavior under test is unaffected either
 // way.
 //
-// 4 real Python tests are genuinely blocked (real, disclosed dependencies on `api
-// .feature`/`api.grid`/`api.material`/`api.boundary`, none of which have any TS port at
-// all -- see `../../../src/api/root/removeProduct.ts`'s own header comment and
-// `TODOS.md`) and are pinned instead as dedicated "throws the disclosed blocked error"
-// regression tests, matching `../type/mapTypeRepresentations.test.ts`'s/`../pset
-// /editPset.test.ts`'s established precedent -- not silently dropped:
-// `test_removing_all_openings_of_an_element` (needs `api.feature.remove_feature`),
-// `test_removing_axes_of_a_grid` (needs `api.grid.remove_grid_axis`),
-// `test_removing_all_material_relationships_of_an_element` (needs `api.material
-// .unassign_material`), `test_removing_all_space_boundaries_of_an_element` (needs
-// `api.boundary.remove_boundary`).
+// 3 real Python tests are genuinely blocked (real, disclosed dependencies on `api
+// .feature`/`api.grid`/`api.boundary`, none of which have any TS port at all -- see
+// `../../../src/api/root/removeProduct.ts`'s own header comment and `TODOS.md`) and are
+// pinned instead as dedicated "throws the disclosed blocked error" regression tests,
+// matching `../type/mapTypeRepresentations.test.ts`'s/`../pset/editPset.test.ts`'s
+// established precedent -- not silently dropped: `test_removing_all_openings_of_an_
+// element` (needs `api.feature.remove_feature`), `test_removing_axes_of_a_grid` (needs
+// `api.grid.remove_grid_axis`), `test_removing_all_space_boundaries_of_an_element`
+// (needs `api.boundary.remove_boundary`).
+//
+// A 4th test, `test_removing_all_material_relationships_of_an_element`, USED to be in
+// this blocked group (it needed `api.material.unassign_material`) but is now ported
+// for real -- see "removing all material relationships of an element" below and the
+// `api.material` chunk 1 that landed `unassignMaterial`/`assignMaterial`/`copyMaterial`
+// (`../material/index.ts`).
 
 import { describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
 import { assignGroup } from "../../../src/api/group/assignGroup";
+import { assignMaterial } from "../../../src/api/material/assignMaterial";
 import { addPset } from "../../../src/api/pset/addPset";
 import { removeProduct } from "../../../src/api/root/removeProduct";
 import { assignContainer } from "../../../src/api/spatial/assignContainer";
@@ -463,6 +468,24 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		expect(file.byType("IfcPropertySingleValue").length).toBe(0);
 	});
 
+	// Real Python: `test_removing_all_material_relationships_of_an_element`. Ported for
+	// real now that `api.material.unassignMaterial` exists (this used to be one of this
+	// file's 4 disclosed-blocker tests -- see this file's own header comment).
+	// `add_material` itself isn't ported (a future `api.material` chunk), so the
+	// fixture builds the material directly, matching this file's own established
+	// `withAttrs`-substitution precedent for other unported fixture dependencies.
+	test("removing all material relationships of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const material = withAttrs(file, "IfcMaterial", { Name: "Foo" });
+		assignMaterial(file, { products: [element], material });
+
+		removeProduct(file, { product: element });
+
+		expect(file.byType("IfcRelAssociatesMaterial").length).toBe(0);
+		expect(file.byType("IfcMaterial").length).toBe(1);
+	});
+
 	test("removing all type relationships of an element", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
@@ -545,8 +568,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 });
 
 // --- Disclosed blockers: real, load-bearing dependencies on `api.feature`/`api.grid`/
-// `api.material`/`api.boundary`, none of which have any TS port at all. See
-// `../../../src/api/root/removeProduct.ts`'s own header comment and `TODOS.md`. ---
+// `api.boundary`, none of which have any TS port at all. See
+// `../../../src/api/root/removeProduct.ts`'s own header comment and `TODOS.md`.
+// (`api.material` is no longer one of these -- `unassignMaterial` now exists, see the
+// real "removing all material relationships of an element" test above, and
+// `TODOS.md`'s updated entry.) ---
 
 describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct -- disclosed blockers (%s)", (schema) => {
 	test("removing an element with openings throws (api.feature.removeFeature not ported)", () => {
@@ -565,15 +591,6 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct -- disclosed blockers (
 		grid.set("UAxes", [axis]);
 
 		expect(() => removeProduct(file, { product: grid })).toThrow(/api\.grid\.removeGridAxis/);
-	});
-
-	test("removing an element with a material association throws (api.material.unassignMaterial not ported)", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWall");
-		const material = withAttrs(file, "IfcMaterial", { Name: "Foo" });
-		withAttrs(file, "IfcRelAssociatesMaterial", { RelatingMaterial: material, RelatedObjects: [element] });
-
-		expect(() => removeProduct(file, { product: element })).toThrow(/api\.material\.unassignMaterial/);
 	});
 
 	test("removing an element with a space boundary throws (api.boundary.removeBoundary not ported)", () => {
