@@ -1,16 +1,26 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // Barrel for `ifcopenshell.api.pset` (src/ifcopenshell-python's `ifcopenshell/api/
-// pset/` package) -- **NOT a full port of that module**. Only `remove_pset` is ported
-// here, as a minimal, direct dependency of `api.group.removeGroup` (see
-// `./removePset.ts`'s own header comment for the full disclosure of why exactly this
-// one function, and not the rest of the module). `add_pset`/`edit_pset`/`add_qto`/
-// `edit_qto`/`assign_pset`/`unassign_pset`/`unshare_pset` (the other 7 files/functions
-// of this module -- `edit_pset.py` alone the single biggest file in the whole `api`
-// package per `research/02-api-layer.md`) remain unported; a future `api.pset` chunk
-// should treat `removePset` as already landed (reviewed against the real Python
-// source, see that file's own header comment) rather than re-porting it from scratch.
+// pset/` package) -- **still not a full port of that module**. This chunk (1 of 3 for
+// this module's remaining real Python files, per `planning/ifcopenshell-ts/PROGRESS.md`'s
+// Phase 6 table) adds `add_pset`/`assign_pset`/`unassign_pset`/`unshare_pset` (the
+// basic CRUD/assignment functions) alongside the already-landed `remove_pset` (see
+// `./removePset.ts`'s own header comment for why that one landed alone, ahead of this
+// chunk, as a minimal dependency of `api.group.removeGroup`).
+//
+// Still unported: `add_qto`/`edit_qto` (chunk 2, a future PR) and `edit_pset.py`
+// (chunk 3, a future PR -- the single biggest file in the whole `api` package).
+//
 // Namespaced per this project's `util/index.ts` per-submodule convention:
-// `api.pset.removePset`.
+// `api.pset.addPset`, `api.pset.assignPset`, `api.pset.unassignPset`,
+// `api.pset.unsharePset`, `api.pset.removePset`.
+export { addPset } from "./addPset";
+export type { AddPsetSettings } from "./addPset";
+export { assignPset } from "./assignPset";
+export type { AssignPsetSettings } from "./assignPset";
+export { unassignPset } from "./unassignPset";
+export type { UnassignPsetSettings } from "./unassignPset";
+export { unsharePset } from "./unsharePset";
+export type { UnsharePsetSettings } from "./unsharePset";
 export { removePset } from "./removePset";
 export type { RemovePsetSettings } from "./removePset";
