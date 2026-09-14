@@ -8,7 +8,7 @@
 // `IfcDocumentInformation.Editors`, every `IfcPersonAndOrganization` pairing this
 // organisation (full removal, via `./removePersonAndOrganisation.ts`), every
 // `IfcActor`/`IfcOccupant` wrapping this organisation (full removal, via
-// `./internalCascadeHelpers.ts`'s `removeProductCascade`), `IfcResourceLevelRelationship`
+// `../root/removeProduct.ts`), `IfcResourceLevelRelationship`
 // (IFC4+ only), and every `IfcApplication` developed by this organisation (full removal,
 // via `./removeApplication.ts`).
 //
@@ -28,17 +28,15 @@
 // discipline of preserving a real Python source's own logic shape even when a piece of
 // it is provably dead.
 //
-// `remove_role`/`remove_address` -- see `./removePerson.ts`'s own header comment
-// (identical reasoning, not repeated here): both now come from their real, exported
-// ports (`./removeRole.ts`/`./removeAddress.ts`), not `./internalCascadeHelpers.ts`.
-// `root.remove_product` remains a much larger, entirely separate future chunk, still
-// reproduced narrowly and privately via `./internalCascadeHelpers.ts`'s own
-// `removeProductCascade`.
+// `remove_role`/`remove_address`/`root.remove_product` -- see `./removePerson.ts`'s own
+// header comment (identical reasoning, not repeated here): all three now come from
+// their real, exported ports (`./removeRole.ts`/`./removeAddress.ts`/
+// `../root/removeProduct.ts`), not the since-deleted `./internalCascadeHelpers.ts`.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { wrapUsecase } from "../hooks";
-import { removeProductCascade } from "./internalCascadeHelpers";
+import { removeProduct } from "../root/removeProduct";
 import { removeAddress } from "./removeAddress";
 import { removeApplication } from "./removeApplication";
 import { removePersonAndOrganisation } from "./removePersonAndOrganisation";
@@ -80,7 +78,7 @@ function removeOrganisationUsecase(file: IfcFile, settings: RemoveOrganisationSe
 		} else if (inverse.isA("IfcPersonAndOrganization")) {
 			removePersonAndOrganisation(file, { personAndOrganisation: inverse });
 		} else if (inverse.isA("IfcActor")) {
-			removeProductCascade(file, inverse);
+			removeProduct(file, { product: inverse });
 		} else if (inverse.isA("IfcResourceLevelRelationship") && !inverse.isA("IfcOrganizationRelationship")) {
 			// The `!inverse.isA("IfcOrganizationRelationship")` guard is permanently
 			// redundant here -- see header comment. Ported verbatim.

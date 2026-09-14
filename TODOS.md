@@ -1359,6 +1359,18 @@ own header comment).
 
 **Depends on / blocked by:** `ifcopenshell.api.material` (Phase 6, not yet started).
 
+**UPDATE 2026-09-14 (`api.root` -- `remove_product` chunk):** A second, independent blocked
+call site on the same unported `api.material` module: `ifcopenshell.api.root.remove_product`'s
+own generic inverse-cascade tail calls `ifcopenshell.api.material.unassign_material` (not
+`assign_material`, but the same unported module) whenever an `IfcRelAssociatesMaterial`
+relationship is found among the product's inverses. `src/ifcopenshell-ts/src/api/root
+/removeProduct.ts` throws the same clear, disclosed error there rather than silently leaving
+the material association dangling -- see that file's own header comment and
+`removeProduct.test.ts`'s dedicated "throws the disclosed blocked error" regression test. Not a
+duplicate of this entry's own `assignType` blocker (a different function, a different half of
+`api.material`'s surface) -- cross-referenced here rather than given its own separate entry
+since both track the exact same root cause (`api.material` has no TS port at all).
+
 ---
 
 ### `api.type.assignType`/`mapTypeRepresentations` skip representation mapping (`api.geometry.map_representation`/`.assign_representation` unported)
@@ -1413,6 +1425,85 @@ the pre-existing `edit_object_placement` entry, not a duplicate of either.
 
 **Depends on / blocked by:** `ifcopenshell.api.geometry` (Phase 6, only
 `unassign_representation`/`remove_representation` landed so far).
+
+---
+
+### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet)
+
+**What:** Real Python's `ifcopenshell.api.root.remove_product` has two more small, genuinely
+new blocked call sites beyond the `api.material`/`api.boundary` ones this file already tracks
+(see the "generic inverse-cascade tail" entries elsewhere): `for opening in getattr(product,
+"HasOpenings", []) or []: ifcopenshell.api.feature.remove_feature(file, feature=opening
+.RelatedOpeningElement)` (only reachable for a genuine `IfcElement` with at least one void
+relationship) and `if product.is_a("IfcGrid"): for axis in product.UAxes + product.VAxes +
+(product.WAxes or ()): ifcopenshell.api.grid.remove_grid_axis(file, axis=axis)` (only reachable
+for a genuine `IfcGrid` with at least one axis). Neither `ifcopenshell.api.feature` nor
+`ifcopenshell.api.grid` has any TS port of any kind (confirmed by directory listing, matching
+`api.material`/`api.boundary`'s own "entirely untouched" status). `src/ifcopenshell-ts/src/api
+/root/removeProduct.ts` performs every other real behavior of this function correctly and
+independently, but throws a clear, loud, descriptive error the moment either blocked path would
+actually be needed -- an occurrence with no openings, or removing a non-`IfcGrid`/axis-free
+`IfcGrid`, is entirely unaffected and completes normally.
+
+**Why:** Same reasoning as every other entry in this file for a genuinely separate, real,
+independent future `api.*` module -- `api.feature`/`api.grid` are their own future chunks, not
+squeezed into `api.root`'s own narrower review scope.
+
+**Impact:** Calling `removeProduct` on an `IfcElement` with a non-empty `HasOpenings` throws
+`"removeProduct: removing an element's HasOpenings needs api.feature.removeFeature, not ported
+yet -- see TODOS.md."`; calling it on an `IfcGrid` with at least one `UAxes`/`VAxes`/`WAxes`
+entry throws `"removeProduct: removing an IfcGrid's axes needs api.grid.removeGridAxis, not
+ported yet -- see TODOS.md."` -- both AFTER this function's own representation/placement/pset
+preamble has already been committed (matching what real Python's own `remove_feature`/
+`remove_grid_axis` call raising partway through would do; not a TS-specific regression). Pinned
+by two dedicated regression tests in `removeProduct.test.ts` (real Python's own
+`test_removing_all_openings_of_an_element`/`test_removing_axes_of_a_grid`, adapted from their
+real passing assertions into "throws the disclosed blocked error" pins instead).
+
+**Fix:** Port `ifcopenshell.api.feature`/`ifcopenshell.api.grid` as their own future chunks
+(both small: 2 files/functions each, per `research/02-python-api-inventory.md`), then wire the
+real calls back into `removeProduct`'s two guarded branches and restore the two real Python
+tests' original passing assertions.
+
+**Context:** Surfaced during the `api.root` -- `remove_product` chunk (2026-09-14), verified
+directly against the real 223-line `remove_product.py` source.
+
+**Depends on / blocked by:** `ifcopenshell.api.feature`, `ifcopenshell.api.grid` (both Phase 6,
+neither started).
+
+---
+
+### `api.root.removeProduct` skips `IfcRelSpaceBoundary` cleanup (`api.boundary.remove_boundary` unported -- `api.boundary` has no TS port of any kind yet)
+
+**What:** Real Python's `ifcopenshell.api.root.remove_product`'s generic inverse-cascade tail
+calls `ifcopenshell.api.boundary.remove_boundary(file, boundary=inverse)` for every
+`IfcRelSpaceBoundary` found among the product's inverses. `ifcopenshell.api.boundary` has no TS
+port of any kind (confirmed by directory listing -- an entirely untouched module, same status
+as `api.material`/`api.feature`/`api.grid` before this chunk). `src/ifcopenshell-ts/src/api
+/root/removeProduct.ts` throws a clear, disclosed error the moment an `IfcRelSpaceBoundary` is
+actually found, rather than silently leaving it dangling -- a product with no space boundary is
+entirely unaffected.
+
+**Why:** Same reasoning as every other entry in this file for a genuinely separate, real,
+independent future `api.*` module.
+
+**Impact:** Calling `removeProduct` on an element referenced by at least one
+`IfcRelSpaceBoundary` throws `"removeProduct: IfcRelSpaceBoundary cleanup needs api.boundary
+.removeBoundary, not ported yet -- see TODOS.md."`, AFTER this function's own representation/
+placement/pset preamble (and any earlier-processed inverses in the same cascade loop) has
+already been committed -- matching what real Python's own `remove_boundary` call raising
+partway through would do. Pinned by a dedicated regression test in `removeProduct.test.ts`
+(real Python's own `test_removing_all_space_boundaries_of_an_element`, adapted from its real
+passing assertion into a "throws the disclosed blocked error" pin instead).
+
+**Fix:** Port `ifcopenshell.api.boundary` as its own future chunk, then wire the real call back
+into `removeProduct`'s guarded branch and restore the real Python test's original passing
+assertion.
+
+**Context:** Surfaced during the `api.root` -- `remove_product` chunk (2026-09-14), verified
+directly against the real 223-line `remove_product.py` source.
+
+**Depends on / blocked by:** `ifcopenshell.api.boundary` (Phase 6, not yet started).
 
 ---
 
@@ -1495,6 +1586,32 @@ in place is safe and correct regardless of whether/when the native fix lands. Th
 itself needs a real `cmake` build environment to verify (this sandbox's own repeatedly-disclosed
 constraint) -- pick up alongside any other native-core primitive-layer fix that has real CI/local
 build access.
+
+**UPDATE 2026-09-14 (`api.root` -- `remove_product` chunk): third confirmed hit, this time on a
+SCALAR (single-entity-typed) attribute, plus a second, different TS-level workaround shape --**
+Real Python's `remove_product` nulls `product.ObjectPlacement = None` before calling
+`remove_deep2(file, object_placement)`, relying on that assignment dropping
+`object_placement`'s own inverse count to 0 (real Python's own comment: "remove the inverse for
+remove_deep2 to work"). Confirmed empirically (not assumed) that this port's
+`product.set("ObjectPlacement", null)` hits the exact same root-cause bug this entry already
+documents -- `getTotalInverses(objectPlacement)` stayed at 1 even after the nulling call,
+causing `removeDeep2`'s own guard to silently refuse to remove the placement. This is a
+genuinely NEW confirmed instance (a single entity-typed attribute, not an aggregate-of-entities
+one like `unassignTypeRepresentation`'s `RepresentationMaps` case above) -- and it needed a
+DIFFERENT workaround shape, since there's no "assign `[]` first" equivalent for a scalar
+attribute: `src/ifcopenshell-ts/src/api/root/removeProduct.ts` instead calls `elementUtil
+.removeDeep2(file, objectPlacement, [product])`, passing `product` via `removeDeep2`'s own
+`alsoConsider` parameter (already-existing machinery, not new) so its inverse-containment check
+treats `product`'s one forward reference to `objectPlacement` as "also being removed" without
+ever touching the buggy null-assignment path at all -- `IfcFile.remove`'s own real, correct
+auto-nulling of attributes referencing a just-deleted entity (`../group/removeGroup.ts`'s header
+comment) then nulls `product.ObjectPlacement` as a side effect, reaching the identical final
+state real Python's own working assignment achieves. Confirmed empirically against this
+worktree's own built native addon. See `removeProduct.ts`'s own inline comment at this exact
+call site for the full writeup, and `removeProduct.test.ts`'s "removing an element's local
+placement" test for the regression coverage. Every previously-shipped or future chunk that ever
+nulls a SCALAR entity-typed attribute (not just an aggregate one) and depends on the old
+referenced entity becoming fully unreferenced should be treated as an equally-suspect case.
 
 ---
 
