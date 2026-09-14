@@ -1305,6 +1305,117 @@ describes, are unaffected either way.
 
 ---
 
+### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet)
+
+**What:** Real Python's `ifcopenshell.api.type.assign_type` finishes (when
+`should_map_representations` is `True`, the default) by calling its own `map_material_usages`
+helper, which -- only if the type's own material (`ifcopenshell.util.element.get_material`,
+already landed) resolves to an `IfcMaterialLayerSet`/`IfcMaterialProfileSet` -- calls
+`ifcopenshell.api.material.assign_material(file, products=related_objects,
+type=f"{ifc_class}Usage")` to give every newly-typed occurrence a matching
+`IfcMaterialLayerSetUsage`/`IfcMaterialProfileSetUsage`. `ifcopenshell.api.material` has NO TS
+port of any kind yet (confirmed by grep -- unlike `api.geometry`, which at least has 2 of ~34
+functions landed, `api.material` is entirely untouched). This TS port's `assignType`
+(`src/ifcopenshell-ts/src/api/type/assignType.ts`) performs its full `IfcRelDefinesByType`
+assign/reuse/merge surgery and `PredefinedType`/`ObjectType` double-typing cleanup correctly and
+independently, but throws a clear, loud, descriptive error (rather than silently skipping the
+mapping, or attempting a risky partial reimplementation of `api.material`) the moment it
+actually needs to call the missing function -- i.e. only when `shouldMapRepresentations` is
+`true` (the default) AND the type's own material genuinely is an
+`IfcMaterialLayerSet`/`IfcMaterialProfileSet`. A type with no material, or
+`shouldMapRepresentations: false`, is unaffected and completes normally.
+
+**Why:** `api.material` (per `research/02-python-api-inventory.md`) is itself a real,
+independent future chunk -- inlining even one of its ~30+ functions under `api.type`'s own,
+much narrower review scope risked a partial/wrong port of `assign_material` (a non-trivial
+function: it has its own inherit/reuse/merge logic for `IfcRelAssociatesMaterial`, plus
+per-material-class dispatch for creating the right `*Usage` wrapper) landing under the wrong
+chunk's review, exactly the same reasoning already established for `edit_object_placement`
+above.
+
+**Impact:** Calling `assignType` with `shouldMapRepresentations: true` (the default) against a
+`relatingType` whose own material is an `IfcMaterialLayerSet`/`IfcMaterialProfileSet` throws
+`"assignType: mapping material usages for N related object(s) needs api.material.assignMaterial
+(type \"<Class>Usage\"), not ported yet -- see TODOS.md."` -- AFTER this function's own
+`IfcRelDefinesByType` surgery has already been committed (matching what would happen if the
+real `api.material.assign_material` call itself raised partway through the real Python
+function; not a TS-specific regression). Callers who need this exact scenario today must either
+pass `shouldMapRepresentations: false` (skipping representation-mapping too, see the
+next entry) or manually construct the `IfcMaterialLayerSetUsage`/`IfcMaterialProfileSetUsage`
+association themselves before/after calling `assignType`. Pinned by a dedicated regression test
+in `assignType.test.ts` (`"mapping material usages when the type's material is an
+IfcMaterialLayerSet/IfcMaterialProfileSet -- blocked on api.material.assignMaterial"`).
+
+**Fix:** Port `ifcopenshell.api.material` as its own (large) future chunk, then wire the real
+`assignMaterial` call back into `assignType`'s `mapMaterialUsages` helper and port the two
+currently-unportable real Python tests this gap also blocks
+(`test_do_not_reassign_material_if_it_was_assigned_previously` needs a *successful* prior call
+to construct its precondition, so it can't even be adapted today -- see `assignType.test.ts`'s
+own header comment).
+
+**Context:** Surfaced during the `api.type` chunk completing `assign_type`/
+`map_type_representations` (2026-09-14), verified directly against the real 319-line
+`assign_type.py` source, not assumed from a summary.
+
+**Depends on / blocked by:** `ifcopenshell.api.material` (Phase 6, not yet started).
+
+---
+
+### `api.type.assignType`/`mapTypeRepresentations` skip representation mapping (`api.geometry.map_representation`/`.assign_representation` unported)
+
+**What:** Real Python's `ifcopenshell.api.type.map_type_representations` -- called directly by
+`assign_type` for every newly-typed occurrence whenever `should_map_representations` is `True`
+(the default) AND the type's own `RepresentationMaps` is non-empty -- has two halves: the FIRST
+(strip every representation currently on the occurrence, via
+`ifcopenshell.api.geometry.unassign_representation`/`.remove_representation`) is fully portable,
+since both of those functions already landed as a minimal, unrelated dependency of
+`api.context.removeContext` (`src/ifcopenshell-ts/src/api/geometry/index.ts`). The SECOND (for
+every one of the type's own `RepresentationMaps`, create a fresh `IfcMappedItem`-based
+representation via `ifcopenshell.api.geometry.map_representation` and assign it onto the
+occurrence via `ifcopenshell.api.geometry.assign_representation`) is NOT -- neither function has
+any TS port at all yet. This TS port's `mapTypeRepresentations`
+(`src/ifcopenshell-ts/src/api/type/mapTypeRepresentations.ts`) throws a clear, loud, descriptive
+error the moment it's clear the blocked second half would be needed (i.e. `RepresentationMaps`
+is non-empty) -- deliberately BEFORE running the otherwise-safe first (stripping) loop, so a
+blocked call never leaves the occurrence with its old representations removed and nothing to
+replace them with (a strictly worse silent-partial-state outcome than refusing the call
+outright). A type with an empty/absent `RepresentationMaps` is unaffected and remains a real,
+correct no-op, matching real Python's own early-return guard.
+
+**Why:** Same reasoning as the `edit_object_placement`/`api.material.assign_material` entries
+above -- `api.geometry.map_representation`/`.assign_representation` are real, independent
+functions (`map_representation` in particular does non-trivial `IfcRepresentationMap`
+reuse/creation and `IfcMappedItem`/`IfcCartesianTransformationOperator` construction) that
+belong under `api.geometry`'s own future, wider review scope, not squeezed into `api.type`'s.
+
+**Impact:** Calling `assignType` with `shouldMapRepresentations: true` (the default) against a
+`relatingType` with a non-empty `RepresentationMaps` throws (via `mapTypeRepresentations`)
+`"mapTypeRepresentations: mapping an occurrence to its type's own RepresentationMaps needs
+api.geometry.mapRepresentation/api.geometry.assignRepresentation, neither ported yet -- see
+TODOS.md."` -- AFTER `assignType`'s own `IfcRelDefinesByType` surgery has already been
+committed (same partial-mutation-matches-real-Python-would-throw-too reasoning as the
+`api.material` entry above). Callers who need this exact scenario today must pass
+`shouldMapRepresentations: false`. Pinned by dedicated regression tests in both
+`mapTypeRepresentations.test.ts` and `assignType.test.ts`.
+
+**Fix:** Port `ifcopenshell.api.geometry.map_representation`/`.assign_representation` as part of
+a future, wider `api.geometry` chunk (they have other callers across `api.*` beyond
+`api.type`), then wire the real calls back into `mapTypeRepresentations`'s own second loop and
+port the two currently-unportable real Python tests this gap also blocks
+(`test_map_representation`, adapted below as a pinned "throws" test instead of its real
+assertions; `test_do_not_map_representation_if_type_was_assigned_previously`, which -- like the
+`api.material` entry's own analogous test -- needs a *successful* prior call to construct its
+precondition and so can't even be adapted today).
+
+**Context:** Surfaced during the same `api.type` chunk as the `api.material` entry immediately
+above (2026-09-14) -- a genuinely different pair of blocked functions than either that entry or
+the pre-existing `edit_object_placement` entry, not a duplicate of either.
+
+**Depends on / blocked by:** `ifcopenshell.api.geometry` (Phase 6, only
+`unassign_representation`/`remove_representation` landed so far).
+
+---
+
 ### Native primitive-layer bug: clearing an entity/aggregate-of-entity attribute to `null` via `.set()` leaves a stale (unregistered-but-still-counted) inverse-index entry
 
 **What:** `EntityInstance.set(name, null)` (or `.setByIndex(index, null)`), for an attribute
