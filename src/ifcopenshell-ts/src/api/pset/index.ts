@@ -8,12 +8,14 @@
 // `./removePset.ts`'s own header comment for why that one landed alone, ahead of this
 // chunk, as a minimal dependency of `api.group.removeGroup`).
 //
-// Still unported: `add_qto`/`edit_qto` (chunk 2, a future PR) and `edit_pset.py`
+// Chunk 2 (this one) adds `add_qto`/`edit_qto` (see `./addQto.ts`/`./editQto.ts`'s own
+// header comments -- the latter is one of the more intricate functions in this whole
+// module family, with real disclosed Python quirks/bugs). Still unported: `edit_pset.py`
 // (chunk 3, a future PR -- the single biggest file in the whole `api` package).
 //
 // Namespaced per this project's `util/index.ts` per-submodule convention:
 // `api.pset.addPset`, `api.pset.assignPset`, `api.pset.unassignPset`,
-// `api.pset.unsharePset`, `api.pset.removePset`.
+// `api.pset.unsharePset`, `api.pset.removePset`, `api.pset.addQto`, `api.pset.editQto`.
 export { addPset } from "./addPset";
 export type { AddPsetSettings } from "./addPset";
 export { assignPset } from "./assignPset";
@@ -24,3 +26,7 @@ export { unsharePset } from "./unsharePset";
 export type { UnsharePsetSettings } from "./unsharePset";
 export { removePset } from "./removePset";
 export type { RemovePsetSettings } from "./removePset";
+export { addQto } from "./addQto";
+export type { AddQtoSettings } from "./addQto";
+export { editQto, inferPropertyType } from "./editQto";
+export type { ComplexQuantityValue, EditQtoSettings, QuantityValue } from "./editQto";
