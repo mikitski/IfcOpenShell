@@ -1396,3 +1396,37 @@ commit, unrelated to anything this chunk touched).
 **Depends on / blocked by:** None -- trivial, standalone fix whenever someone has a multi-schema
 addon to verify against (or picks up the broader `SCHEMA_VERSIONS` widening this file's other
 entry already tracks).
+
+---
+
+### `api.pset.addPset`'s IFC2X3 material-properties dedup scan would crash on a malformed file with an unset `Material`
+
+**What:** `src/ifcopenshell-ts/src/api/pset/addPset.ts`'s `IfcMaterialDefinition`/`IfcMaterial`
+branch, on IFC2X3, dedups existing `IfcMaterialProperties` instances via
+`file.byType("IfcMaterialProperties").filter((d) => (d.get("Material") as EntityInstance).equals(product))`.
+Real Python's equivalent generator expression, `(d for d in file.by_type("IfcMaterialProperties")
+if d.Material == product)`, tolerates `d.Material` being `None` (`None == product` is just
+`False`) -- but this port's `.equals(product)` call would throw a null-reference error if any
+`IfcMaterialProperties` instance in the file happens to have no `Material` set.
+
+**Why this is low-risk, not a live bug:** `IfcMaterialProperties.Material` is declared MANDATORY
+(non-nullable, `Material: IfcMaterial` with no `| null`) in `ifc2x3.d.ts` -- a schema-valid file
+can never actually have one of these unset. `addPset.ts`'s own creation path for this class
+(`file.createEntity(ifcClass)` immediately followed by `properties.set("Material", product)`, both
+within the same synchronous function call) also never leaves a newly-created instance in that
+state observably to any other code. The only way to actually hit this is a file loaded from an
+external, already-schema-invalid source (or a native primitive that constructs the entity without
+immediately setting `Material`) -- not reachable through this port's own API surface today.
+
+**Fix:** Guard the dedup filter with an optional-chaining/null check
+(`(d.get("Material") as EntityInstance | null)?.equals(product) ?? false`) to match Python's
+graceful `None == product -> False` behavior exactly, rather than throwing.
+
+**Context:** Surfaced incidentally by a `/code-review` run (during the `api.pset` qto chunk, PR
+#87) that hit its own documented fork-context-bleed bug and reviewed already-merged PR #86's diff
+instead of PR #87's -- flagged for awareness rather than acted on immediately, since it's real but
+very low practical risk. Not independently exercised against a real IFC2X3 file in this sandbox
+(no multi-schema native addon available at review time).
+
+**Depends on / blocked by:** None -- a trivial, one-line defensive fix whenever someone picks up
+a small `api.pset` follow-up chunk.
