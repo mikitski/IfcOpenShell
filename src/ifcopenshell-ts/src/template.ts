@@ -17,6 +17,39 @@
 // upward package.json search -- not worth replicating for a cosmetic
 // application-identifier string embedded in the generated header). Cosmetic only,
 // not a correctness concern.
+//
+// UPDATED (`api.project` chunk): added `CreateOptions.blank`/`.authorization` and the
+// new `BLANK_TEMPLATE` string, purely additive (both default to preserving the exact
+// prior behavior for every existing caller -- `schema.ts`'s `getSchemaDefinition`,
+// `test/bootstrap.ts`'s `createTestFile`, etc. -- none of which pass `blank`).
+// `api/project/createFile.ts` (port of `ifcopenshell/api/project/create_file.py`)
+// needs a genuinely *entity-free* file (just a HEADER section, empty DATA section) --
+// unlike this file's own default `TEMPLATE`, which always bakes in a starter
+// `IfcProject`/unit-assignment/geometric-context/owner-history chain (`test/
+// bootstrap.ts`'s own `stripProjectBootstrap`/`stripOwnerBootstrap` header comments
+// already document this exact "`template.create` != real `create_file`" gap, found by
+// an earlier `api.unit` chunk). Investigated whether to instead reach this via the
+// low-level `file_new_with_schema_filetype_path_logger` primitive
+// (`native/ifcopenshell_native.ts`'s `file.create_schema_filetype_path_logger`, which
+// *would* produce a truly blank file without going through STEP text at all): blocked
+// -- the `logger` class (same file) has no static constructor/factory method bound
+// anywhere on this primitive surface, so no `logger` instance can be obtained to pass
+// to it at all (not merely "unwrapped at the `IfcFile` level", per `bootstrap.ts`'s
+// own more optimistic phrasing -- confirmed by reading every method on the generated
+// `logger` class: none are `static`). Also independently blocked from the "live
+// header setter" angle: `IfcFile`/`spf_header` has no `file_name`/`file_description`
+// sub-entity accessors at all yet (`TODOS.md`'s dedicated "`spf_header` has no
+// `file_description()` sub-entity accessor" entry) -- there is no way to construct a
+// blank native file and then assign `.header.file_name.name` etc. onto it after the
+// fact either, even if the blank-construction problem above were solved. Both are
+// real C++-side primitive additions, out of scope for this TS-only `api.project`
+// chunk. So, exactly like this file's own pre-existing `TEMPLATE`/`create()`, the only
+// currently-available route to a file with specific, chosen header field values is to
+// bake them into STEP text and parse it via the existing `native.file_new_with_data_
+// data_size` primitive (already used below) -- `BLANK_TEMPLATE` is that same
+// technique, just with an empty `DATA;\nENDSEC;` section instead of `TEMPLATE`'s
+// pre-populated one. See `createFile.ts`'s own header comment for the full field-by-
+// field comparison against real Python's `create_file.py`.
 
 import { IfcFile } from "./file";
 import * as guid from "./guid";
@@ -55,6 +88,28 @@ ENDSEC;
 END-ISO-10303-21;
 `;
 
+// A header-only sibling of `TEMPLATE` above, with a genuinely empty `DATA` section --
+// see this file's header comment (the `api.project` chunk update) for why this exists
+// and why it's the only currently-available route to that shape. Unlike `TEMPLATE`,
+// `preprocessor_version`/`originating_system`/`authorization` are independently
+// substitutable (`{application}` is still reused for the first two, matching real
+// Python's own `create_file.py`, which sets both to the exact same string), and the
+// `FILE_DESCRIPTION` text is a single fully-substitutable `{description}` value rather
+// than `TEMPLATE`'s own hardcoded `'ViewDefinition [{mvd}]'` (note the space before
+// `[`, baked into that literal) -- `createFile.ts` needs the un-spaced literal
+// `"ViewDefinition[DesignTransferView]"` real Python's `create_file.py` hardcodes,
+// which isn't reachable through `TEMPLATE`'s own fixed text.
+const BLANK_TEMPLATE = `ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('{description}'),'2;1');
+FILE_NAME('{filename}','{timestring}',('{creator}'),('{organization}'),'{application}','{application}','{authorization}');
+FILE_SCHEMA(('{schema_identifier}'));
+ENDSEC;
+DATA;
+ENDSEC;
+END-ISO-10303-21;
+`;
+
 // See this file's header comment for why this isn't read from package.json.
 const PLACEHOLDER_VERSION = "0.9.0";
 
@@ -87,6 +142,29 @@ export interface CreateOptions {
 	projectGlobalId?: string;
 	projectName?: string;
 	mvd?: string;
+	/**
+	 * `FILE_NAME`'s `authorization` field (7th positional STEP header field). `TEMPLATE`
+	 * (the default, non-`blank` shape) hardcodes this to `''` -- unused by any existing
+	 * caller, so defaulting this option to `''` preserves that exactly. Added for
+	 * `createFile.ts`'s `"Nobody"` (real Python's `create_file.py` literal).
+	 */
+	authorization?: string;
+	/**
+	 * When `true`, produces a header-only file with a genuinely empty `DATA` section
+	 * (`BLANK_TEMPLATE` above) instead of `TEMPLATE`'s own pre-populated starter
+	 * `IfcProject`/unit-assignment/owner-history chain. See this file's header comment
+	 * (the `api.project` chunk update) for why this exists. Default `false` --
+	 * preserves every existing caller's behavior exactly.
+	 */
+	blank?: boolean;
+	/**
+	 * Only consulted when `blank` is `true`: the exact `FILE_DESCRIPTION` text (single
+	 * string, no surrounding quotes). Defaults to the same `'ViewDefinition [{mvd}]'`-
+	 * shaped text `TEMPLATE` itself hardcodes (kept as a sensible default for any other
+	 * future `blank: true` caller), but `createFile.ts` overrides this with real
+	 * Python's own un-spaced literal -- see `BLANK_TEMPLATE`'s own comment.
+	 */
+	description?: string;
 }
 
 export function create(options: CreateOptions = {}): IfcFile {
@@ -96,6 +174,7 @@ export function create(options: CreateOptions = {}): IfcFile {
 	const application = options.application ?? `IfcOpenShell-TS - v${version}`;
 	const applicationVersion = options.applicationVersion ?? version;
 	const timestring = options.timestring ?? new Date(timestamp * 1000).toISOString().replace(/\.\d{3}Z$/, "");
+	const mvd = options.mvd ?? mvdFor(schemaIdentifier);
 
 	const values: Record<string, string | number> = {
 		filename: options.filename ?? "",
@@ -108,10 +187,13 @@ export function create(options: CreateOptions = {}): IfcFile {
 		application,
 		project_globalid: options.projectGlobalId ?? guid.new(),
 		project_name: options.projectName ?? "",
-		mvd: options.mvd ?? mvdFor(schemaIdentifier),
+		mvd,
+		authorization: options.authorization ?? "",
+		description: options.description ?? `ViewDefinition [${mvd}]`,
 	};
 
-	const text = TEMPLATE.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key] ?? ""));
+	const templateText = options.blank ? BLANK_TEMPLATE : TEMPLATE;
+	const text = templateText.replace(/\{(\w+)\}/g, (_match, key: string) => String(values[key] ?? ""));
 	const buffer = Buffer.from(text, "utf-8");
 	const handle = native.file_new_with_data_data_size(buffer, buffer.length);
 	return new IfcFile(handle);
