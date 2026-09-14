@@ -1,21 +1,21 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // Barrel for `ifcopenshell.api.pset` (src/ifcopenshell-python's `ifcopenshell/api/
-// pset/` package) -- **still not a full port of that module**. This chunk (1 of 3 for
-// this module's remaining real Python files, per `planning/ifcopenshell-ts/PROGRESS.md`'s
-// Phase 6 table) adds `add_pset`/`assign_pset`/`unassign_pset`/`unshare_pset` (the
-// basic CRUD/assignment functions) alongside the already-landed `remove_pset` (see
-// `./removePset.ts`'s own header comment for why that one landed alone, ahead of this
-// chunk, as a minimal dependency of `api.group.removeGroup`).
-//
-// Chunk 2 (this one) adds `add_qto`/`edit_qto` (see `./addQto.ts`/`./editQto.ts`'s own
-// header comments -- the latter is one of the more intricate functions in this whole
-// module family, with real disclosed Python quirks/bugs). Still unported: `edit_pset.py`
-// (chunk 3, a future PR -- the single biggest file in the whole `api` package).
+// pset/` package) -- now a FULL port of that module, across 3 chunks. Chunk 1 added
+// `add_pset`/`assign_pset`/`unassign_pset`/`unshare_pset` alongside the already-landed
+// `remove_pset` (see `./removePset.ts`'s own header comment for why that one landed
+// alone, ahead of chunk 1, as a minimal dependency of `api.group.removeGroup`). Chunk 2
+// added `add_qto`/`edit_qto` (see `./editQto.ts`'s own header comment -- one of the more
+// intricate functions in this module family, with a real disclosed Python bug). Chunk 3
+// (this one) adds `edit_pset` (see `./editPset.ts`'s own header comment -- the single
+// biggest file in the whole `api` package, with several further real, disclosed Python
+// quirks of its own: `should_purge` semantics, a shared-property safety check, and a
+// throwaway-probe-entity orphan-creation quirk in `cast_value_to_primary_measure_type`).
 //
 // Namespaced per this project's `util/index.ts` per-submodule convention:
 // `api.pset.addPset`, `api.pset.assignPset`, `api.pset.unassignPset`,
-// `api.pset.unsharePset`, `api.pset.removePset`, `api.pset.addQto`, `api.pset.editQto`.
+// `api.pset.unsharePset`, `api.pset.removePset`, `api.pset.addQto`, `api.pset.editQto`,
+// `api.pset.editPset`.
 export { addPset } from "./addPset";
 export type { AddPsetSettings } from "./addPset";
 export { assignPset } from "./assignPset";
@@ -30,3 +30,5 @@ export { addQto } from "./addQto";
 export type { AddQtoSettings } from "./addQto";
 export { editQto, inferPropertyType } from "./editQto";
 export type { ComplexQuantityValue, EditQtoSettings, QuantityValue } from "./editQto";
+export { editPset, getPrimaryMeasureType, inferPrimaryMeasureType } from "./editPset";
+export type { EditPsetSettings, PropertyPrimitive, PropertyValue, UnitWrappedPropertyValue } from "./editPset";

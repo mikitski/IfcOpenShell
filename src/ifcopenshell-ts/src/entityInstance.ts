@@ -217,6 +217,22 @@ export class EntityInstance {
 		return declaration === null ? 1 : declaration.attribute_count();
 	}
 
+	/**
+	 * `entity_instance_mixin.attribute_type(index)` -- the underlying STEP argument kind
+	 * at `index` (e.g. `"DOUBLE"`/`"STRING"`/`"BOOL"`/`"INT"`/`"AGGREGATE OF DOUBLE"`/
+	 * ...), as opposed to `util/attribute.ts`'s `getPrimitiveType` (a *declaration*-level
+	 * classification with two disclosed native-surface gaps of its own -- see that
+	 * file's header comment). This is a thin public wrapper around the already-bound
+	 * native `entity_instance.attribute_type(index)` primitive (no new native surface);
+	 * added for `api/pset/editPset.ts`'s `cast_value_to_primary_measure_type` port,
+	 * which is the first caller needing this exact instance-level shim (see that file's
+	 * header comment for why: probing a freshly-created, throwaway instance's own
+	 * attribute kind is genuinely how real Python's own source does this).
+	 */
+	attributeType(index: number): string {
+		return this.native.attribute_type(index);
+	}
+
 	// --- explicit .get()/.set() primitive escape hatch (entity_instance_mixin's
 	// __getattr__/__setattr__ and __getitem__/__setitem__ ported to explicit methods,
 	// designed so a future Proxy can wrap them directly -- 10-architecture.md SS6) ---
