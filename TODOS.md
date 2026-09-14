@@ -742,6 +742,29 @@ given" path on all 3 schemas, need no standalone defined-type instance at all an
 See `src/api/owner/addApplication.ts`'s own header comment for the full writeup. No further consequences
 found elsewhere in this chunk's own 11 files.
 
+**UPDATE 2026-09-14 (Phase 6's `api.pset` `edit_pset` chunk):** found a fourth, independent
+consequence -- and the most sweeping one yet, blocking the MAJORITY of a whole function's own real
+Python test suite, not a single branch. `ifcopenshell.api.pset.edit_pset`'s
+`cast_value_to_primary_measure_type` needs to build a standalone typed value (e.g. `IfcLabel("hi")`,
+`IfcThermalTransmittanceMeasure(42.0)`) for EVERY plain-scalar (`string`/`number`/`boolean`/`Date`)
+property value, for both creating a NEW property and updating an EXISTING one -- the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this entry already
+documents, hit on `cast_value_to_primary_measure_type`'s own very first line (`file.createEntity(
+primaryMeasureType).attributeType(0)`, a probe-instance construction). The SAME gate also blocks the
+raw-array `IfcPropertyEnumeratedValue`/`IfcPropertyListValue` creation paths. Ported the whole
+function completely and faithfully anyway (its 4-tier value-type-inference resolver
+`getPrimaryMeasureType`/`inferPrimaryMeasureType`, never itself touching `file.createEntity`, is
+exported and independently unit-tested as pure logic, unaffected by the gap); every code path that
+does NOT need to materialize a brand-new typed value (renaming; purging/clearing an existing
+property; assigning an already-built `entity_instance` value to a new or existing property; full
+`IfcProperty` passthrough; copying enum data from another existing property; the shared-property/
+`NotImplementedError` dispatch logic) remains fully functional and gets real, passing test coverage.
+`test/api/pset/editPset.test.ts` pins the CURRENT, disclosed, blocked behavior for every scalar-value-
+creation test case ported from real Python's `test_edit_pset.py` (matching
+`addConversionBasedUnit.test.ts`'s own established precedent), each with a comment recording the
+real, unblocked assertion to restore once this gap closes. See `src/api/pset/editPset.ts`'s own
+header comment (top section) for the full writeup.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
