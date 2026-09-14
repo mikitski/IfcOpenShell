@@ -26,12 +26,12 @@
 // deliberate MUTATE-the-original-relationship-in-place quirk for a list attribute,
 // vs. duplicate-the-relationship-entity for a single-valued one -- see below).
 //
-// --- Two genuinely blocked call sites -- disclosed via a loud throw, thrown BEFORE any
-// mutation for that specific relationship, per this project's established discipline
-// (see `../root/removeProduct.ts`'s own header comment and `../type
+// --- One remaining genuinely blocked call site -- disclosed via a loud throw, thrown
+// BEFORE any mutation for that specific relationship, per this project's established
+// discipline (see `../root/removeProduct.ts`'s own header comment and `../type
 // /mapTypeRepresentations.ts`'s "throw before mutating" precedent) ---
 //
-// (1) **Distribution ports** (`IfcRelNests`/`IfcRelConnectsPortToElement`, IFC2X3's own
+// **Distribution ports** (`IfcRelNests`/`IfcRelConnectsPortToElement`, IFC2X3's own
 // name for the same concept): real Python recursively `copy_class`-es every nested
 // port, builds a fresh nest/connection relationship pointing the copies at the new
 // element, then for each new port calls `ifcopenshell.api.system.unassign_port`/
@@ -50,18 +50,18 @@
 // mis-placed entities with no way to finish the job. A product with no ports is
 // entirely unaffected.
 //
-// (2) **`IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
-// material associations** (real Python's own `"Set" in inverse.RelatingMaterial.is_a()`
-// check): needs `ifcopenshell.api.material.copy_material`, and `ifcopenshell.api
-// .material` has NO TS port of any kind -- the SAME already-tracked gap
-// `TODOS.md`'s `api.type.assignType`/`api.root.removeProduct` entries already track
-// (cross-referenced there below, not duplicated). Thrown the moment such a material
-// association is actually found -- a product with a plain `IfcMaterial`/
-// `IfcMaterialList` (no "Set"/"Usage" in the class name) or a parametric
-// `IfcMaterialLayerSetUsage`/`IfcMaterialProfileSetUsage` (handled by the OTHER,
-// fully-portable material branch just below, real Python's own `util.element.copy`
-// shallow-copy path, NOT `api.material.copy_material`) is entirely unaffected. No
-// material association at all is likewise unaffected.
+// --- RESOLVED: `IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
+// material associations, previously blocked, now call the real `api.material.copyMaterial` ---
+//
+// (real Python's own `"Set" in inverse.RelatingMaterial.is_a()` check): `api.material`
+// chunk 1 landed `copyMaterial` as a real, exported function (`../material/copyMaterial.ts`)
+// -- this branch now calls it directly instead of throwing, matching real Python's own
+// `inverse.RelatingMaterial = ifcopenshell.api.material.copy_material(self.file, inverse
+// .RelatingMaterial)` exactly. A plain `IfcMaterial`/`IfcMaterialList` (no "Set"/"Usage"
+// in the class name) or a parametric `IfcMaterialLayerSetUsage`/`IfcMaterialProfileSetUsage`
+// (handled by the OTHER, fully-portable material branch just below, real Python's own
+// `util.element.copy` shallow-copy path, NOT `api.material.copy_material`) is unaffected
+// either way. No material association at all is likewise unaffected.
 //
 // --- Everything else really is fully portable, confirmed line-by-line against the
 // real 193-line source, not assumed from the import list ---
@@ -89,6 +89,7 @@ import { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as elementUtil from "../../util/element";
 import { wrapUsecase } from "../hooks";
+import { copyMaterial } from "../material/copyMaterial";
 
 export interface CopyClassSettings {
 	/** The `IfcProduct`/`IfcTypeProduct` to copy. */
@@ -250,11 +251,12 @@ function copyIndirectAttributes(file: IfcFile, fromElement: EntityInstance, toEl
 			}
 			if (materialClass.includes("Set")) {
 				// See this file's own header comment ("(2) *Set material associations") --
-				// `api.material` has no TS port of any kind. Thrown before copying/mutating
-				// anything for this relationship.
-				throw new Error(
-					`copyClass: copying ${fromElement.isA()}#${fromElement.id()}'s ${materialClass} material association needs api.material.copyMaterial, not ported yet -- see TODOS.md.`,
-				);
+				// `api.material.copyMaterial` landed for real (api.material chunk 1); this
+				// branch now calls it directly instead of throwing.
+				inverse = elementUtil.copy(file, inverse);
+				inverse.set("RelatingMaterial", copyMaterial(file, { material: relatingMaterial }));
+				inverse.set("RelatedObjects", [toElement]);
+				continue;
 			}
 			// Plain IfcMaterial/IfcMaterialList (neither "Usage" nor "Set" in the class
 			// name) falls through to the generic fallback below, matching real Python's
@@ -315,11 +317,10 @@ function copyClassUsecase(file: IfcFile, settings: CopyClassSettings): EntityIns
  * - The copy will be contained in the same spatial structure.
  * - The copy, if it is an occurrence, will have the same type.
  * - Voids are duplicated too.
- * - The copy will have the same material as the original. Parametric material set
- *   usages will be copied -- **except a genuine `IfcMaterialLayerSet`/
- *   `IfcMaterialProfileSet`/`IfcMaterialConstituentSet` association throws today, see
- *   this file's own header comment and `TODOS.md`: needs `api.material.copyMaterial`,
- *   not ported yet**.
+ * - The copy will have the same material as the original, including a full duplicate
+ *   of a genuine `IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
+ *   association (via `api.material.copyMaterial`). Parametric material set usages are
+ *   copied too.
  * - The copy will be part of the same groups as the original.
  *
  * Be warned that:

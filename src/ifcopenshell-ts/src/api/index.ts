@@ -165,3 +165,21 @@ export * as constraint from "./constraint";
 // writeup and a real, disclosed Python quirk in `unassign_declaration.py` (its own
 // `relatingContext` parameter is accepted but never actually consulted).
 export * as project from "./project";
+
+// Phase 6, `api.material` chunk 1 of several: 3 of `api.material`'s 26 real files
+// (`assign_material`/`unassign_material`/`copy_material`) -- a brand-new module (no
+// TS port of any kind existed before this chunk), prioritized because 3 separate,
+// already-merged chunks (`api.type.assignType`, `api.root.removeProduct`,
+// `api.root.copyClass`) each disclosed a real, loud-throw blocker citing this exact
+// module. Landing this chunk retroactively unblocks all three call sites (`copyClass`
+// only once PR #92, which adds `api.root.copyClass`/`.reassignClass`, actually lands
+// -- see `material/index.ts`'s own header comment for the exact per-call-site status).
+// Every other `api.material` file (`add_material`/`add_layer`/`add_profile`/
+// `add_constituent`/`add_material_set`/every `edit_*`/`remove_*`/etc.) remains future
+// work. Namespaced as `api.material.assignMaterial`/`.unassignMaterial`/
+// `.copyMaterial` -- see `material/index.ts`'s and each function's own header comment
+// for this chunk's exact scope and several disclosed real Python quirks (a dead
+// "type -> material set" cache bug relied upon by a real passing Python test, a subtle
+// material-vs-type dispatch-order edge case, and an early-`return`-not-`continue`
+// representation-patching quirk).
+export * as material from "./material";

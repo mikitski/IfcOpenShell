@@ -6,37 +6,49 @@
 // (computed once at collection time, so it's already CI-safe when only IFC4 is
 // registered -- see `../../bootstrap.ts`).
 //
-// --- Two real, load-bearing dependencies on unported modules: adapted, not silently
-// dropped -- see `../../../src/api/type/assignType.ts`'s own header comment ---
+// --- One remaining real, load-bearing dependency on an unported module: adapted, not
+// silently dropped -- see `../../../src/api/type/assignType.ts`'s own header comment ---
 //
-// `test_map_representation`/`test_map_material_usages` are pinned below (in their own
-// "disclosed, currently blocked" describe block) as dedicated "throws the disclosed
-// blocked error" regression tests, matching this project's established
+// `test_map_representation` is pinned below (in its own "disclosed, currently
+// blocked" describe block) as a dedicated "throws the disclosed blocked error"
+// regression test, matching this project's established
 // `addConversionBasedUnit.test.ts`/`editPset.test.ts` precedent for exactly this
-// situation.
+// situation (still blocked on `api.geometry.mapRepresentation`/`.assignRepresentation`,
+// neither ported).
 //
-// `test_do_not_map_representation_if_type_was_assigned_previously`/
-// `test_do_not_reassign_material_if_it_was_assigned_previously` are NOT ported, even
-// adapted: both test a strictly *deeper* behavior (idempotency on a *second* call,
-// once an occurrence is already mapped/has a material usage from a *first*,
-// successful call) that is fundamentally unreachable while the dependency is
-// blocked -- the first call itself throws before ever reaching that state, so there is
-// no "already mapped" precondition this port could ever construct to pin against.
-// This is a real gap, not a silent omission: once `api.geometry.map_representation`/
-// `api.material.assign_material` land, these two tests should be ported for real
-// (their assertions are unaffected by anything in this chunk).
+// `test_do_not_map_representation_if_type_was_assigned_previously` is NOT ported, even
+// adapted: it tests a strictly *deeper* behavior (idempotency on a *second* call, once
+// an occurrence is already mapped from a *first*, successful call) that is
+// fundamentally unreachable while `api.geometry.mapRepresentation` is blocked -- the
+// first call itself throws before ever reaching that state, so there is no "already
+// mapped" precondition this port could ever construct to pin against. This is a real
+// gap, not a silent omission: once `api.geometry.mapRepresentation` lands, this test
+// should be ported for real (its assertions are unaffected by anything in this chunk).
+//
+// `test_map_material_usages`/`test_do_not_reassign_material_if_it_was_assigned_
+// previously` USED to be in the same "blocked, can't even construct the precondition"
+// situation as the representation-mapping tests above -- `api.material` had no TS
+// port of any kind when this file was first written. Both are now ported FOR REAL
+// below (in the main `describe.each` block, not the "disclosed, currently blocked"
+// one) -- `api.material` chunk 1 landed `assignMaterial`/`unassignMaterial`/
+// `copyMaterial` (`../../../src/api/material/index.ts`), and `assignMaterial`'s own
+// `"...Usage"` branches (the exact ones `mapMaterialUsages` needs) have no sibling
+// blocker of their own (see `assignMaterial.ts`'s own header comment), so both real
+// Python assertions -- including the "do not reassign" idempotency one, now
+// genuinely reachable -- are ported verbatim.
 //
 // `test_map_representation_disabled` IS fully portable -- `should_map_representations:
-// false` short-circuits both blocked paths entirely -- and is ported below verbatim,
+// false` short-circuits both the (still-)blocked representation-mapping path and the
+// (now-real) material-usage-mapping path entirely -- and is ported below verbatim,
 // doubling as this chunk's concrete demonstration that the non-blocked majority of
 // `assign_type` works end to end even when the type actually has a representation and
 // a material.
 
 import { describe, expect, test } from "vitest";
+import { assignMaterial } from "../../../src/api/material/assignMaterial";
 import { assignType } from "../../../src/api/type/assignType";
 import type { EntityInstance } from "../../../src/entityInstance";
 import type { IfcFile } from "../../../src/file";
-import * as guid from "../../../src/guid";
 import { getMaterial, getType } from "../../../src/util/element";
 import { getRepresentation } from "../../../src/util/representation";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
@@ -53,19 +65,6 @@ function withAttrs(file: IfcFile, type: string, attrs: Record<string, unknown> =
 function assignTypeRepresentationMap(file: IfcFile, type: EntityInstance, representation: EntityInstance): void {
 	const repMap = file.createEntity("IfcRepresentationMap", file.createEntity("IfcAxis2Placement3D"), representation);
 	type.set("RepresentationMaps", [repMap]);
-}
-
-/** Real Python: `ifcopenshell.api.material.assign_material(file, products=[type], type=materialClass)` -- not ported, so test fixtures build the resulting `IfcRelAssociatesMaterial` directly. */
-function assignTypeMaterial(file: IfcFile, type: EntityInstance, materialClass: string): void {
-	const material =
-		materialClass === "IfcMaterialLayerSet"
-			? withAttrs(file, "IfcMaterialLayerSet", { MaterialLayers: [] })
-			: withAttrs(file, "IfcMaterialProfileSet", { MaterialProfiles: [] });
-	withAttrs(file, "IfcRelAssociatesMaterial", {
-		GlobalId: guid.new(),
-		RelatedObjects: [type],
-		RelatingMaterial: material,
-	});
 }
 
 describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
@@ -133,13 +132,13 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 		expect(() => file.byId(relId)).toThrow();
 	});
 
-	test("map representation disabled (should_map_representations: false avoids both blocked dependencies)", () => {
+	test("map representation disabled (should_map_representations: false avoids the blocked geometry dependency and material-usage mapping)", () => {
 		const file = createTestFile(schema);
 		const elementType = file.createEntity("IfcWallType");
 		const context = file.createEntity("IfcGeometricRepresentationContext");
 		const rep = withAttrs(file, "IfcShapeRepresentation", { ContextOfItems: context });
 		assignTypeRepresentationMap(file, elementType, rep);
-		assignTypeMaterial(file, elementType, "IfcMaterialLayerSet");
+		assignMaterial(file, { products: [elementType], type: "IfcMaterialLayerSet" });
 
 		const element = file.createEntity("IfcWall");
 		expect(() =>
@@ -153,6 +152,51 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 		// No representation mapping and no material usage.
 		expect(getRepresentation(element, context)).toBeNull();
 		expect(getMaterial(element, false, false)).toBeNull();
+	});
+
+	// Real Python: `test_map_material_usages`. Ported for real now that
+	// `api.material.assignMaterial` exists (this used to be one of this file's
+	// disclosed-blocker tests -- see this file's own header comment). IFC2X3 only
+	// covers `IfcMaterialLayerSet` (`IfcMaterialProfileSet`/`IfcMaterialProfileSetUsage`
+	// don't exist on IFC2X3 at all), matching real Python's own schema branch.
+	test("mapping material usages when the type has a material set assigns a matching Usage", () => {
+		const file = createTestFile(schema);
+		const materialTypes =
+			schema === "IFC2X3"
+				? (["IfcMaterialLayerSet"] as const)
+				: (["IfcMaterialLayerSet", "IfcMaterialProfileSet"] as const);
+		for (const materialType of materialTypes) {
+			const elementType = file.createEntity("IfcWallType");
+			assignMaterial(file, { products: [elementType], type: materialType });
+			const element = file.createEntity("IfcWall");
+
+			assignType(file, { relatedObjects: [element], relatingType: elementType });
+
+			const material = getMaterial(element);
+			expect(material).not.toBeNull();
+			expect(material?.isA(`${materialType}Usage`)).toBe(true);
+		}
+	});
+
+	// Real Python: `test_do_not_reassign_material_if_it_was_assigned_previously` --
+	// genuinely unreachable while `api.material.assignMaterial` was blocked (see this
+	// file's own header comment), now ported for real.
+	test("does not reassign material usage if it was assigned previously", () => {
+		const file = createTestFile(schema);
+		const element1 = file.createEntity("IfcWall");
+		const elementType = file.createEntity("IfcWallType");
+		assignMaterial(file, { products: [elementType], type: "IfcMaterialLayerSet" });
+		assignType(file, { relatedObjects: [element1], relatingType: elementType });
+		const material1 = getMaterial(element1);
+		expect(material1).not.toBeNull();
+		const materialId = (material1 as EntityInstance).id();
+
+		// Use 2 elements to trigger the material-assignment code block.
+		const element2 = file.createEntity("IfcWall");
+		assignType(file, { relatedObjects: [element1, element2], relatingType: elementType });
+		const material2 = getMaterial(element1);
+		expect(material2).not.toBeNull();
+		expect((material2 as EntityInstance).id()).toBe(materialId);
 	});
 
 	test("remove predefined type if type assignment (see real GitHub issue #7006)", () => {
@@ -242,10 +286,12 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s)", (schema) => {
 	});
 });
 
-// --- Two real, load-bearing dependencies on unported modules: disclosed, pinned ---
+// --- One remaining real, load-bearing dependency on an unported module: disclosed,
+// pinned. (`test_map_material_usages` USED to be a second one here, but is now ported
+// for real above, in the main describe block -- see this file's own header comment.) ---
 //
 // See this file's own header comment and `../../../src/api/type/assignType.ts`'s own
-// header comment for the full writeup, and `TODOS.md` for the tracked entries.
+// header comment for the full writeup, and `TODOS.md` for the tracked entry.
 
 describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s) -- disclosed, currently blocked", (schema) => {
 	test("mapping representations when the type has RepresentationMaps -- blocked on " +
@@ -269,24 +315,6 @@ describe.each(AVAILABLE_SCHEMAS)("api.type.assignType (%s) -- disclosed, current
 		// TS-specific regression. See `assignType.ts`'s own header comment.
 		expect(file.byType("IfcRelDefinesByType").length).toBe(1);
 		expect(getType(element)?.equals(elementType)).toBe(true);
-	});
-
-	test("mapping material usages when the type's material is an IfcMaterialLayerSet/IfcMaterialProfileSet -- " +
-		"blocked on api.material.assignMaterial (real Python: test_map_material_usages)", () => {
-		const materialTypes =
-			schema === "IFC2X3"
-				? (["IfcMaterialLayerSet"] as const)
-				: (["IfcMaterialLayerSet", "IfcMaterialProfileSet"] as const);
-		for (const materialType of materialTypes) {
-			const file = createTestFile(schema);
-			const elementType = file.createEntity("IfcWallType");
-			assignTypeMaterial(file, elementType, materialType);
-			const element = file.createEntity("IfcWall");
-
-			expect(() => assignType(file, { relatedObjects: [element], relatingType: elementType })).toThrow(
-				new RegExp(`needs api\\.material\\.assignMaterial \\(type "${materialType}Usage"\\)`),
-			);
-		}
 	});
 });
 
