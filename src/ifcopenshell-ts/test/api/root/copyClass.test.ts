@@ -9,13 +9,14 @@
 // instead, matching `removeProduct.test.ts`'s own established precedent for this exact
 // substitution.
 //
-// 2 real Python tests are genuinely blocked (real, disclosed dependencies on `api
-// .system`/`api.material`, neither of which has any TS port at all -- see
-// `../../../src/api/root/copyClass.ts`'s own header comment and `TODOS.md`) and are
-// pinned instead as dedicated "throws the disclosed blocked error" regression tests,
-// not silently dropped: `test_copying_distribution_ports` (needs `api.system
-// .unassignPort`/`.disconnectPort`), `test_copying_material_sets_for_type_elements_only`
-// (needs `api.material.copyMaterial`).
+// 1 real Python test is genuinely blocked (a disclosed dependency on `api.system`,
+// which has no TS port at all -- see `../../../src/api/root/copyClass.ts`'s own header
+// comment and `TODOS.md`) and is pinned instead as a dedicated "throws the disclosed
+// blocked error" regression test, not silently dropped: `test_copying_distribution_ports`
+// (needs `api.system.unassignPort`/`.disconnectPort`).
+// `test_copying_material_sets_for_type_elements_only` (needs `api.material.copyMaterial`)
+// was ALSO blocked originally, but `api.material` chunk 1 landed `copyMaterial` for real
+// before this PR merged -- that test now runs with its real assertions instead.
 //
 // The 2 pset-copying tests below don't use `api.pset.editPset` to populate their
 // property's value -- `editPset.ts`'s own header comment discloses a real,
@@ -458,7 +459,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.copyClass -- disclosed blockers (%s)"
 		expect(() => copyClass(file, { product: element })).toThrow(/api\.system\.unassignPort/);
 	});
 
-	test("copying an IfcMaterialLayerSet material association throws (api.material.copyMaterial not ported)", () => {
+	// Python: `test_copying_material_sets_for_type_elements_only` -- now real, since
+	// `api.material.copyMaterial` landed for real (api.material chunk 1), matching this
+	// project's established "replace a disclosed-throw test with the real assertions
+	// once the blocker resolves" precedent.
+	test("copying an IfcMaterialLayerSet material association duplicates the whole set", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWallType");
 		const singleMaterial = withAttrs(file, "IfcMaterial", { Name: "Foo" });
@@ -466,7 +471,22 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.copyClass -- disclosed blockers (%s)"
 		const materialSet = withAttrs(file, "IfcMaterialLayerSet", { MaterialLayers: [layer] });
 		withAttrs(file, "IfcRelAssociatesMaterial", { RelatedObjects: [element], RelatingMaterial: materialSet });
 
-		expect(() => copyClass(file, { product: element })).toThrow(/api\.material\.copyMaterial/);
+		const newElement = copyClass(file, { product: element });
+
+		const originalRel = (element.get("HasAssociations") as EntityInstance[])[0];
+		const newRel = (newElement.get("HasAssociations") as EntityInstance[])[0];
+		const newMaterialSet = newRel.get("RelatingMaterial") as EntityInstance;
+		const originalMaterialSet = originalRel.get("RelatingMaterial") as EntityInstance;
+
+		expect(newMaterialSet.isA("IfcMaterialLayerSet")).toBe(true);
+		// The set itself is a fresh, independent duplicate...
+		expect(newMaterialSet.equals(originalMaterialSet)).toBe(false);
+		const newLayer = (newMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
+		const originalLayer = (originalMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
+		// ...and so is each layer within it...
+		expect(newLayer.equals(originalLayer)).toBe(false);
+		// ...but the underlying single IfcMaterial each layer references is reused, not copied.
+		expect((newLayer.get("Material") as EntityInstance).equals(singleMaterial)).toBe(true);
 	});
 });
 
