@@ -74,6 +74,21 @@
 // `HasQuantities` can itself contain further complex quantities) -- matches real
 // Python's own recursive-by-construction shape exactly, no depth limit in either.
 //
+// *** Disclosed quirk: purging a complex quantity orphans its own nested quantities,
+// rather than recursively deleting them *** -- confirmed empirically against this
+// port's own built addon, and matching real Python's own `self.file.remove(prop)` (a
+// single-entity removal, no recursion): when a complex quantity is purged (`properties`
+// value `null`), only the complex quantity ITSELF is removed from the file; any
+// `IfcQuantityXXX`/nested `IfcPhysicalComplexQuantity` instances that were in its own
+// `HasQuantities` list are NOT also deleted -- they become genuine orphaned entities,
+// still present in the file (`file.byType(...)`), just no longer referenced by
+// anything. This mirrors `../pset/removePset.ts`'s own header comment precedent
+// exactly: `file.remove()`/`.remove(prop)` never cascades to forward-referenced
+// children on its own in either language -- a caller who wants recursive cleanup has to
+// do it explicitly (the way `remove_pset.py` itself does, manually, for its own
+// orphaned sub-properties) -- and `edit_qto.py` simply doesn't do that extra work for a
+// purged complex quantity's own nested quantities. Reproduced verbatim, not "fixed".
+//
 // --- Type inference for plain numeric `properties` values -- `get_canonical_property_
 // type`/`infer_property_type`, read in full ---
 //

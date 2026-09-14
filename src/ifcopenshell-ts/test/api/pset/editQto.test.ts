@@ -476,7 +476,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editQto Transaction/undo-redo (%s)", 
 		expect(file.byId(qId).get("Name")).toBe("Length");
 	});
 
-	test("undo restores a purged nested complex quantity and its own nested quantities; redo re-purges", () => {
+	test("undo restores a purged complex quantity (its own nested quantity was never actually removed -- disclosed orphan quirk); redo re-purges", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
 		const qto = addQto(file, { product: element, name: "foo" }) as EntityInstance;
@@ -485,15 +485,21 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editQto Transaction/undo-redo (%s)", 
 			properties: { FireResistance: { Discrimination: "COMPONENT", HasQuantities: { InsulationLength: 1 } } },
 		});
 		const complexId = (qto.get("Quantities") as EntityInstance[])[0].id();
+		const nestedId = (file.byId(complexId).get("HasQuantities") as EntityInstance[])[0].id();
 
 		file.beginTransaction();
 		editQto(file, { qto, properties: { FireResistance: null } });
 		file.endTransaction();
 		expect((qto.get("Quantities") as EntityInstance[] | null) ?? []).toHaveLength(0);
+		// See editQto.ts's own header comment's disclosed orphan quirk: purging a complex
+		// quantity only removes the complex quantity ITSELF -- its own nested quantity is
+		// never deleted, just orphaned (still present in the file, unreferenced).
+		expect(() => file.byId(nestedId)).not.toThrow();
 
 		file.undo();
 		expect(file.byId(complexId).isA("IfcPhysicalComplexQuantity")).toBe(true);
 		expect((qto.get("Quantities") as EntityInstance[]).length).toBe(1);
+		expect((file.byId(complexId).get("HasQuantities") as EntityInstance[]).map((q) => q.id())).toEqual([nestedId]);
 
 		file.redo();
 		expect((qto.get("Quantities") as EntityInstance[] | null) ?? []).toHaveLength(0);
