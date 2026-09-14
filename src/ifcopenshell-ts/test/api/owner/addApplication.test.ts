@@ -67,19 +67,27 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC4X3"))("api.owner.addApp
 
 // --- IFC4X3: disclosed, pre-existing primitive-layer gap -- see this file's header comment ---
 
-describe("api.owner.addApplication (IFC4X3) -- disclosed blocked default-developer path", () => {
-	test("adding an application with an explicit developer still works", () => {
-		const file = createTestFile("IFC4X3");
-		const developer = file.createEntity("IfcOrganization", null, "Acme");
-		const application = addApplication(file, { applicationDeveloper: developer });
-		expect((application.get("ApplicationDeveloper") as EntityInstance).equals(developer)).toBe(true);
-	});
+// `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))` -- CI's native build only
+// registers IFC4 (`-DSCHEMA_VERSIONS=4`, a long-established, tracked gap -- see
+// `test/util/doc.test.ts`'s own identical, already-established precedent for this exact
+// guard), so this block must be schema-availability-gated like every other IFC4X3-only
+// `describe` in this project; it only happens to run locally when IFC4X3 is registered.
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))(
+	"api.owner.addApplication (IFC4X3) -- disclosed blocked default-developer path",
+	() => {
+		test("adding an application with an explicit developer still works", () => {
+			const file = createTestFile("IFC4X3");
+			const developer = file.createEntity("IfcOrganization", null, "Acme");
+			const application = addApplication(file, { applicationDeveloper: developer });
+			expect((application.get("ApplicationDeveloper") as EntityInstance).equals(developer)).toBe(true);
+		});
 
-	test("adding the default IfcOpenShell application currently throws (pinned, disclosed gap)", () => {
-		const file = createTestFile("IFC4X3");
-		expect(() => addApplication(file, {})).toThrow("Attribute access is only supported on entity instances");
-	});
-});
+		test("adding the default IfcOpenShell application currently throws (pinned, disclosed gap)", () => {
+			const file = createTestFile("IFC4X3");
+			expect(() => addApplication(file, {})).toThrow("Attribute access is only supported on entity instances");
+		});
+	},
+);
 
 // --- Transaction/undo-redo regression coverage (no Python counterpart) ---
 
