@@ -99,7 +99,10 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		// Just removing the product with the placement.
 		let file = blankFile(schema);
 		let element = file.createEntity("IfcWall");
-		element.set("ObjectPlacement", withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") }));
+		element.set(
+			"ObjectPlacement",
+			withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") }),
+		);
 
 		removeProduct(file, { product: element });
 
@@ -109,7 +112,9 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		// Removing the product that shares the placement with another product.
 		file = blankFile(schema);
 		element = file.createEntity("IfcWall");
-		const placement = withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") });
+		const placement = withAttrs(file, "IfcLocalPlacement", {
+			RelativePlacement: file.createEntity("IfcAxis2Placement3D"),
+		});
 		element.set("ObjectPlacement", placement);
 		const element1 = file.createEntity("IfcWall");
 		element1.set("ObjectPlacement", placement);
@@ -122,10 +127,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		// Removing the product whose placement is used as a reference point for another placement.
 		file = blankFile(schema);
 		element = file.createEntity("IfcWall");
-		const placementA = withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") });
+		const placementA = withAttrs(file, "IfcLocalPlacement", {
+			RelativePlacement: file.createEntity("IfcAxis2Placement3D"),
+		});
 		element.set("ObjectPlacement", placementA);
 		const element1b = file.createEntity("IfcWall");
-		const placementB = withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") });
+		const placementB = withAttrs(file, "IfcLocalPlacement", {
+			RelativePlacement: file.createEntity("IfcAxis2Placement3D"),
+		});
 		element1b.set("ObjectPlacement", placementB);
 		placementA.set("PlacementRelTo", placementB);
 
@@ -610,7 +619,9 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct Transaction/undo-redo (
 		const item = file.createEntity("IfcExtrudedAreaSolid");
 		const representation = withAttrs(file, "IfcShapeRepresentation", { Items: [item] });
 		const productDef = withAttrs(file, "IfcProductDefinitionShape", { Representations: [representation] });
-		const placement = withAttrs(file, "IfcLocalPlacement", { RelativePlacement: file.createEntity("IfcAxis2Placement3D") });
+		const placement = withAttrs(file, "IfcLocalPlacement", {
+			RelativePlacement: file.createEntity("IfcAxis2Placement3D"),
+		});
 		const element = withAttrs(file, "IfcWall", { Representation: productDef, ObjectPlacement: placement });
 		const pset = addPset(file, { product: element, name: "Foo_Bar" });
 		addRawProperty(file, pset);
