@@ -131,3 +131,20 @@ export * as document from "./document";
 // `assignReference`/`unassignReference`'s exact shape with `document`'s
 // `assignDocument`/`unassignDocument`, per real Python's own cross-referencing comment).
 export * as library from "./library";
+
+// Phase 6, `api.constraint` chunk: all 9 `api.constraint` functions (`add_metric`/
+// `add_metric_reference`/`add_objective`/`assign_constraint`/`edit_metric`/
+// `edit_objective`/`remove_constraint`/`remove_metric`/`unassign_constraint`),
+// completing that module and its `classification`/`document`/`library`/`constraint`
+// resource-association family. Manages `IfcObjective`/`IfcMetric`, assigned to products
+// via `IfcRelAssociatesConstraint`. No unported dependency of any kind. Namespaced as
+// `api.constraint.addObjective`/etc. -- see `constraint/index.ts`'s own header comment
+// for this chunk's exact scope, including why (despite the family resemblance) this
+// module's `assignConstraint`/`unassignConstraint` do NOT use `util/element.ts`'s
+// `REFERENCE_TYPES`/`getReferencedElements` machinery at all (neither `IfcObjective` nor
+// `IfcMetric` is a `REFERENCE_TYPES` entry), 2 disclosed IFC2X3-vs-IFC4+ schema
+// limitations (`add_metric_reference`/`remove_metric` are effectively IFC4+-only --
+// `IfcReference`/`IfcMetric.ReferencePath`/`IfcResourceConstraintRelationship` all don't
+// exist on IFC2X3, and real Python has no guard against it, ported verbatim), and a
+// disclosed `.d.ts`-generation-artifact finding on `IfcObjective.BenchmarkValues`.
+export * as constraint from "./constraint";
