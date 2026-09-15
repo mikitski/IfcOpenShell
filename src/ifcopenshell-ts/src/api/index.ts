@@ -202,3 +202,20 @@ export * as material from "./material";
 // `IfcFillAreaStyle`/`IfcFillAreaStyleHatching` removal recursion, and
 // `IfcPresentationStyleAssignment`'s IFC4X3 removal).
 export * as style from "./style";
+
+// Phase 6, `api.system` chunk: all 12 `api.system` functions (`add_port`/`add_system`/
+// `assign_flow_control`/`assign_port`/`assign_system`/`connect_port`/`disconnect_port`/
+// `edit_system`/`remove_system`/`unassign_flow_control`/`unassign_port`/
+// `unassign_system`), completing that module -- a brand-new module (no TS port of any
+// kind existed before this chunk), prioritized because `../root/copyClass.ts`
+// disclosed a real, loud-throw blocker citing this exact module by name
+// (`unassignPort`/`.disconnectPort`). Manages `IfcSystem` (via `IfcRelAssignsToGroup`,
+// reusing `api.group`) and `IfcDistributionPort` connectivity/flow-control assignment.
+// One remaining genuinely-unported dependency, `api.geometry.editObjectPlacement`,
+// blocks only `assign_port`'s own placement-relocalization step (thrown only at that
+// exact point, never proactively) -- this also means `copyClass.ts`'s own blocker is
+// NARROWED (its `api.system` half is resolved), not fully resolved, since it also
+// needs `editObjectPlacement`. Namespaced as `api.system.addSystem`/etc. -- see
+// `system/index.ts`'s own header comment for this chunk's exact scope and the full
+// disclosure of both the `editObjectPlacement` gap and the `copyClass.ts` narrowing.
+export * as system from "./system";
