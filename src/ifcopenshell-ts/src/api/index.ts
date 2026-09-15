@@ -219,3 +219,25 @@ export * as style from "./style";
 // `system/index.ts`'s own header comment for this chunk's exact scope and the full
 // disclosure of both the `editObjectPlacement` gap and the `copyClass.ts` narrowing.
 export * as system from "./system";
+
+// Phase 6, `api.drawing`/`api.control`/`api.pset_template` chunk: THREE small,
+// brand-new modules ported together in one chunk (11 real files, ~821 lines total --
+// none had any TS port of any kind before this chunk). `api.drawing` (3 files, 223
+// lines): associates products/grid axes with annotation objects via
+// `IfcRelAssignsToProduct`, plus editing `IfcTextLiteral`. `api.control` (2 files, 174
+// lines): assigns/unassigns planning controls/constraints (`IfcControl`) via
+// `IfcRelAssignsToControl`. `api.pset_template` (6 files, 424 lines): manages
+// `IfcPropertySetTemplate`/`IfcSimplePropertyTemplate` (property set/property
+// TEMPLATES, distinct from and a dependency of `api.pset`'s actual property sets;
+// effectively IFC4+-only -- see `pset_template/index.ts`'s own header comment). No
+// unported dependency of any kind in any of the three (confirmed by reading all 11
+// real files -- `api.owner`/`guid`/`util.element`/`util.pset` are each already
+// landed). Namespaced as `api.drawing.assignProduct`/etc., `api.control.assignControl`/
+// etc., `api.psetTemplate.addPsetTemplate`/etc. (camelCase for the multi-word module
+// name) -- see each submodule's own `index.ts` header comment for the full scope and
+// several disclosed real Python quirks (a grid-axis rel-multiplication quirk in
+// `drawing.assignProduct`/`.unassignProduct`, a silently-discarded
+// `primaryMeasureType` for QTO templates in `pset_template.addPropTemplate`, and more).
+export * as drawing from "./drawing";
+export * as control from "./control";
+export * as psetTemplate from "./pset_template";
