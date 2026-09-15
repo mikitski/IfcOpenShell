@@ -4,29 +4,25 @@
 // 204 lines) -- chunk 2 of 2 for `api.style` (see `./index.ts`'s own header comment).
 // No sibling `api.style` dependency of any kind.
 //
-// --- The `material` (Blender node-tree) parameter: NOT a "not yet ported" gap,
-// permanently out of scope -- throws unconditionally, only when actually supplied ---
+// --- Real Python's own exact order of operations, ported verbatim (this matters: see
+// the `material` disclosure below for why the ORDER, not just the individual checks,
+// is load-bearing) ---
 //
-// Real Python's OWN signature type-hints `material: Optional[bpy.types.Material]`
-// (`bpy` imported only under `TYPE_CHECKING`) and, when provided, walks a Blender
-// material's own node tree (`material.node_tree.nodes`) looking for a glTF-compatible
-// shader graph (`BSDF_PRINCIPLED`/`MIX_SHADER`/`TEX_IMAGE`/`NORMAL_MAP`/`SEPRGB`/...
-// node types, socket links, `node.image.filepath`) to auto-detect diffuse/normal/
-// metallic-roughness/occlusion/emissive texture maps, finally importing `bonsai.tool`
-// (a Blender ADDON, not part of `ifcopenshell` itself) inside `create_surface_texture`.
-// This is architecturally different from every other genuinely-unported-dependency
-// disclosure elsewhere in this project (e.g. `unassignMaterialStyle.ts`'s
-// `util.element.getShapeAspects`) -- those are real `ifcopenshell` Python functions
-// this project just hasn't ported YET; this is Blender's own live Python object model
-// (`bpy.types.Material`/node trees/sockets), which has no meaning at all outside a
-// running Blender process and therefore no TS/Node representation to even accept as a
-// parameter, let alone port a traversal of. `material` is typed `unknown` below and
-// this function throws a clear, loud, descriptive error the moment it's actually
-// supplied (non-`null`/non-`undefined`) -- never proactively (a `null`/omitted
-// `material`, the common case and the ONLY case any real Python test for this function
-// ever exercises -- confirmed against `test_add_surface_textures.py`, which never
-// passes `material=` -- runs the fully-ported `textures=` path below to completion,
-// unaffected).
+// `execute()`'s real body runs, in this exact order: (1) `if self.file.schema ==
+// "IFC2X3": return []` -- UNCONDITIONAL, `material` is never even inspected on this
+// schema; (2) the full `textures` loop -- fully portable, ALWAYS runs to completion
+// regardless of whether `material` was also supplied; (3) only THEN, `if
+// self.settings["material"] is None: return self.textures` -- i.e. the
+// Blender-node-tree-walking code (the part that genuinely can't be ported, see below)
+// is reached only after both (1) and (2) have already run. This port mirrors that
+// exact order: the IFC2X3 check comes first, the `textures` loop runs unconditionally
+// second, and the `material` check/throw comes LAST -- so a caller supplying `material`
+// on an IFC2X3 file gets the correct silent `[]` (the schema check short-circuits
+// before `material` is ever inspected, exactly like real Python), and a caller
+// supplying both `material` and `textures` still gets every real texture created
+// before the throw (matching real Python's own "the blocked call is the very last
+// step" ordering, the same discipline this project's every other disclosed-blocker
+// file follows, e.g. `../material/setShapeAspectConstituents.ts`'s own header comment).
 //
 // --- IFC2X3: real, disclosed early-return, ported verbatim (real Python's own
 // comment) ---
@@ -46,6 +42,31 @@
 // .py`'s own `TestAddSurfaceTexture` class extends `test.bootstrap.IFC4` only, with an
 // explicit `# TODO: add ifc2x3 tests after add_surface_textures will support ifc2x3`
 // comment -- confirming no IFC2X3 behavior is defined or tested upstream either.
+//
+// --- The `material` (Blender node-tree) parameter: NOT a "not yet ported" gap,
+// permanently out of scope -- throws only when actually supplied, and only LAST ---
+//
+// Real Python's OWN signature type-hints `material: Optional[bpy.types.Material]`
+// (`bpy` imported only under `TYPE_CHECKING`) and, when provided, walks a Blender
+// material's own node tree (`material.node_tree.nodes`) looking for a glTF-compatible
+// shader graph (`BSDF_PRINCIPLED`/`MIX_SHADER`/`TEX_IMAGE`/`NORMAL_MAP`/`SEPRGB`/...
+// node types, socket links, `node.image.filepath`) to auto-detect diffuse/normal/
+// metallic-roughness/occlusion/emissive texture maps, finally importing `bonsai.tool`
+// (a Blender ADDON, not part of `ifcopenshell` itself) inside `create_surface_texture`.
+// This is architecturally different from every other genuinely-unported-dependency
+// disclosure elsewhere in this project (e.g. `unassignMaterialStyle.ts`'s
+// `util.element.getShapeAspects`) -- those are real `ifcopenshell` Python functions
+// this project just hasn't ported YET; this is Blender's own live Python object model
+// (`bpy.types.Material`/node trees/sockets), which has no meaning at all outside a
+// running Blender process and therefore no TS/Node representation to even accept as a
+// parameter, let alone port a traversal of. `material` is typed `unknown` below and
+// this function throws a clear, loud, descriptive error the moment it's actually
+// supplied (non-`null`/non-`undefined`) -- but, per the order-of-operations section
+// above, only AFTER the IFC2X3 check and the full `textures` loop have already run (a
+// `null`/omitted `material`, the common case and the ONLY case any real Python test for
+// this function ever exercises -- confirmed against `test_add_surface_textures.py`,
+// which never passes `material=` -- never reaches this check at all, since it's always
+// `undefined`/`null` by then).
 //
 // --- `file.create_entity("IfcImageTexture", **texture_data)` -- ported as a fresh
 // zero-arg create plus a named `.set()` per surviving key, not a positional call ---
@@ -110,20 +131,11 @@ export interface AddSurfaceTexturesSettings {
 }
 
 function addSurfaceTexturesUsecase(file: IfcFile, settings: AddSurfaceTexturesSettings): EntityInstance[] {
-	if (settings.material !== undefined && settings.material !== null) {
-		// See this file's own header comment -- no TS/Node equivalent of a Blender
-		// material node tree exists; this is not a "not yet ported" gap, it's
-		// permanently out of scope. Thrown only here, at the exact point actually
-		// needed, never proactively (a `null`/omitted `material` never reaches this
-		// branch at all).
-		throw new Error(
-			"addSurfaceTextures: the `material` (Blender node-tree) parameter has no TS/Node equivalent -- see this file's own header comment and TODOS.md.",
-		);
-	}
-
 	if (file.schema === "IFC2X3") {
-		// See this file's own header comment -- real Python's own disclosed
-		// early-return, matching real IFC2X3/IFC4+ `IfcImageTexture` schema differences.
+		// See this file's own header comment ("order of operations") -- real Python's
+		// own disclosed early-return, UNCONDITIONAL: `material` is never even inspected
+		// on this schema, matching real IFC2X3/IFC4+ `IfcImageTexture` schema
+		// differences.
 		return [];
 	}
 
@@ -149,11 +161,18 @@ function addSurfaceTexturesUsecase(file: IfcFile, settings: AddSurfaceTexturesSe
 		textures.push(texture);
 	}
 
-	// See this file's own header comment -- `settings.material` is always
-	// `null`/`undefined` by this point (the branch above already threw otherwise), so
-	// real Python's own `if self.settings["material"] is None: return self.textures`
-	// (and every Blender-node-tree-walking branch after it) collapses to just this.
-	return textures;
+	if (settings.material === undefined || settings.material === null) {
+		return textures;
+	}
+
+	// See this file's own header comment ("order of operations" / "the `material`
+	// parameter") -- no TS/Node equivalent of a Blender material node tree exists;
+	// this is not a "not yet ported" gap, it's permanently out of scope. Thrown only
+	// here, LAST -- the IFC2X3 check and the full `textures` loop above have already
+	// run to completion, exactly matching real Python's own order of operations.
+	throw new Error(
+		"addSurfaceTextures: the `material` (Blender node-tree) parameter has no TS/Node equivalent -- see this file's own header comment and TODOS.md.",
+	);
 }
 
 /**

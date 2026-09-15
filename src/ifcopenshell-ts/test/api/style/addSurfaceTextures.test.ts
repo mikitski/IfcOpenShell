@@ -8,7 +8,12 @@
 // `../../../src/api/style/addSurfaceTextures.ts`'s own header comment). Additionally
 // covers this port's own disclosed `material` (Blender node-tree) throw, which has no
 // real Python counterpart to port from (a permanent TS/Node scope boundary, not a gap
-// in upstream's own test suite).
+// in upstream's own test suite) -- pinning the real order-of-operations
+// (`../../../src/api/style/addSurfaceTextures.ts`'s own header comment): the IFC2X3
+// check runs BEFORE `material` is ever inspected (so `material` on IFC2X3 correctly
+// returns `[]`, never throws), and the full `textures` loop always runs to completion
+// BEFORE the `material` throw (so real textures are created even when `material` is
+// also supplied).
 
 import { describe, expect, test } from "vitest";
 import { addSurfaceTextures } from "../../../src/api/style/addSurfaceTextures";
@@ -98,13 +103,34 @@ describe.each(AVAILABLE_SCHEMAS)("api.style.addSurfaceTextures (%s) -- schema-in
 
 		expect(addSurfaceTextures(file, {})).toEqual([]);
 	});
-
-	test("throws when material is supplied -- see this file's own header comment", () => {
-		const file = createTestFile(schema);
-
-		expect(() => addSurfaceTextures(file, { material: {} })).toThrow(/material.*no TS\/Node equivalent/);
-	});
 });
+
+describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
+	"api.style.addSurfaceTextures (%s) -- material (blocked, non-IFC2X3 only)",
+	(schema) => {
+		test("throws when material is supplied -- see this file's own header comment", () => {
+			const file = createTestFile(schema);
+
+			expect(() => addSurfaceTextures(file, { material: {} })).toThrow(/material.*no TS\/Node equivalent/);
+		});
+
+		// See this file's own header comment / `../../../src/api/style
+		// /addSurfaceTextures.ts`'s own header comment ("order of operations") -- the
+		// full `textures` loop must still run to completion, creating every real
+		// texture, BEFORE the `material` throw -- not thrown proactively before any of
+		// this function's own portable, real behavior has run.
+		test("still creates every texture from `textures` before throwing on a supplied material", () => {
+			const file = createTestFile(schema);
+			const textureData = defaultTextureData();
+
+			expect(() => addSurfaceTextures(file, { textures: textureData, material: {} })).toThrow(
+				/material.*no TS\/Node equivalent/,
+			);
+
+			expect(file.byType("IfcImageTexture")).toHaveLength(textureData.length);
+		});
+	},
+);
 
 describe("api.style.addSurfaceTextures (IFC2X3)", () => {
 	test("returns an empty list -- IFC2X3 texture support is not implemented (matches real Python's own disclosed early-return)", () => {
@@ -113,6 +139,17 @@ describe("api.style.addSurfaceTextures (IFC2X3)", () => {
 		const textures = addSurfaceTextures(file, { textures: defaultTextureData() });
 
 		expect(textures).toEqual([]);
+		expect(file.byType("IfcImageTexture").length).toBe(0);
+	});
+
+	// See this file's own header comment / `../../../src/api/style
+	// /addSurfaceTextures.ts`'s own header comment ("order of operations") -- the
+	// IFC2X3 early-return is UNCONDITIONAL: `material` is never even inspected on this
+	// schema, so this does NOT throw, unlike every other schema.
+	test("returns an empty list without throwing even when material is supplied -- the IFC2X3 check runs first", () => {
+		const file = createTestFile("IFC2X3");
+
+		expect(addSurfaceTextures(file, { material: {} })).toEqual([]);
 		expect(file.byType("IfcImageTexture").length).toBe(0);
 	});
 });

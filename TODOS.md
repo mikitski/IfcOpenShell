@@ -2131,10 +2131,17 @@ Blender node tree (`material.node_tree.nodes`, node types like `BSDF_PRINCIPLED`
 `TEX_IMAGE`/`NORMAL_MAP`/`SEPRGB`, socket links, `node.image.filepath`) to auto-detect diffuse/
 normal/metallic-roughness/occlusion/emissive texture maps, finally importing `bonsai.tool` (a
 Blender ADDON, not part of `ifcopenshell` itself) inside its own `create_surface_texture` helper.
-`src/ifcopenshell-ts/src/api/style/addSurfaceTextures.ts` throws a clear, loud error the instant
-`material` is actually supplied (non-`null`/non-`undefined`) -- never proactively; the `textures`
-(list-of-dicts) parameter path, which is fully portable and is the ONLY path real Python's own
-test suite (`test_add_surface_textures.py`) ever exercises, runs to completion unaffected.
+`src/ifcopenshell-ts/src/api/style/addSurfaceTextures.ts` throws a clear, loud error when `material`
+is actually supplied (non-`null`/non-`undefined`) -- but only LAST, matching real Python's own exact
+order of operations: (1) the IFC2X3 early-return runs first, UNCONDITIONALLY (`material` is never
+even inspected on that schema); (2) the full `textures` (list-of-dicts) loop -- fully portable, and
+the ONLY path real Python's own test suite (`test_add_surface_textures.py`) ever exercises -- always
+runs to completion, creating every real texture, regardless of whether `material` was also supplied;
+(3) only then is `material` checked and thrown on. Never thrown proactively, and never before either
+of the above two real, portable behaviors has already run (a `code-review` finding on the initial PR
+for this chunk -- the first version of this file checked `material` first, which would have wrongly
+thrown for a `material` supplied on an IFC2X3 file, and wrongly discarded already-creatable textures
+when both `textures` and `material` were supplied together).
 
 **Why:** Unlike every OTHER "genuinely unported dependency" entry in this file, this is NOT a
 "hasn't been ported yet" gap -- there is no TS/Node representation of `bpy.types.Material` (or any
@@ -2145,14 +2152,16 @@ project for as long as IfcOpenShell-TS targets a plain Node addon rather than a 
 Python/JS bridge.
 
 **Impact:** Calling `addSurfaceTextures(file, { material: someValue })` (any non-`null`/
-non-`undefined` value) always throws
+non-`undefined` value) throws
 `"addSurfaceTextures: the \`material\` (Blender node-tree) parameter has no TS/Node equivalent --
-see this file's own header comment and TODOS.md."` immediately, before any of the function's own
-`textures=`-driven work runs (there is no meaningful "partial" behavior to preserve here, unlike
-every other disclosed blocker in this file, since the two parameters are mutually exclusive real
-Python usage modes -- "Either `material` or `textures` should be provided", per real Python's own
-docstring). Every real call passing `textures=`/omitting `material` is completely unaffected and
-was ported in full.
+see this file's own header comment and TODOS.md."` -- but on an IFC2X3 file, this NEVER throws at
+all (the schema check returns `[]` first, unconditionally, before `material` is ever inspected); on
+IFC4/IFC4X3, it throws only after the full `textures` loop has already run to completion, so any
+`textures` supplied ALONGSIDE `material` are still created for real before the throw (there is no
+meaningful "further partial" behavior to preserve beyond that, since the two parameters otherwise
+represent mutually exclusive real Python usage modes -- "Either `material` or `textures` should be
+provided", per real Python's own docstring). Every real call passing `textures=`/omitting `material`
+is completely unaffected and was ported in full.
 
 **Fix:** None planned -- this is a permanent, disclosed scope boundary, not a backlog item. If this
 project ever needs to support Blender-driven texture auto-detection (e.g. as part of a future
