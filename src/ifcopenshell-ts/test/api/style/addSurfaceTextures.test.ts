@@ -132,7 +132,7 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 	},
 );
 
-describe("api.style.addSurfaceTextures (IFC2X3)", () => {
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))("api.style.addSurfaceTextures (IFC2X3)", () => {
 	test("returns an empty list -- IFC2X3 texture support is not implemented (matches real Python's own disclosed early-return)", () => {
 		const file = createTestFile("IFC2X3");
 
