@@ -7,10 +7,18 @@
 // `../../../src/api/material/setShapeAspectConstituents.ts`'s own header comment): the
 // material-set creation/removal surgery (including the real, disclosed upstream bug
 // that makes the "reuse an existing matching set" branch permanently unreachable), and
-// the genuinely blocked `api.style.assignItemStyle` call site (thrown only when an
-// item's shape aspect actually matches a named material AND that material has a real
-// style). `IfcMaterialConstituentSet` doesn't exist on IFC2X3 at all, so every test
-// here runs IFC4/IFC4X3 only.
+// the final style-assignment call site (thrown only when an item's shape aspect
+// actually matches a named material AND that material has a real style).
+// `IfcMaterialConstituentSet` doesn't exist on IFC2X3 at all, so every test here runs
+// IFC4/IFC4X3 only.
+//
+// **UPDATE (`api.style` chunk 2, 2026-09-15):** the previously-disclosed
+// `api.style.assignItemStyle` blocker is now resolved -- `setShapeAspectConstituents.ts`
+// calls the real, landed `assignItemStyle`. The "throws the disclosed blocked error"
+// regression test below is replaced with real assertions on the resulting
+// `IfcStyledItem` (see `../style/assignItemStyle.test.ts` for that function's own,
+// broader coverage -- this file only pins that `setShapeAspectConstituents` actually
+// reaches and correctly invokes it).
 
 import { describe, expect, test } from "vitest";
 import { addMaterial } from "../../../src/api/material/addMaterial";
@@ -90,7 +98,7 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 			expect(file.byType("IfcMaterialConstituentSet").length).toBe(1);
 		});
 
-		test("throws when a shape aspect name matches a material with a real style assigned", () => {
+		test("assigns the item style when a shape aspect name matches a material with a real style assigned", () => {
 			const file = createTestFile(schema);
 			const context = file.createEntity("IfcGeometricRepresentationContext");
 			const aluminium = addMaterial(file, { name: "AL01", category: "aluminium" });
@@ -117,14 +125,25 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 			shapeAspect.set("ShapeRepresentations", [aspectRep]);
 			shapeAspect.set("Name", "Framing");
 
-			expect(() => setShapeAspectConstituents(file, { element, context, materials: { Framing: aluminium } })).toThrow(
-				/assignItemStyle/,
-			);
+			expect(() =>
+				setShapeAspectConstituents(file, { element, context, materials: { Framing: aluminium } }),
+			).not.toThrow();
 
-			// The material-set creation surgery (everything before the blocked call) still
-			// ran to completion -- see this file's own header comment.
+			// The material-set creation surgery still ran to completion.
 			const material = getMaterial(element);
 			expect(material?.isA("IfcMaterialConstituentSet")).toBe(true);
+
+			// `item` had no prior `StyledByItem` -- `assignItemStyle` creates a brand new
+			// `IfcStyledItem` wrapping `aluminium`'s own style directly (neither IFC4 nor
+			// IFC4X3 wrap a freshly-created item's style in an
+			// `IfcPresentationStyleAssignment` -- only IFC2X3 does, and IFC2X3 is filtered
+			// out of this `describe.each`, since `IfcMaterialConstituentSet` doesn't exist
+			// there at all).
+			const styledByItem = item.get("StyledByItem") as EntityInstance[];
+			expect(styledByItem).toHaveLength(1);
+			const assignedStyles = styledByItem[0].get("Styles") as EntityInstance[];
+			expect(assignedStyles).toHaveLength(1);
+			expect(assignedStyles[0].equals(style)).toBe(true);
 		});
 
 		test("does not throw when no shape aspect matches any material name", () => {

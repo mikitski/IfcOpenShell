@@ -9,10 +9,15 @@
 // below. `ifcopenshell.util.element.get_material` and every
 // `ifcopenshell.util.representation.*` helper it calls (`get_material_style`,
 // `get_representation`, `resolve_representation`, `get_item_shape_aspect`) are
-// likewise already landed. The ONE genuinely unported dependency is
-// `ifcopenshell.api.style.assign_item_style` -- `api.style` has NO TS port of any kind
-// (confirmed: no `api/style/` directory anywhere under `src/`) -- see the dedicated
-// section below and the matching `TODOS.md` entry.
+// likewise already landed.
+//
+// **UPDATE (`api.style` chunk 2, 2026-09-15):** the final loop's
+// `ifcopenshell.api.style.assign_item_style` call -- previously blocked (`api.style` had
+// no TS port of any kind at all) -- is now wired up for real, using
+// `../style/assignItemStyle.ts`'s `assignItemStyle` (landed in this same chunk). The
+// disclosed-blocker throw below is gone; see `TODOS.md`'s
+// "`api.material.setShapeAspectConstituents` needs
+// `ifcopenshell.api.style.assign_item_style`" entry, now marked RESOLVED there.
 //
 // --- Real, disclosed bug, ported verbatim: the "reuse an existing matching
 // constituent set" branch is permanently unreachable ---
@@ -47,20 +52,17 @@
 // unreachable branch), not "corrected" to check `IfcMaterialConstituentSet` instead --
 // that would be a real, silent behavior CHANGE from upstream, not a faithful port.
 //
-// --- `ifcopenshell.api.style.assign_item_style`: genuinely unported, throws loudly ---
+// --- `ifcopenshell.api.style.assign_item_style`: now wired up for real ---
 //
 // The final loop (walk `representation.Items`, match each item's shape aspect name
 // against `materials`' own keys via a per-material style lookup, then call
-// `ifcopenshell.api.style.assign_item_style`) is ported in full up to the exact point
-// of that one call -- everything else in this function (the material-set
-// creation/reuse-check/removal surgery above, and the aspect/style MATCHING logic
-// itself) is fully, faithfully ported and runs to completion regardless of whether any
-// item ever actually needs a style reassigned. Only the actual `assign_item_style`
-// call itself throws, and only when reached (a real aspect/style match was found for
-// that specific item) -- never proactively before the loop even starts, matching this
-// project's established convention for a genuinely-separate-future-module blocker
-// (e.g. `../root/copyClass.ts`'s own `api.system` disclosure). See `TODOS.md` for the
-// full writeup.
+// `ifcopenshell.api.style.assign_item_style`) is ported in full, including the real
+// call itself (`../style/assignItemStyle.ts`'s `assignItemStyle`, `api.style` chunk 2) --
+// everything else in this function (the material-set creation/reuse-check/removal
+// surgery above, and the aspect/style MATCHING logic itself) was already fully,
+// faithfully ported and runs to completion regardless of whether any item ever
+// actually needs a style reassigned; that real-behavior ordering is unchanged by this
+// update.
 //
 // --- `resolve_representation(get_representation(...))`: a real, disclosed
 // `None`-crashes-Python gap, NOT guarded against here ---
@@ -86,6 +88,7 @@ import {
 	resolveRepresentation,
 } from "../../util/representation";
 import { wrapUsecase } from "../hooks";
+import { assignItemStyle } from "../style/assignItemStyle";
 import { addConstituent } from "./addConstituent";
 import { addMaterialSet } from "./addMaterialSet";
 import { assignMaterial } from "./assignMaterial";
@@ -170,11 +173,7 @@ function setShapeAspectConstituentsUsecase(file: IfcFile, settings: SetShapeAspe
 		const aspectName = aspect.get("Name") as string | null;
 		const style = aspectName !== null ? styles.get(aspectName) : undefined;
 		if (style) {
-			// See this file's own header comment and `TODOS.md`: `api.style` has no TS port
-			// of any kind yet.
-			throw new Error(
-				`setShapeAspectConstituents: assigning item style for shape aspect '${aspectName}' needs api.style.assignItemStyle, not ported yet -- see TODOS.md.`,
-			);
+			assignItemStyle(file, { item, style });
 		}
 	}
 }
@@ -210,10 +209,6 @@ function setShapeAspectConstituentsUsecase(file: IfcFile, settings: SetShapeAspe
  * See this file's own header comment for a real, disclosed upstream bug: an existing,
  * value-matching material constituent set assigned to `element` is NEVER reused -- a
  * brand new one is always created.
- *
- * **Known gap:** the final style-assignment step needs `api.style.assignItemStyle`,
- * which has no TS port of any kind yet -- this throws only if a matching shape
- * aspect/style pair is actually found (see `TODOS.md`).
  *
  * @example
  * ```ts
