@@ -1889,3 +1889,120 @@ assumed from the stack trace alone) before writing this entry.
 **Depends on / blocked by:** None -- a self-contained fix to `util/element.ts`'s existing
 `copy`/`copyDeep`, whenever someone picks up a follow-up chunk touching either function (or wants
 to fully unblock `copyMaterial.test.ts`'s pinned "throws" test above).
+
+---
+
+### `api.material.editProfileUsage`'s `CardinalPoint`-change branch needs `ifcopenshell.geom`/`util.shape.getX`/`getY` (not yet ported)
+
+**What:** Real Python's `ifcopenshell.api.material.edit_profile_usage`, whenever a caller's
+`attributes` actually change an `IfcMaterialProfileSetUsage`'s `CardinalPoint` (to a truthy value
+genuinely different from the usage's current one), calls `update_cardinal_point()`, which builds
+a throwaway single-entity `ifcopenshell.file`, strips fillet/rounding radii off a copy of the
+profile curve in play, extrudes it via a dummy `IfcExtrudedAreaSolid`, calls
+`ifcopenshell.geom.create_shape(...)` to actually triangulate it, then reads
+`ifcopenshell.util.shape.get_x`/`get_y` off the resulting triangulation to compute one of 9
+cardinal-point offsets, before patching every affected element's own body representation
+`IfcSweptAreaSolid.Position`. This TS port has no `ifcopenshell.geom` binding of any kind (the
+same pre-existing gap this file's very first entry, "`getAxis2placement`'s
+`IfcAxis2PlacementLinear` fallback needs `ifcopenshell.geom`", already tracks, and the same
+`util.shape` gap the "`util.shape`'s `ifcopenshell.geom`-dependent surface" entry tracks).
+`src/ifcopenshell-ts/src/api/material/editProfileUsage.ts` ports every other real behavior of
+this function correctly and independently (finding the profile curve in play via
+`CompositeProfile`/`MaterialProfiles[0].Profile`, the real no-profile-at-all silent no-op guard,
+and the final `attributes` setter loop), but throws a clear, disclosed error the instant it's
+clear the geometry-kernel step would actually be needed (i.e. `CardinalPoint` genuinely changes
+AND a profile is found) -- deliberately BEFORE building the dummy file, BEFORE patching any
+element's representation, and BEFORE the function's own final `attributes` setter loop has
+touched `usage` at all (real Python's own order-of-operations runs `update_cardinal_point()`
+first). Editing any attribute other than `CardinalPoint`, or setting it to its own current value
+or a falsy value, is entirely unaffected.
+
+**Why:** `ifcopenshell.geom`/the `ifcopenshell.util.shape` functions that depend on it are a
+substantial, separate native-geometry-kernel binding effort (OpenCASCADE-backed triangulation),
+not something a single `api.material` chunk should build unilaterally -- exactly the same
+reasoning this file's very first two entries already established.
+
+**Impact:** Calling `editProfileUsage` with `attributes: { CardinalPoint: <new value> }` against
+a usage whose profile set has a real profile (`CompositeProfile` or a non-empty
+`MaterialProfiles`) throws `"editProfileUsage: changing CardinalPoint to <value> needs a
+geometry-kernel-backed position calculation (ifcopenshell.geom.create_shape /
+util.shape.get_x/get_y), not ported yet -- see TODOS.md."`. Pinned by a dedicated regression test
+in `editProfileUsage.test.ts` (adapted from real Python's own `test_update_cardinal_point`, which
+asserts a real geometric result this port cannot compute yet), alongside real, portable
+assertions for every branch that doesn't need the geometry kernel (no `CardinalPoint` change, an
+unchanged-value no-op, and the real no-profile-at-all early return).
+
+**Fix:** Port an `ifcopenshell.geom` binding (see this file's first two entries' own "Fix"
+sections for the shared scope: `create_shape`, `ifcopenshell_wrapper.CURVES_SURFACES_AND_SOLIDS`,
+`W.triangulation`/`get_x`/`get_y` at minimum), then wire the real `calculate_position()`
+computation back into `updateCardinalPoint` and restore real Python's own
+`test_update_cardinal_point` assertions in place of the pinned "throws" test.
+
+**Context:** Surfaced during the `api.material` chunk 4 (`edit_layer`/`edit_constituent`/
+`reorder_set_item`/`edit_layer_usage`/`edit_profile`/`set_shape_aspect_constituents`/
+`assign_profile`/`edit_profile_usage`, completing `api.material` at 26/26 files, 2026-09-15),
+verified directly against the real 223-line `edit_profile_usage.py` source.
+
+**Depends on / blocked by:** Same future `ifcopenshell.geom` binding effort as this file's first
+two entries (not yet scheduled/started).
+
+---
+
+### `api.material.setShapeAspectConstituents` needs `ifcopenshell.api.style.assign_item_style` (`api.style` has no TS port of any kind yet) -- also discloses a real upstream bug
+
+**What:** Real Python's `ifcopenshell.api.material.set_shape_aspect_constituents` ends with a
+loop over an element's own representation items: for each item with a matching named shape
+aspect whose name also matches one of the caller's own `materials` keys with a real style
+attached, it calls `ifcopenshell.api.style.assign_item_style(file, item=item, style=style)`.
+`ifcopenshell.api.style` has NO TS port of any kind (confirmed: no `api/style/` directory
+anywhere under `src/ifcopenshell-ts/src/` -- a brand-new blocked module for this project, the
+same treatment `../root/copyClass.ts`'s own `api.system` entry already established).
+`src/ifcopenshell-ts/src/api/material/setShapeAspectConstituents.ts` ports every other real
+behavior of this function correctly and independently (the material-set creation/reuse-check/
+removal surgery, and the aspect/style matching logic itself), and throws a clear, disclosed error
+ONLY at the exact point, and only for the exact item, where the real `assign_item_style` call
+would actually be needed -- never proactively before the loop even starts.
+
+This same file also discloses a real, verbatim-preserved upstream BUG, unrelated to the
+`api.style` gap: the "reuse an existing matching material constituent set" check reads
+`material.is_a("IfcMaterialConstituent")` (a SET-ITEM class, never assignable as a
+`RelatingMaterial`) where it should almost certainly read
+`material.is_a("IfcMaterialConstituentSet")` (the class `ifcopenshell.util.element.get_material`
+can actually return here). As written, this check is always `False`, so this function ALWAYS
+creates a brand new `IfcMaterialConstituentSet` from scratch on every call, even when called
+twice in a row with byte-for-byte identical `materials` -- it never reuses one. See
+`setShapeAspectConstituents.ts`'s own header comment for the full writeup (including why even a
+naive typo fix would immediately break on its own intended case, since the correct fix also needs
+`MaterialConstituents` read off the SET, not the single item the current, always-losing branch
+assumes).
+
+**Why (the `api.style` gap):** Same reasoning as every other genuinely-separate-future-module
+entry in this file (e.g. `api.system`, `api.feature`, `api.grid`, `api.boundary`) --
+`ifcopenshell.api.style` is a real, independent module (manages presentation
+styles/`IfcSurfaceStyle`/`IfcStyledItem` assignment) that belongs under its own future chunk's
+review scope, not squeezed into `api.material`'s.
+
+**Impact:** Calling `setShapeAspectConstituents` throws
+`"setShapeAspectConstituents: assigning item style for shape aspect '<name>' needs
+api.style.assignItemStyle, not ported yet -- see TODOS.md."` only when an item's own shape aspect
+name matches a `materials` key AND that material has a real style in `context` -- otherwise
+(including every case where `element` has no shape-aspect-tagged representation items at all)
+this function completes normally, with the material-set creation/removal surgery already having
+run to completion (matching real Python's own order-of-operations: the blocked call is the very
+last step). The disclosed reuse-bug means EVERY call (whether or not it hits the `api.style`
+throw) creates a brand new material constituent set, never reusing an existing matching one --
+pinned by a dedicated regression test in `setShapeAspectConstituents.test.ts`.
+
+**Fix:** Port `ifcopenshell.api.style` (at minimum `assign_item_style`) as its own future chunk,
+then wire the real call back into `setShapeAspectConstituents`'s own final loop. Separately (and
+independently of the `api.style` gap): decide whether to fix the disclosed
+`is_a("IfcMaterialConstituent")`/`"IfcMaterialConstituentSet"` typo to match upstream once
+upstream itself fixes it (or leave it as a deliberately-verbatim port of a real, currently-shipped
+Python bug) -- see this file's own general policy of preserving real quirks/bugs verbatim rather
+than silently "fixing" behavior upstream itself hasn't changed.
+
+**Context:** Surfaced during the `api.material` chunk 4 (same chunk as the `editProfileUsage`
+entry immediately above, completing `api.material` at 26/26 files, 2026-09-15), verified directly
+against the real 115-line `set_shape_aspect_constituents.py` source.
+
+**Depends on / blocked by:** `ifcopenshell.api.style` (not yet started, no TS port of any kind).

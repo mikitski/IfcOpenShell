@@ -6,19 +6,38 @@
 // `assign_material`/`unassign_material`/`copy_material`. Chunk 2 ported 8 more:
 // `add_material`/`add_material_set`/`add_layer`/`add_profile`/`add_constituent`/
 // `add_list_item`/`edit_material`/`edit_assigned_material` (11 of 26 files total after
-// chunk 2). THIS chunk (chunk 3) ports the entire `remove_*` family, 6 more files:
+// chunk 2). Chunk 3 ported the entire `remove_*` family, 6 more files:
 // `remove_material`/`remove_material_set`/`remove_layer`/`remove_profile`/
-// `remove_constituent`/`remove_list_item` (17 of 26 files total so far). Deliberately
-// NOT ported in this chunk: `assign_profile`/every remaining `edit_*`
-// (`edit_constituent`/`edit_layer`/`edit_layer_usage`/`edit_profile`/
-// `edit_profile_usage`)/`reorder_set_item`/`set_shape_aspect_constituents` -- all
-// separate, future `api.material` chunks. Of this chunk's own 6 files, only
-// `remove_material_set` has a genuine sibling `api.material` call (`unassign_material`,
-// already landed in chunk 1) -- read in full and wired up directly, no blocker; the
-// other 5 files' own docstring examples reference `add_layer`/`add_profile`/
-// `add_constituent`/`add_list_item`/`edit_layer`, but those are documentation only, not
-// real code inside the `remove_*` functions themselves. So no `TODOS.md` entry or
-// loud-throw blocker was needed for this chunk either.
+// `remove_constituent`/`remove_list_item` (17 of 26 files total after chunk 3). THIS
+// chunk (chunk 4, the last) ports the final 8 files, COMPLETING the module (26/26
+// files): `edit_layer`/`edit_constituent`/`reorder_set_item`/`edit_layer_usage`/
+// `edit_profile`/`set_shape_aspect_constituents`/`assign_profile`/`edit_profile_usage`
+// (the last being by far this chunk's largest and most complex file, 223 real lines).
+//
+// Every sibling `api.material` dependency this chunk's own 8 files need
+// (`unassign_material`/`remove_material_set`/`add_material_set`/`add_constituent`/
+// `assign_material`, all needed by `set_shape_aspect_constituents` alone) was already
+// landed in an earlier chunk of this SAME module -- no cross-chunk ordering blocker.
+// Two genuinely unported, OUTSIDE-`api.material` dependencies remain, each disclosed in
+// its own file's header comment and a dedicated `TODOS.md` entry, and each throws a
+// clear, loud, descriptive error only at the exact point it would actually be needed
+// (never proactively, never before every otherwise-portable real behavior has run to
+// completion): `edit_profile_usage.ts`'s `CardinalPoint`-change branch needs
+// `ifcopenshell.geom`/`util.shape.getX`/`getY` (the same pre-existing geometry-kernel
+// gap this project's very first `TODOS.md` entry already tracks); `set_shape_aspect
+// _constituents.ts`'s final style-assignment loop needs `ifcopenshell.api.style
+// .assign_item_style` (`api.style` has NO TS port of any kind -- a brand-new blocked
+// module for this project, same treatment as `api.system`'s own entry for
+// `../root/copyClass.ts`). `set_shape_aspect_constituents.ts` also discloses a real,
+// verbatim-preserved upstream BUG (an `is_a("IfcMaterialConstituent")` check that
+// should almost certainly read `"IfcMaterialConstituentSet"`, permanently disabling an
+// intended "reuse an existing matching material set" optimisation) -- see that file's
+// own header comment for the full writeup.
+//
+// `api.material` is now FULLY PORTED (26/26 files) -- every future `api.*` chunk that
+// cited a real, disclosed `api.material` blocker (several already resolved
+// retroactively across chunks 1-3, see those chunks' own header comments) can treat
+// every function in this module as landed and reviewed.
 //
 // --- Why chunk 1 was prioritized (retained from that chunk's own header comment) ---
 //
@@ -64,14 +83,26 @@ export { addProfile } from "./addProfile";
 export type { AddProfileSettings } from "./addProfile";
 export { assignMaterial } from "./assignMaterial";
 export type { AssignMaterialSettings } from "./assignMaterial";
+export { assignProfile } from "./assignProfile";
+export type { AssignProfileSettings } from "./assignProfile";
 export { unassignMaterial } from "./unassignMaterial";
 export type { UnassignMaterialSettings } from "./unassignMaterial";
 export { copyMaterial } from "./copyMaterial";
 export type { CopyMaterialSettings } from "./copyMaterial";
 export { editAssignedMaterial } from "./editAssignedMaterial";
 export type { EditAssignedMaterialSettings } from "./editAssignedMaterial";
+export { editConstituent } from "./editConstituent";
+export type { EditConstituentSettings } from "./editConstituent";
+export { editLayer } from "./editLayer";
+export type { EditLayerSettings } from "./editLayer";
+export { editLayerUsage } from "./editLayerUsage";
+export type { EditLayerUsageSettings } from "./editLayerUsage";
 export { editMaterial } from "./editMaterial";
 export type { EditMaterialSettings } from "./editMaterial";
+export { editProfile } from "./editProfile";
+export type { EditProfileSettings } from "./editProfile";
+export { editProfileUsage } from "./editProfileUsage";
+export type { EditProfileUsageSettings } from "./editProfileUsage";
 export { removeConstituent } from "./removeConstituent";
 export type { RemoveConstituentSettings } from "./removeConstituent";
 export { removeLayer } from "./removeLayer";
@@ -84,3 +115,7 @@ export { removeMaterialSet } from "./removeMaterialSet";
 export type { RemoveMaterialSetSettings } from "./removeMaterialSet";
 export { removeProfile } from "./removeProfile";
 export type { RemoveProfileSettings } from "./removeProfile";
+export { reorderSetItem } from "./reorderSetItem";
+export type { ReorderSetItemSettings } from "./reorderSetItem";
+export { setShapeAspectConstituents } from "./setShapeAspectConstituents";
+export type { SetShapeAspectConstituentsSettings } from "./setShapeAspectConstituents";
