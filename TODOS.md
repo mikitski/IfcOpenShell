@@ -1807,6 +1807,47 @@ entry already tracks).
 
 ---
 
+### `api.material` `editLayer`/`editLayerUsage`/`reorderSetItem` tests crash on IFC2X3 by calling `addMaterial` with `category` -- a third `SCHEMA_VERSIONS=4`-only silent-skip casualty
+
+**What:** `test/api/material/editLayer.test.ts`/`editLayerUsage.test.ts`/`reorderSetItem.test.ts`
+(already-landed, PR #97) use `describe.each(AVAILABLE_SCHEMAS)` with no IFC2X3 filter, and their
+fixture setup calls `addMaterial(file, { name: ..., category: "..." })` -- e.g.
+`addMaterial(file, { name: "PB01", category: "gypsum" })`. `addMaterial.ts`'s own header comment
+(and its own IFC2X3-vs-IFC4+ disclosure) already documents that providing a truthy `category` on
+an IFC2X3 file throws a native "no such attribute" error, since `IfcMaterial` has no `Category`
+attribute at all on that schema. None of these three test files ever asserts on the material's
+`Category` value -- it's purely decorative fixture data copied from the real Python docstring
+examples -- so every one of these `addMaterial` calls genuinely crashes on IFC2X3 for no test-
+relevant reason, not a flake.
+
+**Why this was invisible until now:** Same root cause as this file's own `"api.unit.
+addMonetaryUnit/editMonetaryUnit"` entry immediately above: `ci-ifcopenshell-ts.yml` builds the
+C++ core with `-DSCHEMA_VERSIONS=4` (IFC4-only), so `AVAILABLE_SCHEMAS` silently filters IFC2X3 out
+of every `describe.each(AVAILABLE_SCHEMAS)` suite in real CI today. Found only because the
+`api.style` chunk 1 PR (#98) happened to run the full pre-existing suite against a locally-built
+all-3-schemas native addon rather than CI's own IFC4-only one.
+
+**Impact:** `editLayer.test.ts` (4 cases), `editLayerUsage.test.ts` (1 case), and
+`reorderSetItem.test.ts` (2 of its cases -- the ones using named materials rather than the
+bare-`name`-only fixture already present later in that same file) all throw when run against
+IFC2X3 -- confirmed by grep, not yet re-run against a multi-schema addon by this session (no local
+toolchain available to verify a fix here directly).
+
+**Fix:** Drop the unused `category` (and, if present, `description`) argument from each offending
+`addMaterial(...)` fixture call in these three test files -- `addMaterial(file, { name: "PB01" })`
+is sufficient, matching `reorderSetItem.test.ts`'s own later, already-IFC2X3-safe fixture calls in
+the same file (e.g. `addMaterial(file, { name: "AL01" })`).
+
+**Context:** Found incidentally while independently reviewing PR #98 (`api.style` chunk 1) and
+re-checking its own claim of "newly surfaced" pre-existing IFC2X3 failures against the exact
+already-merged `api.material` chunk 4 files this session had personally reviewed for PR #97,
+2026-09-15.
+
+**Depends on / blocked by:** None -- trivial, standalone fix whenever someone has a multi-schema
+addon to verify against.
+
+---
+
 ### `api.pset.addPset`'s IFC2X3 material-properties dedup scan would crash on a malformed file with an unset `Material`
 
 **What:** `src/ifcopenshell-ts/src/api/pset/addPset.ts`'s `IfcMaterialDefinition`/`IfcMaterial`
