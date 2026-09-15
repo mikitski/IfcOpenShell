@@ -3,22 +3,22 @@
 // Barrel for `ifcopenshell.api.material` (src/ifcopenshell-python's `ifcopenshell/api/
 // material/` package, 26 real files, ~2585 lines total) -- a brand-new, large module,
 // split across several chunks like `api.owner`/`api.pset` before it. Chunk 1 ported
-// `assign_material`/`unassign_material`/`copy_material` (see each file's own header
-// comment for its full scope and disclosed quirks). THIS chunk (chunk 2) additionally
-// ports 8 more of those 26 files: `add_material`/`add_material_set`/`add_layer`/
-// `add_profile`/`add_constituent`/`add_list_item`/`edit_material`/
-// `edit_assigned_material` (11 of 26 files total so far). Deliberately NOT ported in
-// this chunk: `assign_profile`/every remaining `edit_*` (`edit_constituent`/
-// `edit_layer`/`edit_layer_usage`/`edit_profile`/`edit_profile_usage`)/every
-// `remove_*` (`remove_constituent`/`remove_layer`/`remove_list_item`/
-// `remove_material`/`remove_material_set`/`remove_profile`)/`reorder_set_item`/
-// `set_shape_aspect_constituents` -- all separate, future `api.material` chunks. None
-// of this chunk's own 8 files has a genuine blocked sibling-call dependency: each was
-// read in full first, and none calls another `ifcopenshell.api.material.*` function
-// from its own body (the shared docstring examples across several of these files
-// reference `add_layer`/`edit_layer`/`assign_material`, but those are documentation
-// only, not real code) -- so no `TODOS.md` entry or loud-throw blocker was needed for
-// this chunk.
+// `assign_material`/`unassign_material`/`copy_material`. Chunk 2 ported 8 more:
+// `add_material`/`add_material_set`/`add_layer`/`add_profile`/`add_constituent`/
+// `add_list_item`/`edit_material`/`edit_assigned_material` (11 of 26 files total after
+// chunk 2). THIS chunk (chunk 3) ports the entire `remove_*` family, 6 more files:
+// `remove_material`/`remove_material_set`/`remove_layer`/`remove_profile`/
+// `remove_constituent`/`remove_list_item` (17 of 26 files total so far). Deliberately
+// NOT ported in this chunk: `assign_profile`/every remaining `edit_*`
+// (`edit_constituent`/`edit_layer`/`edit_layer_usage`/`edit_profile`/
+// `edit_profile_usage`)/`reorder_set_item`/`set_shape_aspect_constituents` -- all
+// separate, future `api.material` chunks. Of this chunk's own 6 files, only
+// `remove_material_set` has a genuine sibling `api.material` call (`unassign_material`,
+// already landed in chunk 1) -- read in full and wired up directly, no blocker; the
+// other 5 files' own docstring examples reference `add_layer`/`add_profile`/
+// `add_constituent`/`add_list_item`/`edit_layer`, but those are documentation only, not
+// real code inside the `remove_*` functions themselves. So no `TODOS.md` entry or
+// loud-throw blocker was needed for this chunk either.
 //
 // --- Why chunk 1 was prioritized (retained from that chunk's own header comment) ---
 //
@@ -72,3 +72,15 @@ export { editAssignedMaterial } from "./editAssignedMaterial";
 export type { EditAssignedMaterialSettings } from "./editAssignedMaterial";
 export { editMaterial } from "./editMaterial";
 export type { EditMaterialSettings } from "./editMaterial";
+export { removeConstituent } from "./removeConstituent";
+export type { RemoveConstituentSettings } from "./removeConstituent";
+export { removeLayer } from "./removeLayer";
+export type { RemoveLayerSettings } from "./removeLayer";
+export { removeListItem } from "./removeListItem";
+export type { RemoveListItemSettings } from "./removeListItem";
+export { removeMaterial } from "./removeMaterial";
+export type { RemoveMaterialSettings } from "./removeMaterial";
+export { removeMaterialSet } from "./removeMaterialSet";
+export type { RemoveMaterialSetSettings } from "./removeMaterialSet";
+export { removeProfile } from "./removeProfile";
+export type { RemoveProfileSettings } from "./removeProfile";
