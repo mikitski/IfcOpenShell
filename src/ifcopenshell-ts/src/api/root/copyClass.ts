@@ -26,10 +26,13 @@
 // deliberate MUTATE-the-original-relationship-in-place quirk for a list attribute,
 // vs. duplicate-the-relationship-entity for a single-valued one -- see below).
 //
-// --- One remaining genuinely blocked call site -- disclosed via a loud throw, thrown
-// BEFORE any mutation for that specific relationship, per this project's established
-// discipline (see `../root/removeProduct.ts`'s own header comment and `../type
-// /mapTypeRepresentations.ts`'s "throw before mutating" precedent) ---
+// --- One remaining genuinely blocked call site -- NARROWED (not fully resolved) once
+// `api.system` landed -- disclosed via a loud throw, thrown at the exact point real
+// Python would reach the blocked call, after every mutation real Python would already
+// have made by then, per this project's established discipline (see `../root
+// /removeProduct.ts`'s own header comment and `../type/mapTypeRepresentations.ts`'s
+// "throw before mutating" precedent, applied here as "throw exactly where blocked,
+// not proactively before real work that doesn't actually need the blocked call") ---
 //
 // **Distribution ports** (`IfcRelNests`/`IfcRelConnectsPortToElement`, IFC2X3's own
 // name for the same concept): real Python recursively `copy_class`-es every nested
@@ -39,16 +42,21 @@
 // the recursive `copy_class` call's own generic-fallback branch) and
 // `ifcopenshell.api.geometry.edit_object_placement` (resetting the copied port's own
 // placement to the SAME absolute matrix the original port had, since the new nest
-// puts it under a different `PlacementRelTo` parent). `ifcopenshell.api.system` has NO
-// TS port of any kind (confirmed by directory listing -- entirely untouched, a
-// brand-new blocked module for this project); `api.geometry.editObjectPlacement`
-// is the SAME pre-existing blocker `TODOS.md` already tracks (`api.spatial
-// .assignContainer`/`api.aggregate.assignObject`'s own entry). Since BOTH would be
-// needed the moment `product` genuinely has at least one nested port, this throws
-// right there -- before recursively copying any port, before creating the new nest
-// relationship -- rather than partially duplicating ports into orphaned, disconnected,
-// mis-placed entities with no way to finish the job. A product with no ports is
-// entirely unaffected.
+// puts it under a different `PlacementRelTo` parent).
+//
+// `ifcopenshell.api.system` landed for real (Phase 6, `api.system` chunk) -- this now
+// calls the real `unassignPort`/`disconnectPort` directly, exactly matching real
+// Python's own per-port loop. `api.geometry.editObjectPlacement` is still the SAME
+// pre-existing blocker `TODOS.md` already tracks (`api.spatial.assignContainer`/
+// `api.aggregate.assignObject`'s own entry), and real Python's own `copy_class` calls
+// it UNCONDITIONALLY for every copied port (unlike `api.system.assignPort`'s own
+// placement-guarded call site) -- so this still throws, but now only at the exact
+// point `editObjectPlacement` would actually be called, for the first port that
+// reaches it, AFTER the recursive port copy, the new nest/connection relationship,
+// and that port's own `unassignPort`/`disconnectPort` cleanup have already run --
+// matching real Python's own exact order of operations up to the point it would also
+// have called the same blocked function. A product with no nested ports is entirely
+// unaffected.
 //
 // --- RESOLVED: `IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
 // material associations, previously blocked, now call the real `api.material.copyMaterial` ---
@@ -68,10 +76,14 @@
 //
 // `ifcopenshell.api.root` (self-recursion, both already-landed `createEntity`/
 // `removeProduct` neighbours plus this function calling itself for ports/openings),
-// `ifcopenshell.util.element`/`ifcopenshell.util.placement` are all either already
-// landed (`copy`/`copyDeep`) or, for `util.placement`, not even actually needed here --
-// this port never reaches `util.placement.get_local_placement`'s own real Python call
-// site (the ports branch, itself entirely blocked, see (1) above) so it's not imported.
+// `ifcopenshell.util.element` (`copy`/`copyDeep`), and, now that `api.system` has
+// landed, `ifcopenshell.api.system.unassignPort`/`.disconnectPort` (the ports branch's
+// own real cleanup calls, see above) are all already landed. `ifcopenshell.util.placement
+// .get_local_placement` is the one real Python call this port still never reaches --
+// it's only ever consumed by the still-blocked `edit_object_placement` call
+// immediately after it (the ports branch, see above), so it's not imported here
+// either; computing it for disclosure-only fidelity with no consumer would just be an
+// unused local.
 //
 // --- Self-recursion, matching `../root/removeProduct.ts`'s own established pattern ---
 //
@@ -90,6 +102,8 @@ import type { IfcFile } from "../../file";
 import * as elementUtil from "../../util/element";
 import { wrapUsecase } from "../hooks";
 import { copyMaterial } from "../material/copyMaterial";
+import { disconnectPort } from "../system/disconnectPort";
+import { unassignPort } from "../system/unassignPort";
 
 export interface CopyClassSettings {
 	/** The `IfcProduct`/`IfcTypeProduct` to copy. */
@@ -172,13 +186,62 @@ function copyIndirectAttributes(file: IfcFile, fromElement: EntityInstance, toEl
 				: [inverse.get("RelatingPort") as EntityInstance];
 			if (ports.length === 0) continue;
 
-			// See this file's own header comment ("(1) Distribution ports") -- `api.system`
-			// has no TS port of any kind, and `api.geometry.editObjectPlacement` is the same
-			// pre-existing blocker `TODOS.md` already tracks. Thrown before recursively
-			// copying any port.
-			throw new Error(
-				`copyClass: copying ${fromElement.isA()}#${fromElement.id()}'s ${ports.length} nested distribution port(s) needs api.system.unassignPort/.disconnectPort and api.geometry.editObjectPlacement, none ported yet -- see TODOS.md.`,
-			);
+			// Real Python: `new_ports = [ifcopenshell.api.root.copy_class(self.file,
+			// product=p) for p in ports]` -- recurses through THIS SAME wrapped `copyClass`
+			// export (see this file's own header comment, "Self-recursion"), using the
+			// STILL-ORIGINAL `inverse` (not yet reassigned to a copy below). Each recursive
+			// call's own `copyIndirectAttributes` walks `p`'s own inverses, which includes
+			// this SAME original `inverse` -- since `p` sits inside `inverse`'s own
+			// list-valued `RelatedObjects` (IFC4+) or is itself `inverse`'s single-valued
+			// `RelatingPort` (IFC2X3), the recursive call's own generic-fallback branch
+			// (see this file's own header comment) either MUTATES this exact `inverse` in
+			// place (IFC4+: silently appending the new port copy into `fromElement`'s own
+			// nest rel) or creates an independent duplicate of it (IFC2X3: a second
+			// `IfcRelConnectsPortToElement` also pointing at `fromElement`) -- both real,
+			// deliberate quirks (not bugs), exactly why the `unassignPort` cleanup below is
+			// needed immediately after, matching real Python's own next step exactly.
+			const newPorts = ports.map((port) => copyClass(file, { product: port }));
+
+			inverse = elementUtil.copy(file, inverse);
+			if (inverse.isA("IfcRelNests")) {
+				inverse.set("RelatingObject", toElement);
+				inverse.set("RelatedObjects", newPorts);
+			} else {
+				inverse.set("RelatedElement", toElement);
+				inverse.set("RelatingPort", newPorts[0]);
+			}
+
+			for (const newPort of newPorts) {
+				// Undoes the recursive-copy side effect disclosed above: strips `newPort`
+				// back out of whatever spurious `fromElement`-referencing rel the recursive
+				// `copyClass(port)` call's own generic fallback just created/mutated (a
+				// duplicate `IfcRelConnectsPortToElement` on IFC2X3, or `fromElement`'s own
+				// original nest rel's `RelatedObjects` on IFC4+) -- `unassignPort` already
+				// dispatches on schema internally, matching real Python's own single,
+				// schema-agnostic call site here.
+				unassignPort(file, { element: fromElement, port: newPort });
+				// Severs any port-to-port `IfcRelConnectsPorts` connection the recursive
+				// `copyClass(port)` call's own generic fallback branch (single-valued
+				// `RelatingPort`/`RelatedPort` match) carried over onto `newPort` -- a
+				// copied port must not silently inherit the original's own connections.
+				disconnectPort(file, { port: newPort });
+
+				// See this file's own header comment ("Distribution ports", NARROWED as of
+				// `api.system` landing) -- `api.geometry.editObjectPlacement` is the one
+				// remaining blocker (real Python: `matrix = util.placement.
+				// get_local_placement(port.ObjectPlacement); edit_object_placement(...)`,
+				// called UNCONDITIONALLY here, unlike `assignPort.ts`'s own placement-guarded
+				// call site). Thrown for the FIRST port that reaches this point -- this
+				// port's own `unassignPort`/`disconnectPort` cleanup above has already run,
+				// matching real Python's own per-port loop order exactly; any LATER port in
+				// `newPorts` is never reached, matching what real Python's own loop would
+				// also not have reached had it hit this same exception here.
+				throw new Error(
+					`copyClass: re-localizing ${newPort.isA()}#${newPort.id()}'s placement (copied from ${fromElement.isA()}#${fromElement.id()}'s nested port) needs api.geometry.editObjectPlacement, not ported yet -- see TODOS.md.`,
+				);
+			}
+
+			continue;
 		}
 
 		if (
@@ -312,7 +375,8 @@ function copyClassUsecase(file: IfcFile, settings: CopyClassSettings): EntityIns
  * - The copy will have duplicated property sets, properties, and quantities.
  * - The copy will have all nested distribution ports copied too -- **except this
  *   throws today, see this file's own header comment and `TODOS.md`: needs
- *   `api.system.unassignPort`/`.disconnectPort`, neither ported yet**.
+ *   `api.geometry.editObjectPlacement` (not yet ported) to re-localize each copied
+ *   port's placement**.
  * - The copy will be part of the same aggregate.
  * - The copy will be contained in the same spatial structure.
  * - The copy, if it is an occurrence, will have the same type.

@@ -1368,6 +1368,32 @@ disclosed-throw pin, now citing only `editObjectPlacement`. This entry's OWN top
 `edit_object_placement` gap (the `assignContainer`/`assignObject` placement-relocalization
 step) is UNCHANGED -- still fully blocked, unrelated call sites.
 
+**UPDATE 2026-09-15 (`api.system` chunk, all 12 files, completing that module):** Two
+more independent blocked call sites on the same unported `edit_object_placement`,
+surfaced porting a brand-new module:
+1. `ifcopenshell.api.system.assign_port`'s own `update_port_placement` step, reached
+   ONLY when the port being (re)assigned already has an `IfcLocalPlacement` (a bare
+   port fresh out of `root.createEntity`/`system.addPort` never does, so this is
+   unreached for the common case -- confirmed against `test_assigning_a_port_once_only`,
+   which never hits it). `src/ifcopenshell-ts/src/api/system/assignPort.ts` performs the
+   entire rest of `assign_port` (finding/reusing an existing `IfcRelNests`/
+   `IfcRelConnectsPortToElement`, or creating a brand-new one) exactly as real Python
+   does -- both BEFORE it would even check the port's placement -- then throws only if
+   `port.ObjectPlacement` is set and `is_a("IfcLocalPlacement")`, the one condition real
+   Python's own guard requires before it would reach `edit_object_placement` itself.
+   Real Python's own `test_updating_the_placement_to_be_relative_if_it_exists` needs
+   `edit_object_placement` both to build its own fixture (an already-placed port) AND
+   to exercise the assertion -- pinned instead as a dedicated disclosed-throw
+   regression test in `assignPort.test.ts`.
+2. `ifcopenshell.api.root.copy_class`'s own ports-copying branch -- see the
+   `api.root.copyClass` entry above (cross-referenced there in full, not duplicated
+   here) -- calls `edit_object_placement` UNCONDITIONALLY for every copied port,
+   unlike `assign_port`'s own placement-guarded call site above.
+
+Both are pinned by dedicated regression tests, not silently dropped. Neither changes
+this entry's own top-level `assignContainer`/`assignObject` gap, which remains
+unrelated and fully blocked.
+
 ---
 
 ### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet) -- **RESOLVED 2026-09-14, see UPDATE below**
@@ -1485,7 +1511,7 @@ unrelated and remains fully open regardless.
 
 ---
 
-### `api.root.copyClass` skips distribution-port copying (`api.system` unported -- has no TS port of any kind yet)
+### `api.root.copyClass` skips distribution-port copying (`api.system` unported -- has no TS port of any kind yet) -- **NARROWED 2026-09-15, see UPDATE below: `api.system` half RESOLVED, still blocked on `api.geometry.editObjectPlacement`**
 
 **What:** Real Python's `ifcopenshell.api.root.copy_class`, when the product being copied has
 at least one nested `IfcDistributionPort` (via `IfcRelNests` in IFC4+, `IfcRelConnectsPortToElement`
@@ -1533,6 +1559,38 @@ directly against the real 193-line `copy_class.py` source.
 
 **Depends on / blocked by:** `ifcopenshell.api.system` (Phase 6, not yet started),
 `ifcopenshell.api.geometry.editObjectPlacement` (this file's own first entry, above).
+
+**UPDATE 2026-09-15 (`api.system` chunk, all 12 files, completing that module):**
+`ifcopenshell.api.system` is no longer unstarted -- `unassign_port`/`disconnect_port`
+(and every other function in the module) landed for real. `copyClass.ts`'s ports
+branch (`src/ifcopenshell-ts/src/api/root/copyClass.ts`) now performs the ENTIRE real
+sequence real Python does for every nested port: the recursive `copyClass` call, the
+new `IfcRelNests`/`IfcRelConnectsPortToElement` relationship pointing at the copies,
+and -- for each new port -- the real `unassignPort`/`disconnectPort` calls (undoing
+the recursive copy's own generic-fallback side effects, exactly matching real Python's
+own next step). This is a genuine NARROWING, not a full resolution: real Python's own
+`copy_class` calls `ifcopenshell.api.geometry.edit_object_placement` UNCONDITIONALLY
+for every copied port immediately after `unassign_port`/`disconnect_port` (unlike
+`api.system.assignPort`'s own placement-GUARDED call site, which only reaches
+`edit_object_placement` when the port already has an `IfcLocalPlacement` -- see the
+`api.system` entry below) -- `editObjectPlacement` remains this file's own first entry,
+fully unported, so `copyClass` still throws, now only at that exact remaining point
+(after `unassignPort`/`disconnectPort` have already run for the port being processed,
+matching this file's own "throw only where blocked, after every mutation real Python
+would already have made" discipline). The error message now cites only
+`api.geometry.editObjectPlacement` (`"copyClass: re-localizing <Class>#<id>'s
+placement ... needs api.geometry.editObjectPlacement, not ported yet -- see
+TODOS.md."`), not `api.system.unassignPort`/`.disconnectPort` (both now real).
+`copyClass.test.ts`'s own disclosed-throw regression test is updated to build its
+fixture with the real `api.system.addPort`/`.connectPort` (no longer substituted) and
+asserts the real partial-mutation state up to the throw point (the port WAS
+recursively copied, the original element's own ports are unaffected by the recursive
+copy's side effect, and the new port is disconnected from whatever the original was
+connected to) -- not just a bare "it throws". Real Python's own
+`test_copying_distribution_ports` assertions past that point (the new port's placement
+matching the original's absolute matrix) remain unported, still blocked on
+`editObjectPlacement` exactly like every other call site tracked by this file's own
+first entry.
 
 ---
 
