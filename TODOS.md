@@ -765,6 +765,30 @@ creation test case ported from real Python's `test_edit_pset.py` (matching
 real, unblocked assertion to restore once this gap closes. See `src/api/pset/editPset.ts`'s own
 header comment (top section) for the full writeup.
 
+**UPDATE 2026-09-15 (`api.style` chunk 2, `edit_surface_style` file):** found a fifth, independent
+consequence -- `ifcopenshell.api.style.edit_surface_style`'s own two special-cased attribute-class
+handlers each need a standalone typed value at one exact point: `edit_colour_or_factor`'s "set to a
+numeric factor" branch needs a real, addressable `IfcNormalisedRatioMeasure(value)` (so it can later
+be `file.remove()`d if reassigned again -- the entire reason real Python explicitly creates it rather
+than assigning the raw scalar directly); `edit_specular_highlight`'s two branches each need a
+standalone `IfcSpecularExponent(value)`/`IfcSpecularRoughness(value)`. Confirmed empirically against
+this exact worktree's own built native addon (`file.createEntity("IfcLabel", "hello")` and even a
+zero-arg `file.createEntity("IfcNormalisedRatioMeasure")` followed by `.setByIndex(0, 0.5)` both hit
+the identical `attribute_kind_of`/"Attribute access is only supported on entity instances" throw this
+entry already documents -- and the zero-arg instance itself gets `id() === 0`, so there is no way to
+even obtain a real, addressable id for such a value without this gap being fixed first, regardless of
+how its value gets written). Ported `edit_surface_style.ts`'s own `editColourRgb`/dict-shaped
+`editColourOrFactor`/`SpecularHighlight`-`null`-clearing branches completely and faithfully (none of
+them need a standalone typed-value creation, all unaffected); the numeric-factor `editColourOrFactor`
+branch still runs its own real, portable "remove the old real-id value first" step to completion
+before throwing (matching real Python's own order of operations: the blocked create-and-assign step
+is the very last thing that branch does), and `editSpecularHighlight`'s two blocked branches throw
+immediately (no prior mutation exists in real Python for that function to preserve first).
+`test/api/style/editSurfaceStyle.test.ts` pins the CURRENT, disclosed, blocked behavior for these
+exact scenarios (matching `editPset.test.ts`'s own established precedent), each with a comment
+recording the real, unblocked assertion to restore once this gap closes. See
+`src/api/style/editSurfaceStyle.ts`'s own header comment for the full writeup.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
@@ -1989,7 +2013,15 @@ two entries (not yet scheduled/started).
 
 ---
 
-### `api.material.setShapeAspectConstituents` needs `ifcopenshell.api.style.assign_item_style` (`api.style` has no TS port of any kind yet) -- also discloses a real upstream bug
+### RESOLVED -- `api.material.setShapeAspectConstituents` needed `ifcopenshell.api.style.assign_item_style` -- also discloses a real upstream bug (bug itself still open)
+
+**Status: RESOLVED (`api.style` chunk 2, 2026-09-15).** `ifcopenshell.api.style.assign_item_style`
+is now ported (`src/ifcopenshell-ts/src/api/style/assignItemStyle.ts`), and
+`setShapeAspectConstituents.ts`'s own final loop now calls the real, landed `assignItemStyle`
+instead of throwing the disclosed blocked error described below. The regression test that used to
+pin the throw (`setShapeAspectConstituents.test.ts`) now asserts the real resulting
+`IfcStyledItem`/`Styles` instead. The rest of this entry (kept for history) describes the
+now-resolved blocker and the SEPARATE, STILL-OPEN upstream bug it was written alongside.
 
 **What:** Real Python's `ifcopenshell.api.material.set_shape_aspect_constituents` ends with a
 loop over an element's own representation items: for each item with a matching named shape
@@ -2005,7 +2037,8 @@ ONLY at the exact point, and only for the exact item, where the real `assign_ite
 would actually be needed -- never proactively before the loop even starts.
 
 This same file also discloses a real, verbatim-preserved upstream BUG, unrelated to the
-`api.style` gap: the "reuse an existing matching material constituent set" check reads
+`api.style` gap (this part is STILL OPEN -- not affected by the resolution above): the "reuse an
+existing matching material constituent set" check reads
 `material.is_a("IfcMaterialConstituent")` (a SET-ITEM class, never assignable as a
 `RelatingMaterial`) where it should almost certainly read
 `material.is_a("IfcMaterialConstituentSet")` (the class `ifcopenshell.util.element.get_material`
@@ -2017,26 +2050,27 @@ naive typo fix would immediately break on its own intended case, since the corre
 `MaterialConstituents` read off the SET, not the single item the current, always-losing branch
 assumes).
 
-**Why (the `api.style` gap):** Same reasoning as every other genuinely-separate-future-module
-entry in this file (e.g. `api.system`, `api.feature`, `api.grid`, `api.boundary`) --
-`ifcopenshell.api.style` is a real, independent module (manages presentation
-styles/`IfcSurfaceStyle`/`IfcStyledItem` assignment) that belongs under its own future chunk's
-review scope, not squeezed into `api.material`'s.
+**Why (the `api.style` gap, now resolved):** Same reasoning as every other genuinely-separate-
+future-module entry in this file (e.g. `api.system`, `api.feature`, `api.grid`, `api.boundary`) --
+`ifcopenshell.api.style` was a real, independent module (manages presentation
+styles/`IfcSurfaceStyle`/`IfcStyledItem` assignment) that belonged under its own future chunk's
+review scope, not squeezed into `api.material`'s -- and has since landed in full (13/13 files,
+`api.style` chunks 1 and 2).
 
-**Impact:** Calling `setShapeAspectConstituents` throws
+**Impact (historical, before the fix above):** Calling `setShapeAspectConstituents` used to throw
 `"setShapeAspectConstituents: assigning item style for shape aspect '<name>' needs
 api.style.assignItemStyle, not ported yet -- see TODOS.md."` only when an item's own shape aspect
-name matches a `materials` key AND that material has a real style in `context` -- otherwise
+name matched a `materials` key AND that material had a real style in `context` -- otherwise
 (including every case where `element` has no shape-aspect-tagged representation items at all)
-this function completes normally, with the material-set creation/removal surgery already having
-run to completion (matching real Python's own order-of-operations: the blocked call is the very
-last step). The disclosed reuse-bug means EVERY call (whether or not it hits the `api.style`
-throw) creates a brand new material constituent set, never reusing an existing matching one --
-pinned by a dedicated regression test in `setShapeAspectConstituents.test.ts`.
+this function completed normally, with the material-set creation/removal surgery already having
+run to completion. The disclosed reuse-bug (still open) means EVERY call still creates a brand new
+material constituent set, never reusing an existing matching one -- pinned by a dedicated
+regression test in `setShapeAspectConstituents.test.ts`.
 
-**Fix:** Port `ifcopenshell.api.style` (at minimum `assign_item_style`) as its own future chunk,
-then wire the real call back into `setShapeAspectConstituents`'s own final loop. Separately (and
-independently of the `api.style` gap): decide whether to fix the disclosed
+**Fix:** ~~Port `ifcopenshell.api.style` (at minimum `assign_item_style`) as its own future chunk,
+then wire the real call back into `setShapeAspectConstituents`'s own final loop.~~ Done (`api.style`
+chunk 2, 2026-09-15). Separately (and independently of the now-resolved `api.style` gap, STILL
+OPEN): decide whether to fix the disclosed
 `is_a("IfcMaterialConstituent")`/`"IfcMaterialConstituentSet"` typo to match upstream once
 upstream itself fixes it (or leave it as a deliberately-verbatim port of a real, currently-shipped
 Python bug) -- see this file's own general policy of preserving real quirks/bugs verbatim rather
@@ -2044,11 +2078,26 @@ than silently "fixing" behavior upstream itself hasn't changed.
 
 **Context:** Surfaced during the `api.material` chunk 4 (same chunk as the `editProfileUsage`
 entry immediately above, completing `api.material` at 26/26 files, 2026-09-15), verified directly
-against the real 115-line `set_shape_aspect_constituents.py` source.
+against the real 115-line `set_shape_aspect_constituents.py` source. Resolved during the
+`api.style` chunk 2 (completing `api.style` at 13/13 files, 2026-09-15).
 
-**Depends on / blocked by:** `ifcopenshell.api.style` (not yet started, no TS port of any kind).
+**Depends on / blocked by:** Nothing -- resolved. The separate reuse-check bug above has no
+dependency either; it's a deliberate verbatim-preservation decision, not a blocker.
 
-### `api.style.unassignMaterialStyle` needs `ifcopenshell.util.element.get_shape_aspects` (not yet ported)
+### `api.style.unassignMaterialStyle`/`assignMaterialStyle` need `ifcopenshell.util.element.get_shape_aspects` (not yet ported)
+
+**UPDATE (`api.style` chunk 2, 2026-09-15):** `assignMaterialStyle.ts` (the newly-landed inverse
+of `unassignMaterialStyle.ts`, both described below) hits this EXACT SAME blocked dependency in its
+own symmetric "handle material constituents and shape aspects" tail (`ifcopenshell.util.element
+.get_shape_aspects`, called from `assign_material_style.py` immediately after
+`get_elements_by_material`, exactly like the unassign side). `assignMaterialStyle.ts` throws its
+own, differently-worded (but equally disclosed, equally non-proactive) error at the same kind of
+point: `"assignMaterialStyle: matching material constituents to shape aspects for element #<id>
+needs util.element.getShapeAspects, not ported yet -- see TODOS.md."`, gated by the exact same
+conditions (a named material constituent AND at least one real element using the material) -- with
+`assignMaterialStyle`'s own PRIMARY behavior (creating/reusing the material's own
+`IfcStyledRepresentation` chain) always completing first, unaffected. Everything below (originally
+written for `unassignMaterialStyle` alone) applies identically to both functions now.
 
 **What:** Real Python's `ifcopenshell.api.style.unassign_material_style` ends with a "handle
 material constituents and shape aspects" section: once it confirms `material` has at least one
@@ -2092,19 +2141,79 @@ completion.
 
 **Fix:** Port `ifcopenshell.util.element.get_shape_aspects` (a small, ~20-line function -- `get_type`
 plus direct `Representation.HasShapeAspects`/`RepresentationMaps[].HasShapeAspects` attribute reads,
-per the real source) into `util/element.ts`, then wire the real call back into
-`unassignMaterialStyle.ts`'s own loop. Note real Python's own `getattr(element, "Representation",
-...)` sentinel trick distinguishes "this class declares no `Representation` attribute at all" (an
-`IfcTypeProduct`) from "the attribute exists but is `None`" (a plain `IfcProduct` with no geometry)
--- but in the LATTER case, real Python still proceeds to read `representation.HasShapeAspects` on a
-`None` value, which crashes with a real `AttributeError` upstream. Any future port of this function
-should preserve that crash-on-`None` behavior verbatim (matching this project's own "preserve real
-quirks/bugs verbatim" policy), not silently guard against it.
+per the real source) into `util/element.ts`, then wire the real call back into BOTH
+`unassignMaterialStyle.ts`'s own loop AND `assignMaterialStyle.ts`'s own (symmetric) loop. Note
+real Python's own `getattr(element, "Representation", ...)` sentinel trick distinguishes "this
+class declares no `Representation` attribute at all" (an `IfcTypeProduct`) from "the attribute
+exists but is `None`" (a plain `IfcProduct` with no geometry) -- but in the LATTER case, real
+Python still proceeds to read `representation.HasShapeAspects` on a `None` value, which crashes
+with a real `AttributeError` upstream. Any future port of this function should preserve that
+crash-on-`None` behavior verbatim (matching this project's own "preserve real quirks/bugs verbatim"
+policy), not silently guard against it.
 
 **Context:** Surfaced during the `api.style` chunk 1 (7 files: `add_style`/`remove_style`/
 `remove_surface_style`/`remove_styled_representation`/`edit_presentation_style`/
 `unassign_material_style`/`unassign_representation_styles`, 2026-09-15), verified directly against
 the real 102-line `unassign_material_style.py` source and the real 36-line
-`util.element.get_shape_aspects` source.
+`util.element.get_shape_aspects` source. Confirmed to affect `assign_material_style.py` too (its
+exact inverse) during the `api.style` chunk 2 (6 files, completing `api.style` at 13/13,
+2026-09-15), verified directly against the real 247-line `assign_material_style.py` source.
 
 **Depends on / blocked by:** `ifcopenshell.util.element.get_shape_aspects` (not yet ported).
+
+---
+
+### `api.style.addSurfaceTextures`'s `material` parameter has no TS/Node equivalent -- permanently out of scope, not a "port later" item
+
+**What:** Real Python's `ifcopenshell.api.style.add_surface_textures(file, material=None,
+textures=None, uv_maps=None)` accepts an OPTIONAL `material: bpy.types.Material` parameter (a
+Blender material definition) and, when provided, walks that material's own glTF-compatible
+Blender node tree (`material.node_tree.nodes`, node types like `BSDF_PRINCIPLED`/`MIX_SHADER`/
+`TEX_IMAGE`/`NORMAL_MAP`/`SEPRGB`, socket links, `node.image.filepath`) to auto-detect diffuse/
+normal/metallic-roughness/occlusion/emissive texture maps, finally importing `bonsai.tool` (a
+Blender ADDON, not part of `ifcopenshell` itself) inside its own `create_surface_texture` helper.
+`src/ifcopenshell-ts/src/api/style/addSurfaceTextures.ts` throws a clear, loud error when `material`
+is actually supplied (non-`null`/non-`undefined`) -- but only LAST, matching real Python's own exact
+order of operations: (1) the IFC2X3 early-return runs first, UNCONDITIONALLY (`material` is never
+even inspected on that schema); (2) the full `textures` (list-of-dicts) loop -- fully portable, and
+the ONLY path real Python's own test suite (`test_add_surface_textures.py`) ever exercises -- always
+runs to completion, creating every real texture, regardless of whether `material` was also supplied;
+(3) only then is `material` checked and thrown on. Never thrown proactively, and never before either
+of the above two real, portable behaviors has already run (a `code-review` finding on the initial PR
+for this chunk -- the first version of this file checked `material` first, which would have wrongly
+thrown for a `material` supplied on an IFC2X3 file, and wrongly discarded already-creatable textures
+when both `textures` and `material` were supplied together).
+
+**Why:** Unlike every OTHER "genuinely unported dependency" entry in this file, this is NOT a
+"hasn't been ported yet" gap -- there is no TS/Node representation of `bpy.types.Material` (or any
+Blender node-tree concept) to accept as a parameter in the first place, since a Node.js native
+addon has no running Blender process to query. This dependency cannot be "finished" the way
+`util.element.getShapeAspects` (above) eventually can; it is architecturally out of scope for this
+project for as long as IfcOpenShell-TS targets a plain Node addon rather than a Blender-embedded
+Python/JS bridge.
+
+**Impact:** Calling `addSurfaceTextures(file, { material: someValue })` (any non-`null`/
+non-`undefined` value) throws
+`"addSurfaceTextures: the \`material\` (Blender node-tree) parameter has no TS/Node equivalent --
+see this file's own header comment and TODOS.md."` -- but on an IFC2X3 file, this NEVER throws at
+all (the schema check returns `[]` first, unconditionally, before `material` is ever inspected); on
+IFC4/IFC4X3, it throws only after the full `textures` loop has already run to completion, so any
+`textures` supplied ALONGSIDE `material` are still created for real before the throw (there is no
+meaningful "further partial" behavior to preserve beyond that, since the two parameters otherwise
+represent mutually exclusive real Python usage modes -- "Either `material` or `textures` should be
+provided", per real Python's own docstring). Every real call passing `textures=`/omitting `material`
+is completely unaffected and was ported in full.
+
+**Fix:** None planned -- this is a permanent, disclosed scope boundary, not a backlog item. If this
+project ever needs to support Blender-driven texture auto-detection (e.g. as part of a future
+Bonsai-on-Node integration), it would need its own bespoke design (there is no faithful "port" of a
+live Blender node-tree traversal into a headless Node addon), not a straightforward translation of
+this function's own Blender-specific helpers (`detect_normal_map`/`detect_emissive_map`/
+`detect_metallicroughness_map`/`detect_occlusion_map`/`detect_diffuse_map`/
+`detect_unlit_emissive_map`, all left unported in `add_surface_textures.py`'s own source, never
+even attempted here).
+
+**Context:** Surfaced during the `api.style` chunk 2 (6 files, completing `api.style` at 13/13,
+2026-09-15), verified directly against the real 204-line `add_surface_textures.py` source.
+
+**Depends on / blocked by:** Nothing scheduled -- see "Fix" above.
