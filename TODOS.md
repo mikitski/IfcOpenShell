@@ -2006,3 +2006,64 @@ entry immediately above, completing `api.material` at 26/26 files, 2026-09-15), 
 against the real 115-line `set_shape_aspect_constituents.py` source.
 
 **Depends on / blocked by:** `ifcopenshell.api.style` (not yet started, no TS port of any kind).
+
+### `api.style.unassignMaterialStyle` needs `ifcopenshell.util.element.get_shape_aspects` (not yet ported)
+
+**What:** Real Python's `ifcopenshell.api.style.unassign_material_style` ends with a "handle
+material constituents and shape aspects" section: once it confirms `material` has at least one
+named `IfcMaterialConstituent` inverse, it calls `ifcopenshell.util.element.get_elements_by_material`
+(already ported, `util/element.ts`'s `getElementsByMaterial`) to find every element using that
+material, then `ifcopenshell.util.element.get_shape_aspects(element)` on each one to collect shape
+aspects whose name might match a constituent name (so the matching aspect's own representations can
+have the style unassigned via `ifcopenshell.api.style.unassign_representation_styles`, itself
+already ported in this same chunk). `get_shape_aspects` itself has NO TS port of any kind --
+confirmed absent from `src/ifcopenshell-ts/src/util/element.ts`, whose own header comment
+explicitly lists it as out of scope across all 3 of that file's own already-landed chunks ("calls
+`ifcopenshell.util.representation`, a not-yet-ported Tier B module" -- a claim worth re-checking:
+reading the real 36-line `get_shape_aspects` source directly shows it does NOT actually call
+`util.representation` at all, only `get_type` -- already ported -- and direct `Representation`/
+`RepresentationMaps` attribute access; the original blocking rationale may already be stale, but
+porting a function outside this chunk's assigned 7 `api.style` files was kept out of scope here
+regardless, per this project's own "do not inline a risky partial port for a dependency outside the
+module under review" discipline).
+
+`src/ifcopenshell-ts/src/api/style/unassignMaterialStyle.ts` ports every other real behavior of
+this function correctly and independently (the full representation/styled-item unassignment loop,
+which always runs to completion regardless of material constituents; the material-constituent-name
+collection; the early return when there are none), and throws a clear, disclosed error ONLY at the
+exact point, and only for the exact element, where the real `get_shape_aspects` call would actually
+be needed -- never proactively, and never before the function's own real, unconditional mutations
+(the first loop) have already run.
+
+**Why:** Same reasoning as this file's own general policy for a genuinely-separate, out-of-scope
+dependency: `ifcopenshell.util.element.get_shape_aspects` is a real function belonging to
+`util.element`'s own future chunk (should one be needed) or a small standalone follow-up, not
+squeezed into `api.style` chunk 1's review scope.
+
+**Impact:** Calling `unassignMaterialStyle` throws
+`"unassignMaterialStyle: matching material constituents to shape aspects for element #<id> needs
+util.element.getShapeAspects, not ported yet -- see TODOS.md."` only when `material` is used by at
+least one named `IfcMaterialConstituent` AND `get_elements_by_material` finds at least one real
+element using that material (directly, or via a material set) -- otherwise (including every case
+where `material` is a plain, non-constituent material) this function completes normally, with the
+direct material-style unassignment (its primary, documented behavior) having already run to
+completion.
+
+**Fix:** Port `ifcopenshell.util.element.get_shape_aspects` (a small, ~20-line function -- `get_type`
+plus direct `Representation.HasShapeAspects`/`RepresentationMaps[].HasShapeAspects` attribute reads,
+per the real source) into `util/element.ts`, then wire the real call back into
+`unassignMaterialStyle.ts`'s own loop. Note real Python's own `getattr(element, "Representation",
+...)` sentinel trick distinguishes "this class declares no `Representation` attribute at all" (an
+`IfcTypeProduct`) from "the attribute exists but is `None`" (a plain `IfcProduct` with no geometry)
+-- but in the LATTER case, real Python still proceeds to read `representation.HasShapeAspects` on a
+`None` value, which crashes with a real `AttributeError` upstream. Any future port of this function
+should preserve that crash-on-`None` behavior verbatim (matching this project's own "preserve real
+quirks/bugs verbatim" policy), not silently guard against it.
+
+**Context:** Surfaced during the `api.style` chunk 1 (7 files: `add_style`/`remove_style`/
+`remove_surface_style`/`remove_styled_representation`/`edit_presentation_style`/
+`unassign_material_style`/`unassign_representation_styles`, 2026-09-15), verified directly against
+the real 102-line `unassign_material_style.py` source and the real 36-line
+`util.element.get_shape_aspects` source.
+
+**Depends on / blocked by:** `ifcopenshell.util.element.get_shape_aspects` (not yet ported).

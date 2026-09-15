@@ -183,3 +183,22 @@ export * as project from "./project";
 // material-vs-type dispatch-order edge case, and an early-`return`-not-`continue`
 // representation-patching quirk).
 export * as material from "./material";
+
+// Phase 6, `api.style` chunk 1 of 2: 7 of `api.style`'s 13 real files (`add_style`/
+// `remove_style`/`remove_surface_style`/`remove_styled_representation`/
+// `edit_presentation_style`/`unassign_material_style`/
+// `unassign_representation_styles`) -- a brand-new module (no TS port of any kind
+// existed before this chunk), prioritized because `api.material.
+// setShapeAspectConstituents` (chunk 4 of `api.material`) disclosed a real, loud-throw
+// blocker citing this exact module's `assign_item_style` by name. `assign_item_style`
+// itself is a chunk 2 file (NOT ported here, alongside `add_surface_style`/
+// `edit_surface_style`/`add_surface_textures`/`assign_material_style`/
+// `assign_representation_styles`), so that specific blocker remains open until chunk 2
+// lands. Namespaced as `api.style.addStyle`/etc. -- see `style/index.ts`'s own header
+// comment for this chunk's exact scope, a remaining genuinely-unported dependency
+// (`util.element.getShapeAspects`, disclosed in `style/unassignMaterialStyle.ts`'s own
+// header comment and `TODOS.md`), and several disclosed real Python quirks/schema
+// differences (an unconditional Revit-compatibility `Side = "BOTH"` force, a mutual
+// `IfcFillAreaStyle`/`IfcFillAreaStyleHatching` removal recursion, and
+// `IfcPresentationStyleAssignment`'s IFC4X3 removal).
+export * as style from "./style";
