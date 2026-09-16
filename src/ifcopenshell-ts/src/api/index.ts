@@ -241,3 +241,26 @@ export * as system from "./system";
 export * as drawing from "./drawing";
 export * as control from "./control";
 export * as psetTemplate from "./pset_template";
+
+// Phase 6, `api.nest`/`api.resource` chunk: TWO small, brand-new modules ported
+// together in one chunk (16 real files, ~1232 lines total -- neither had any TS port
+// of any kind before this chunk). `api.nest` (4 files, 327 lines): manages
+// `IfcRelNests` (physical parent/child attachment through a predetermined connection
+// point), structurally near-identical to the already-landed `api.aggregate`/
+// `api.spatial` containment pair -- ported FIRST in this chunk, since `api.resource`'s
+// own `add_resource` depends on it directly. `api.resource` (12 files, 905 lines):
+// manages `IfcConstructionResource` (crew/labour/equipment/material/product resources)
+// and its quantity/time/usage sub-objects, via `api.nest` (parent/child resource
+// hierarchy), `api.project.assignDeclaration` (root-level resource declaration),
+// `api.root.createEntity`, `util.constraint`/`util.date`/`util.resource` (all already
+// landed). One remaining genuinely-unported dependency: `resource.editResourceTime`'s
+// `ScheduleUsage`-with-a-hard-`ScheduleWork`-constraint branch needs
+// `api.sequence.calculate_task_duration` -- `api.sequence` (40 files, ~4257 lines) has
+// no TS port of any kind and is out of scope for this chunk; a clear, disclosed error
+// is thrown only at the exact point that call would happen, never proactively. See
+// `nest/index.ts`'s and `resource/index.ts`'s own header comments for the full scope
+// and several disclosed real Python quirks/bugs (an unguarded IFC2X3 throw in
+// `nest.changeNest`/`.reorderNesting`, `resource.editResourceTime`'s literal
+// `"RemainingTime"` typo that should be `"RemainingWork"`, and more).
+export * as nest from "./nest";
+export * as resource from "./resource";
