@@ -193,7 +193,7 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.cost.assignC
 		expect(secondQuantities[0].getByIndex(3)).toBeCloseTo(40.0, 10);
 	});
 
-	test("formula mode: supports unary minus and exponentiation with correct precedence", () => {
+	test("formula mode: exponentiation is right-associative and binds tighter than multiplication", () => {
 		const file = createTestFile(schema);
 		const schedule = addCostSchedule(file);
 		const item = addCostItem(file, { costSchedule: schedule });
@@ -201,16 +201,43 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.cost.assignC
 		const qto = addQto(file, { product: wall, name: "Qto_WallBaseQuantities" });
 		editQto(file, { qto, properties: { NetVolume: 2.0 } });
 
-		// -2**2 == -(2**2) == -4, matching Python's own operator precedence.
+		// NetVolume * 2**3 == NetVolume * (2**3) == 2 * 8 == 16 (`**` binds tighter
+		// than `*`), and, independently, 2**2**2 == 2**(2**2) == 16 (right-associative)
+		// -- both matching Python's own operator precedence/associativity.
 		assignCostItemQuantity(file, {
 			costItem: item,
 			products: [wall],
-			formula: "-NetVolume**2",
+			formula: "NetVolume * 2**3",
 			ifcClass: "IfcQuantityVolume",
 		});
 
 		const costQuantities = item.get("CostQuantities") as EntityInstance[];
-		expect(costQuantities[0].getByIndex(3)).toBe(-4);
+		expect(costQuantities[0].getByIndex(3)).toBe(16);
+	});
+
+	// Real, disclosed upstream bug (see `../../../src/api/cost/assignCostItemQuantity
+	// .ts`'s own header comment): `FormulaEvaluator` has no `visit_UnaryOp`, so
+	// `OPERATORS[ast.USub]` is dead code and a formula with a literal unary minus
+	// ANYWHERE always crashes with `ValueError: Operation not permitted: UnaryOp` in
+	// real Python -- it never actually negates. Ported verbatim, not "fixed" to
+	// compute a negated result real Python's own formula language never produces.
+	test("formula mode: BLOCKED -- unary minus always throws (disclosed real upstream bug, not a computed negation)", () => {
+		const file = createTestFile(schema);
+		const schedule = addCostSchedule(file);
+		const item = addCostItem(file, { costSchedule: schedule });
+		const wall = createEntity(file, { ifcClass: "IfcWall" });
+		const qto = addQto(file, { product: wall, name: "Qto_WallBaseQuantities" });
+		editQto(file, { qto, properties: { NetVolume: 2.0 } });
+
+		expect(() => assignCostItemQuantity(file, { costItem: item, products: [wall], formula: "-5" })).toThrow();
+		expect(() =>
+			assignCostItemQuantity(file, {
+				costItem: item,
+				products: [wall],
+				formula: "NetVolume * -1",
+				ifcClass: "IfcQuantityVolume",
+			}),
+		).toThrow();
 	});
 
 	test("formula mode: an unsupported expression throws at parse time", () => {

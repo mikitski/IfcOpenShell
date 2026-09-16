@@ -45,8 +45,8 @@
 //       def generic_visit(self, node): raise ValueError(f"Operation not permitted: {type(node).__name__}")
 //
 // Despite going through Python's REAL, general-purpose expression grammar
-// (`ast.parse`), the actual SUPPORTED node set is tiny and closed: `BinOp` (only the 5
-// operators in `OPERATORS`: `+ - * / **`, plus unary `-` via `USub`), `Name`,
+// (`ast.parse`), the actual SUPPORTED node set is tiny and closed: `BinOp` (the 4
+// operators `FormulaEvaluator` can actually reach: `+ - * /` and `**`), `Name`,
 // `Attribute` (dotted names, one or more levels, via `build_full_name`'s own `while
 // isinstance(node, ast.Attribute)` loop), and `Constant` (a bare number literal) --
 // `generic_visit`'s own `raise ValueError` is the REAL enforcement mechanism: any other
@@ -55,12 +55,50 @@
 // but then raises `ValueError: Operation not permitted: <NodeType>` the moment
 // `FormulaEvaluator.visit` reaches it (NOT at parse time).
 //
+// --- REAL, NEWLY-DISCOVERED UPSTREAM BUG: unary minus is DEAD CODE in real Python --
+//     `FormulaEvaluator` has no `visit_UnaryOp`, so a formula with a literal unary
+//     minus ANYWHERE always crashes at evaluate time, it never actually negates ---
+//
+// `OPERATORS` includes `ast.USub: operator.neg`, and this file's own earlier drafts
+// (and its own header comment, before this was found) assumed that meant unary minus
+// (`"-5"`, `"A.qty * -1"`) was a genuinely supported, evaluated operation. It is NOT,
+// confirmed empirically (`ast.dump(ast.parse("A.qty * -1", mode="eval").body)` ->
+// `BinOp(left=Attribute(...), op=Mult(), right=UnaryOp(op=USub(), operand=Constant
+// (value=1)))`) and by re-reading `ast.NodeVisitor.visit`'s own dispatch mechanism
+// (`getattr(self, "visit_" + node.__class__.__name__, self.generic_visit)`):
+// `FormulaEvaluator` defines exactly `visit_BinOp`/`visit_Name`/`visit_Attribute`/
+// `visit_Constant` -- there is no `visit_UnaryOp` anywhere in the class. A `UnaryOp`
+// node (what `-x` actually parses to -- NOT a negative `Constant`; Python's own
+// constant folding does not apply to a general expression parsed via `mode="eval"`)
+// therefore ALWAYS falls through to `generic_visit`, which raises `ValueError:
+// Operation not permitted: UnaryOp`. And critically, `OPERATORS[ast.USub]` is never
+// actually reachable either way: `visit_BinOp` only ever looks up `OPERATORS[type(
+// node.op)]` for a `BinOp`'s own `.op`, which is always `Add`/`Sub`/`Mult`/`Div`/`Pow`
+// -- `USub` only ever appears as a `UnaryOp`'s `.op`, a node type with no visitor at
+// all. So `ast.USub: operator.neg` in the real `OPERATORS` dict is dead code: a real,
+// undiscovered bug in upstream `ifcopenshell-python` (not something this port
+// introduces) -- ANY formula containing a literal unary minus anywhere crashes with
+// `ValueError`, it does not correctly negate.
+//
+// This port's parser still PARSES a leading `-` (`parseFactor`'s own `'-' factor`
+// production below) -- matching real Python's `ast.parse` itself succeeding for such
+// input (the bug is in evaluation, not parsing). But `evaluateFormulaNode` deliberately
+// does NOT compute the negation: encountering a `{kind: "unary", ...}` node throws
+// (mirroring `generic_visit`'s own raise for `UnaryOp`, at the same, later point real
+// Python's own bug fires, not silently "fixed" to actually negate). This is the
+// OPPOSITE direction from this file's own "PARSE-time rejection" divergence documented
+// below (things rejected EARLIER than Python) -- this is a case rejected at the SAME
+// point Python does, reproducing a real bug rather than correcting it, per this
+// project's own "preserve every real quirk/bug verbatim" mandate.
+// `assignCostItemQuantity.test.ts` pins this with a dedicated regression test.
+//
 // This project already has an established precedent for exactly this situation --
 // `util/cost.ts`'s own header comment, porting `ifcopenshell.util.cost`'s separate
 // (Lark-grammar-based) cost-value formula mini-language: "no new npm dependency, the
 // real grammar is small enough to hand-roll." The SAME reasoning applies here, even
-// more strongly -- this grammar is smaller still (5 binary operators + unary minus +
-// dotted names + number literals; no `SUM(...)`/category-wrapping concept at all,
+// more strongly -- this grammar is smaller still (5 binary operators + dotted names +
+// number literals -- unary minus PARSES but always throws at evaluate time, per the
+// disclosed dead-`USub` bug above; no `SUM(...)`/category-wrapping concept at all,
 // unlike `util.cost`'s own mini-language). A hand-rolled recursive-descent
 // tokenizer/parser/evaluator (`parseFormula`/`extractFormulaVariables`/
 // `evaluateFormulaNode` below) is ported instead of either (a) declaring a blocker, or
@@ -264,7 +302,10 @@ class FormulaParser {
 		return node;
 	}
 
-	/** `factor: '-' factor | power` -- unary minus may nest at any depth. */
+	/** `factor: '-' factor | power` -- unary minus may nest at any depth. Parses
+	 * successfully (matching real Python's own `ast.parse`), but `evaluateFormulaNode`
+	 * always throws on the resulting `"unary"` node -- see this file's header comment's
+	 * disclosed dead-`ast.USub` bug section. */
 	private parseFactor(): FormulaNode {
 		if (this.isOp("-")) {
 			this.next();
@@ -323,7 +364,13 @@ function parseFormula(formula: string): FormulaNode {
 }
 
 /** Python's `VariableExtractor` -- collects every dotted/bare variable name referenced
- * in the formula, deduplicated (a `Set`, matching Python's own `self.variables: set[str]`). */
+ * in the formula, deduplicated (a `Set`, matching Python's own `self.variables: set[str]`).
+ * Unlike `FormulaEvaluator` below, `VariableExtractor` does NOT override `generic_visit`
+ * -- real Python's default `ast.NodeVisitor.generic_visit` just recurses into every
+ * child of an unhandled node type (a `UnaryOp` included), so a formula's variables are
+ * still collected correctly even though `FormulaEvaluator` itself would later throw on
+ * that same `UnaryOp` node (see this file's header comment) -- ported faithfully via
+ * the identical unconditional recursion into `node.operand` below. */
 function extractFormulaVariables(node: FormulaNode, out: Set<string> = new Set()): Set<string> {
 	if (node.kind === "name") out.add(node.name);
 	else if (node.kind === "unary") extractFormulaVariables(node.operand, out);
@@ -358,7 +405,15 @@ function evaluateFormulaNode(node: FormulaNode, values: Readonly<Record<string, 
 		}
 		return value;
 	}
-	if (node.kind === "unary") return -evaluateFormulaNode(node.operand, values);
+	if (node.kind === "unary") {
+		// See this file's header comment's disclosed dead-`ast.USub` bug: real Python's
+		// `FormulaEvaluator` has no `visit_UnaryOp`, so a `UnaryOp` node ALWAYS falls
+		// through to `generic_visit`'s own `raise ValueError("Operation not permitted:
+		// UnaryOp")` -- it never actually negates. Ported verbatim: this branch throws
+		// here too, rather than computing `-evaluateFormulaNode(node.operand, values)`
+		// (a result real Python's own formula language never actually produces).
+		throw new Error("assignCostItemQuantity: Operation not permitted: UnaryOp");
+	}
 	return FORMULA_OPERATORS[node.op](evaluateFormulaNode(node.left, values), evaluateFormulaNode(node.right, values));
 }
 
