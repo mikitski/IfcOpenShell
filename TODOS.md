@@ -789,6 +789,32 @@ exact scenarios (matching `editPset.test.ts`'s own established precedent), each 
 recording the real, unblocked assertion to restore once this gap closes. See
 `src/api/style/editSurfaceStyle.ts`'s own header comment for the full writeup.
 
+**UPDATE 2026-09-15 (`api.drawing`/`api.control`/`api.pset_template` chunk, `pset_template.edit_prop_template` file):** found a sixth, independent
+consequence -- `ifcopenshell.api.pset_template.edit_prop_template`'s `Enumerators`
+special case needs to wrap each RAW enum value (e.g. `"FOO"`) into a standalone typed
+value (`IfcLabel("FOO")`, or whatever `primary_measure_type` resolves to) via
+`file.create_entity(primary_measure_type, v)` -- the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this
+entry already documents. Confirmed empirically against this exact worktree's own built
+native addon before writing `editPropTemplate.ts`. Ported the whole function completely
+and faithfully anyway: the generic attribute-setter loop and everything up through
+resolving `propName`/`primaryMeasureType` inside the `Enumerators` branch is fully
+functional and gets real, passing test coverage; only the actual
+`file.createEntity(primaryMeasureType, v)` call itself throws, at the exact point real
+Python would materialize the value, with no proactive guard -- matching
+`editPset.ts`'s/`editSurfaceStyle.ts`'s own "let the native call fail naturally"
+precedent rather than introducing a new pattern. `test/api/pset_template/
+editPropTemplate.test.ts` pins this CURRENT, disclosed, blocked behavior with a
+dedicated test (matching `editPset.test.ts`'s/`editSurfaceStyle.test.ts`'s own
+established precedent), with a comment recording the real Python assertion
+(`test_editing_an_enumeration`) to restore once this gap closes. See
+`src/api/pset_template/editPropTemplate.ts`'s own header comment for the full writeup.
+No other file in this 3-module, 11-file chunk (`api.drawing`/`api.control`/
+`api.pset_template`) touches this gap at all -- every other `file.createEntity(...)`
+call across the chunk creates a real, multi-attribute ENTITY (`IfcRelAssignsToProduct`/
+`IfcRelAssignsToControl`/`IfcPropertySetTemplate`/`IfcSimplePropertyTemplate`/
+`IfcPropertyEnumeration`), never a standalone simple/defined-type value.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
