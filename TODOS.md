@@ -1852,7 +1852,7 @@ the pre-existing `edit_object_placement` entry, not a duplicate of either.
 
 ---
 
-### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet)
+### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet) -- **`IfcGrid` half RESOLVED 2026-09-16, see UPDATE below: `HasOpenings`/`api.feature` half remains blocked**
 
 **What:** Real Python's `ifcopenshell.api.root.remove_product` has two more small, genuinely
 new blocked call sites beyond the `api.material`/`api.boundary` ones this file already tracks
@@ -1895,9 +1895,23 @@ directly against the real 223-line `remove_product.py` source.
 **Depends on / blocked by:** `ifcopenshell.api.feature`, `ifcopenshell.api.grid` (both Phase 6,
 neither started).
 
+**UPDATE 2026-09-16 (`IfcGrid` axis half wired in for real):** `api.grid.removeGridAxis` landed
+one chunk earlier (PR #108) without this function's own `IfcGrid`-axis branch being retrofitted
+at the same time (see `TODOS.md`'s sibling `IfcRelSpaceBoundary` entry below, and
+`PROGRESS.md`'s own "UPDATE 2026-09-16" entries, for the same deliberate-deferral precedent).
+That follow-up has now landed: `src/ifcopenshell-ts/src/api/root/removeProduct.ts`'s `IfcGrid`
+branch now calls the real `removeGridAxis(file, { axis })` for every axis in `product`'s own
+`UAxes`/`VAxes`/`WAxes` (the last matching real Python's own `(product.WAxes or ())` null
+tolerance), exactly matching real Python's own `for axis in product.UAxes + product.VAxes +
+(product.WAxes or ()): ifcopenshell.api.grid.remove_grid_axis(file, axis=axis)`.
+`test_removing_axes_of_a_grid`'s real passing assertion is restored in `removeProduct.test.ts`
+("removing axes of a grid"), replacing its former "throws the disclosed blocked error" pin. The
+`HasOpenings`/`api.feature` half of this entry is UNCHANGED and still genuinely blocked --
+`api.feature` still has no TS port of any kind.
+
 ---
 
-### `api.root.removeProduct` skips `IfcRelSpaceBoundary` cleanup (`api.boundary.remove_boundary` unported -- `api.boundary` has no TS port of any kind yet)
+### `api.root.removeProduct` skips `IfcRelSpaceBoundary` cleanup (`api.boundary.remove_boundary` unported -- `api.boundary` has no TS port of any kind yet) -- **RESOLVED 2026-09-16, see UPDATE below**
 
 **What:** Real Python's `ifcopenshell.api.root.remove_product`'s generic inverse-cascade tail
 calls `ifcopenshell.api.boundary.remove_boundary(file, boundary=inverse)` for every
@@ -1940,6 +1954,17 @@ single, later, deliberate follow-up chunk, matching how `api.geometry.editObject
 5 blocked callers were retroactively resolved as an explicit, separate step once that function
 landed (see `PROGRESS.md`'s own "UPDATE 2026-09-16" entries for `api.spatial`/`api.aggregate`/
 `api.root.reassignClass`/`.copyClass`).
+
+**UPDATE 2026-09-16 (follow-up chunk wires it in for real):** The deliberately-deferred follow-up
+promised in the UPDATE directly above has now landed, alongside the sibling `IfcGrid` axis wiring
+(this file's preceding entry): `src/ifcopenshell-ts/src/api/root/removeProduct.ts`'s
+`IfcRelSpaceBoundary` branch now calls the real `removeBoundary(file, { boundary: inverse })` --
+`inverse` (the `IfcRelSpaceBoundary` itself), not `product`, matching real Python's own
+`ifcopenshell.api.boundary.remove_boundary(file, boundary=inverse)`.
+`test_removing_all_space_boundaries_of_an_element`'s real passing assertion is restored in
+`removeProduct.test.ts` ("removing all space boundaries of an element"), replacing its former
+"throws the disclosed blocked error" pin. This entry is now fully resolved -- no remaining
+blocked call site.
 
 ---
 

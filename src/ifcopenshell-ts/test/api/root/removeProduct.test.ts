@@ -3,44 +3,46 @@
 // TS counterpart to `test/api/root/test_remove_product.py` (src/ifcopenshell-python,
 // `TestRemoveProduct`/`TestRemoveProductIFC2X3`). Real Python's own fixtures lean
 // heavily on several sibling `api.*` functions this codebase hasn't ported yet
-// (`api.feature.add_feature`/`add_filling`, `api.grid.create_grid_axis`, `api.nest
-// .assign_object`, `api.system.add_port`/`assign_port`/`connect_port`/
-// `assign_flow_control`, `api.drawing.assign_product`, `api.geometry
-// .edit_object_placement`/`connect_path`/`connect_element`, `api.material
-// .add_material`/`assign_material`) -- every such case is ported here with its fixture
-// built directly via `file.createEntity`/`withAttrs` instead (matching
-// `../group/removeGroup.test.ts`'s and `../geometry/unassignRepresentation.test.ts`'s
-// own established precedent for this exact substitution; `withAttrs` -- a small local
-// helper reproducing `file.createEntity(type)` then one `.set()` call per keyword --
-// works around this port's positional-only `createEntity`, and a "create bare, don't
-// bother filling in every EXPRESS-mandatory attribute" fixture is already established
-// as safe: the native layer doesn't enforce attribute-cardinality validity at creation
-// time, only real usecases' own logic does). Every real Python assertion that depended
-// on an unported dependency's own entity-creation shape (e.g. an exact `len(list(self
-// .file))` total-entity snapshot) is adapted to specific `file.byType(...)` counts
-// instead, since this port's substituted fixture doesn't create the identical set of
-// bookkeeping entities (e.g. `add_filling` creates no `OwnerHistory` at all, `add_feature`
-// does) -- the underlying relationship-cascade behavior under test is unaffected either
-// way.
+// (`api.feature.add_feature`/`add_filling`, `api.nest.assign_object`, `api.system
+// .add_port`/`assign_port`/`connect_port`/`assign_flow_control`, `api.drawing
+// .assign_product`, `api.geometry.edit_object_placement`/`connect_path`/
+// `connect_element`, `api.material.add_material`/`assign_material`) -- every such case
+// is ported here with its fixture built directly via `file.createEntity`/`withAttrs`
+// instead (matching `../group/removeGroup.test.ts`'s and `../geometry
+// /unassignRepresentation.test.ts`'s own established precedent for this exact
+// substitution; `withAttrs` -- a small local helper reproducing `file.createEntity(type)`
+// then one `.set()` call per keyword -- works around this port's positional-only
+// `createEntity`, and a "create bare, don't bother filling in every EXPRESS-mandatory
+// attribute" fixture is already established as safe: the native layer doesn't enforce
+// attribute-cardinality validity at creation time, only real usecases' own logic does).
+// Every real Python assertion that depended on an unported dependency's own
+// entity-creation shape (e.g. an exact `len(list(self.file))` total-entity snapshot) is
+// adapted to specific `file.byType(...)` counts instead, since this port's substituted
+// fixture doesn't create the identical set of bookkeeping entities (e.g. `add_filling`
+// creates no `OwnerHistory` at all, `add_feature` does) -- the underlying
+// relationship-cascade behavior under test is unaffected either way.
 //
-// 3 real Python tests are genuinely blocked (real, disclosed dependencies on `api
-// .feature`/`api.grid`/`api.boundary`, none of which have any TS port at all -- see
-// `../../../src/api/root/removeProduct.ts`'s own header comment and `TODOS.md`) and are
-// pinned instead as dedicated "throws the disclosed blocked error" regression tests,
-// matching `../type/mapTypeRepresentations.test.ts`'s/`../pset/editPset.test.ts`'s
-// established precedent -- not silently dropped: `test_removing_all_openings_of_an_
-// element` (needs `api.feature.remove_feature`), `test_removing_axes_of_a_grid` (needs
-// `api.grid.remove_grid_axis`), `test_removing_all_space_boundaries_of_an_element`
-// (needs `api.boundary.remove_boundary`).
+// Only 1 real Python test is genuinely blocked now (a real, disclosed dependency on
+// `api.feature`, which has no TS port at all -- see `../../../src/api/root
+// /removeProduct.ts`'s own header comment and `TODOS.md`) and is pinned instead as a
+// dedicated "throws the disclosed blocked error" regression test, matching
+// `../type/mapTypeRepresentations.test.ts`'s/`../pset/editPset.test.ts`'s established
+// precedent -- not silently dropped: `test_removing_all_openings_of_an_element` (needs
+// `api.feature.remove_feature`).
 //
-// A 4th test, `test_removing_all_material_relationships_of_an_element`, USED to be in
-// this blocked group (it needed `api.material.unassign_material`) but is now ported
-// for real -- see "removing all material relationships of an element" below and the
-// `api.material` chunk 1 that landed `unassignMaterial`/`assignMaterial`/`copyMaterial`
-// (`../material/index.ts`).
+// 3 more tests USED to be in this blocked group -- `test_removing_all_material_
+// relationships_of_an_element` (needed `api.material.unassign_material`),
+// `test_removing_axes_of_a_grid` (needed `api.grid.remove_grid_axis`), and
+// `test_removing_all_space_boundaries_of_an_element` (needed `api.boundary
+// .remove_boundary`) -- but are now all ported for real: see "removing all material
+// relationships of an element"/"removing axes of a grid"/"removing all space boundaries
+// of an element" below, and the `api.material`/`api.grid`/`api.boundary` chunks that
+// landed `unassignMaterial` (`../material/index.ts`), `removeGridAxis`
+// (`../grid/index.ts`), and `removeBoundary` (`../boundary/index.ts`) respectively.
 
 import { describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
+import { createGridAxis } from "../../../src/api/grid/createGridAxis";
 import { assignGroup } from "../../../src/api/group/assignGroup";
 import { assignMaterial } from "../../../src/api/material/assignMaterial";
 import { addPset } from "../../../src/api/pset/addPset";
@@ -220,6 +222,25 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		removeProduct(file, { product: element });
 
 		expect(file.byType("IfcWallType").length).toBe(0);
+	});
+
+	// Real Python: `test_removing_axes_of_a_grid`. Ported for real now that
+	// `api.grid.removeGridAxis` exists (this used to be one of this file's disclosed-
+	// blocker tests -- see this file's own header comment). `blankFile` (not
+	// `createTestFile`) matches this test's own `len(list(self.file)) == 0` assertion --
+	// with the default project bootstrap still present, removing the grid and its axes
+	// alone would never bring the file down to zero entities.
+	test("removing axes of a grid", () => {
+		const file = blankFile(schema);
+		const grid = file.createEntity("IfcGrid");
+		const axisA = createGridAxis(file, { axisTag: "A", uvwAxes: "UAxes", grid });
+		axisA.set("AxisCurve", file.createEntity("IfcPolyline", [file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0])]));
+		const axis1 = createGridAxis(file, { axisTag: "1", uvwAxes: "VAxes", grid });
+		axis1.set("AxisCurve", file.createEntity("IfcPolyline", [file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0])]));
+
+		removeProduct(file, { product: grid });
+
+		expect([...file]).toHaveLength(0);
 	});
 
 	test("removing all void relationships of an opening", () => {
@@ -512,6 +533,19 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		expect(file.byType("IfcWall").length).toBe(2);
 	});
 
+	// Real Python: `test_removing_all_space_boundaries_of_an_element`. Ported for real
+	// now that `api.boundary.removeBoundary` exists (this used to be one of this file's
+	// disclosed-blocker tests -- see this file's own header comment).
+	test("removing all space boundaries of an element", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		withAttrs(file, "IfcRelSpaceBoundary", { RelatedBuildingElement: element });
+
+		removeProduct(file, { product: element });
+
+		expect(file.byType("IfcRelSpaceBoundary").length).toBe(0);
+	});
+
 	test("removing orphaned group relationships", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
@@ -567,12 +601,13 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 	});
 });
 
-// --- Disclosed blockers: real, load-bearing dependencies on `api.feature`/`api.grid`/
-// `api.boundary`, none of which have any TS port at all. See
-// `../../../src/api/root/removeProduct.ts`'s own header comment and `TODOS.md`.
-// (`api.material` is no longer one of these -- `unassignMaterial` now exists, see the
-// real "removing all material relationships of an element" test above, and
-// `TODOS.md`'s updated entry.) ---
+// --- Disclosed blocker: a real, load-bearing dependency on `api.feature`, which has no
+// TS port at all. See `../../../src/api/root/removeProduct.ts`'s own header comment and
+// `TODOS.md`. (`api.material`/`api.grid`/`api.boundary` are no longer among these --
+// `unassignMaterial`/`removeGridAxis`/`removeBoundary` all now exist, see the real
+// "removing all material relationships of an element"/"removing axes of a grid"/
+// "removing all space boundaries of an element" tests above, and `TODOS.md`'s updated
+// entries.) ---
 
 describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct -- disclosed blockers (%s)", (schema) => {
 	test("removing an element with openings throws (api.feature.removeFeature not ported)", () => {
@@ -582,23 +617,6 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct -- disclosed blockers (
 		withAttrs(file, "IfcRelVoidsElement", { RelatingBuildingElement: element, RelatedOpeningElement: opening });
 
 		expect(() => removeProduct(file, { product: element })).toThrow(/api\.feature\.removeFeature/);
-	});
-
-	test("removing an IfcGrid with axes throws (api.grid.removeGridAxis not ported)", () => {
-		const file = createTestFile(schema);
-		const grid = file.createEntity("IfcGrid");
-		const axis = file.createEntity("IfcGridAxis");
-		grid.set("UAxes", [axis]);
-
-		expect(() => removeProduct(file, { product: grid })).toThrow(/api\.grid\.removeGridAxis/);
-	});
-
-	test("removing an element with a space boundary throws (api.boundary.removeBoundary not ported)", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWall");
-		withAttrs(file, "IfcRelSpaceBoundary", { RelatedBuildingElement: element });
-
-		expect(() => removeProduct(file, { product: element })).toThrow(/api\.boundary\.removeBoundary/);
 	});
 });
 

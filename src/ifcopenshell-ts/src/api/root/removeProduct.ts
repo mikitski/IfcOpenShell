@@ -52,8 +52,8 @@
 // pset that's solely referenced by this type (via `../pset/removePset.ts`, already
 // landed).
 //
-// --- Two more genuinely new, unported dependencies -- disclosed via a loud throw, not
-// silently skipped or reimplemented, per this project's established discipline (see
+// --- One remaining genuinely new, unported dependency -- disclosed via a loud throw,
+// not silently skipped or reimplemented, per this project's established discipline (see
 // `internalCascadeHelpers.ts`'s own header comment and `../type/mapTypeRepresentations
 // .ts`'s identical treatment of its own unported dependencies) ---
 //
@@ -61,27 +61,36 @@
 // `api.feature` has no TS port of any kind. Only reached when `product` actually
 // declares a non-empty `HasOpenings` (an `IfcElement` with at least one void
 // relationship) -- an occurrence with no openings, or a non-`IfcElement`, is unaffected.
+// Still a `TODOS.md` entry, thrown up front the moment it's clear the blocked path would
+// actually be needed -- matching this project's "throw before mutating, don't leave a
+// worse partial state than refusing outright" discipline (`../type/mapTypeRepresentations
+// .ts`'s own header comment is the direct precedent).
 //
-// `product.is_a("IfcGrid")` -> `ifcopenshell.api.grid.remove_grid_axis`: `api.grid` has
-// no TS port of any kind. Only reached for a genuine `IfcGrid` with at least one axis --
-// a non-`IfcGrid`, or an axis-free grid, is unaffected.
+// `product.is_a("IfcGrid")` -> `ifcopenshell.api.grid.remove_grid_axis`: RESOLVED -- now
+// wired in for real. `api.grid` landed in full (`../grid/removeGridAxis.ts`), and this
+// branch now calls it exactly as real Python does: `for axis in product.UAxes +
+// product.VAxes + (product.WAxes or ()): ifcopenshell.api.grid.remove_grid_axis(file,
+// axis=axis)`, ported below as a flat concatenation of `product`'s own `UAxes`/`VAxes`/
+// `WAxes` (the third possibly empty/`null`, matching Python's own `or ()`) fed one at a
+// time into `removeGridAxis`. `test_removing_axes_of_a_grid` (previously pinned as a
+// "throws the disclosed blocked error" regression, per this file's own former framing
+// here) is now restored to its real Python assertion in `removeProduct.test.ts`.
 //
-// Both are new `TODOS.md` entries (a genuinely different pair of blocked call sites
-// than the pre-existing `edit_object_placement`/`api.material.assign_material`/
-// `api.geometry.map_representation` entries), each thrown up front the moment it's
-// clear the blocked path would actually be needed -- matching this project's "throw
-// before mutating, don't leave a worse partial state than refusing outright" discipline
-// (`../type/mapTypeRepresentations.ts`'s own header comment is the direct precedent).
+// --- The generic inverse-cascade tail's own two formerly-unported branches, both now
+// RESOLVED, carried over unchanged in shape from `internalCascadeHelpers.ts`'s own
+// `removeProductCascade` ---
 //
-// --- The generic inverse-cascade tail's own unported branch, carried over unchanged
-// from `internalCascadeHelpers.ts`'s own `removeProductCascade` ---
-//
-// `IfcRelSpaceBoundary` -> `ifcopenshell.api.boundary.remove_boundary` (`api.boundary`
-// has no TS port at all -- a `TODOS.md` entry) throws a clear, disclosed error rather
-// than silently leaving a dangling/incorrect relationship.
+// `IfcRelSpaceBoundary` -> `ifcopenshell.api.boundary.remove_boundary`: RESOLVED -- now
+// wired in for real. `api.boundary` landed in full (`../boundary/removeBoundary.ts`),
+// and this branch now calls `removeBoundary(file, { boundary: inverse })` exactly as
+// real Python does (`ifcopenshell.api.boundary.remove_boundary(file, boundary=inverse)`
+// -- `inverse`, the `IfcRelSpaceBoundary` itself, is the `boundary` argument, not
+// `product`). `test_removing_all_space_boundaries_of_an_element` (previously pinned as
+// a "throws the disclosed blocked error" regression, per this file's own former framing
+// here) is now restored to its real Python assertion in `removeProduct.test.ts`.
 //
 // `IfcRelAssociatesMaterial` -> `ifcopenshell.api.material.unassign_material` USED to
-// be a second disclosed-throw branch here (`api.material` had no TS port at all when
+// be a third disclosed-throw branch here (`api.material` had no TS port at all when
 // this file was first written), but is now a real call: `api.material` chunk 1 landed
 // `unassignMaterial`/`assignMaterial`/`copyMaterial` (`../material/index.ts`), and
 // this branch was updated to call the real, exported `unassignMaterial(file,
@@ -123,8 +132,10 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as elementUtil from "../../util/element";
+import { removeBoundary } from "../boundary/removeBoundary";
 import { removeRepresentation } from "../geometry/removeRepresentation";
 import { unassignRepresentation } from "../geometry/unassignRepresentation";
+import { removeGridAxis } from "../grid/removeGridAxis";
 import { wrapUsecase } from "../hooks";
 import { unassignMaterial } from "../material/unassignMaterial";
 import { removePset } from "../pset/removePset";
@@ -227,16 +238,15 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
 		);
 	}
 
-	// See this file's own header comment -- `api.grid` has no TS port of any kind. Only
-	// reached for a genuine IfcGrid with at least one axis.
+	// See this file's own header comment -- `api.grid` is now fully ported. Real Python:
+	// `for axis in product.UAxes + product.VAxes + (product.WAxes or ()):
+	// ifcopenshell.api.grid.remove_grid_axis(file, axis=axis)`.
 	if (product.isA("IfcGrid")) {
 		const uAxes = (product.get("UAxes") as EntityInstance[] | null) ?? [];
 		const vAxes = (product.get("VAxes") as EntityInstance[] | null) ?? [];
 		const wAxes = (product.get("WAxes") as EntityInstance[] | null) ?? [];
-		if (uAxes.length + vAxes.length + wAxes.length > 0) {
-			throw new Error(
-				"removeProduct: removing an IfcGrid's axes needs api.grid.removeGridAxis, not ported yet -- see TODOS.md.",
-			);
+		for (const axis of [...uAxes, ...vAxes, ...wAxes]) {
+			removeGridAxis(file, { axis });
 		}
 	}
 
@@ -277,9 +287,10 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
 				unassignType(file, { relatedObjects: [product] });
 			}
 		} else if (inverse.isA("IfcRelSpaceBoundary")) {
-			throw new Error(
-				"removeProduct: IfcRelSpaceBoundary cleanup needs api.boundary.removeBoundary, not ported yet -- see TODOS.md.",
-			);
+			// See this file's own header comment -- `api.boundary` is now fully ported.
+			// `inverse` (the `IfcRelSpaceBoundary` itself) is the `boundary` argument, not
+			// `product` -- matching real Python's own `remove_boundary(file, boundary=inverse)`.
+			removeBoundary(file, { boundary: inverse });
 		} else if (
 			inverse.isA("IfcRelFillsElement") ||
 			inverse.isA("IfcRelVoidsElement") ||
@@ -392,13 +403,13 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
  * nesting relationships are removed (but naturally, the materials, types, containers,
  * etc themselves remain).
  *
- * **Disclosed, real blockers** (throws, see this file's own header comment and
- * `TODOS.md`): removing an element with `HasOpenings` (needs `api.feature`), removing
- * an `IfcGrid` with axes (needs `api.grid`), or a space boundary (needs `api.boundary
- * .removeBoundary`) -- none of those 3 modules have any TS port yet. A material
- * association is no longer one of these -- `api.material.unassignMaterial` is real
- * (see `../material/index.ts`). Every other relationship this function cleans up is
- * fully ported.
+ * **Disclosed, real blocker** (throws, see this file's own header comment and
+ * `TODOS.md`): removing an element with `HasOpenings` (needs `api.feature`, which has
+ * no TS port of any kind yet). Removing an `IfcGrid` with axes and removing a space
+ * boundary are no longer blockers -- `api.grid.removeGridAxis`/`api.boundary
+ * .removeBoundary` are both real now (see `../grid/index.ts`/`../boundary/index.ts`),
+ * same as `api.material.unassignMaterial` (see `../material/index.ts`). Every other
+ * relationship this function cleans up is fully ported.
  *
  * @example
  * ```ts
