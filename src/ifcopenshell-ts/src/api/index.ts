@@ -361,3 +361,27 @@ export * as grid from "./grid";
 // empirically for this specific case. See `boundary/index.ts`'s own header comment
 // for the full scope and disclosures.
 export * as boundary from "./boundary";
+
+// Phase 6, `api.georeference` chunk: a brand-new module, all 5 real files ported in one
+// chunk (489 lines total -- no TS port of any kind before this chunk). Manages
+// georeferencing metadata -- an IFC model's coordinate reference system (CRS), map
+// conversion, true north, and WCS (World Coordinate System). No unported dependency of
+// any kind (`api.pset.addPset`/`.editPset`/`.removePset`, `util.element.getPset`/
+// `.removeDeep2`, `util.geolocation.angle2yaxis`, `util.unit.calculateUnitScale`, all
+// already landed); `editWcs`'s `numpy`/`shape_builder` import is NOT a blocker either (two
+// small `np.isclose`/`np.allclose` tolerance checks and one already-ported `ShapeBuilder`
+// method, both duplicated as small per-module private helpers per this project's
+// established convention). Confirmed real schema divergences (`IfcProjectedCRS`/
+// `IfcCoordinateOperation`/`IfcMapConversion` don't exist on IFC2X3 at all;
+// `IfcMapConversionScaled`/`IfcRigidOperation` are IFC4X3-only) and two categories of
+// disclosed findings: the ninth/tenth confirmed consequences of the already-disclosed
+// `EntityInstance.setByIndex`/`IfcFile.createEntity` primitive-layer gap (blocking
+// `addGeoreferencing`'s/`editGeoreferencing`'s IFC2X3 branches and one optional IFC4X3
+// `ifcClass` branch -- `editGeoreferencing`'s IFC2X3 branch also carries a real,
+// independently-confirmed dead-code Python bug of its own, a computed wrapped value that
+// is silently discarded), and two more confirmed hits of the already-disclosed native
+// inverse-index bug (`editTrueNorth`'s "unset true north" branch, `removeGeoreferencing`'s
+// `MapUnit` cleanup), each worked around the same established `removeDeep2`-with-
+// `alsoConsider` technique. See `georeference/index.ts`'s own header comment for the full
+// scope and disclosures.
+export * as georeference from "./georeference";
