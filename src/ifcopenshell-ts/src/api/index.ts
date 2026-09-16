@@ -288,3 +288,25 @@ export * as resource from "./resource";
 // all; `IfcStructuralActivity` subtypes have no `PredefinedType` there either). See
 // `structural/index.ts`'s own header comment for the full scope and disclosures.
 export * as structural from "./structural";
+
+// Phase 6, `api.cost` chunk: one brand-new module, all 20 real files ported in one
+// chunk (~1720 lines total -- no TS port of any kind before this chunk), plus ONE file
+// from the otherwise entirely-unported `api.sequence` module (`add_date_time`, a real
+// dependency of `cost.addCostSchedule`, ported into a new, deliberately minimal
+// `api.sequence` barrel of its own -- see `sequence/index.ts`'s own header comment).
+// Manages cost schedules/items/values (`IfcCostSchedule`/`IfcCostItem`/`IfcCostValue`)
+// and parametric quantity take-off, via the already-landed `api.control`/`api.nest`/
+// `api.root`, `util.cost`/`util.element`/`util.resource`/`util.unit`. The largest and
+// most complex file (`assignCostItemQuantity`, 300 lines) uses a small, hand-rolled
+// recursive-descent arithmetic-formula parser/evaluator in place of real Python's
+// `ast`/`operator` modules -- investigated in full and determined NOT to be a blocker,
+// matching `util/cost.ts`'s own established "hand-roll a small grammar rather than
+// reach for a library" precedent for a different, unrelated formula mini-language in
+// this same API family. See `cost/index.ts`'s own header comment for the full
+// dependency confirmation, schema-difference findings, and several disclosed real
+// Python quirks/bugs (a copy-paste `source`-vs-`destination` bug in
+// `copyCostItemValues`, a throwaway-then-immediately-deleted `IfcRelNests` in
+// `copyCostItem`, an intentional-but-non-obvious `CostValues` aliasing in
+// `assignCostValue`, and more).
+export * as cost from "./cost";
+export * as sequence from "./sequence";

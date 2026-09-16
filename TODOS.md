@@ -841,6 +841,49 @@ creates a real, multi-attribute ENTITY (`IfcStructuralAnalysisModel`/
 `IfcAxis2Placement3D`/`IfcDirection`/etc.), never a standalone valued simple/
 defined-type instance.
 
+**UPDATE 2026-09-16 (`api.cost` chunk, `edit_cost_value.ts`/`edit_cost_value_formula.ts`/`calculate_cost_item_resource_value.ts` files):** found an eighth,
+independent consequence -- `ifcopenshell.api.cost.edit_cost_value`'s `AppliedValue`
+branch (`file.createEntity("IfcMonetaryMeasure", value)`) and its `UnitBasis` branch
+(`file.createEntity(measureClass, unitBasis.ValueComponent)`), plus (transitively)
+`ifcopenshell.api.cost.edit_cost_value_formula`'s own `AppliedValue`-wrapping step for
+every leaf formula operand, plus (transitively again)
+`ifcopenshell.api.cost.calculate_cost_item_resource_value`'s own final
+`edit_cost_value_formula` call for every resource -- all hit the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this
+entry already documents. Confirmed empirically against this exact worktree's own built
+native addon while writing `editCostValue.test.ts`/`editCostValueFormula.test.ts`
+(a real repro during test-writing, not assumed). This is a notably WIDE-impact instance:
+`edit_cost_value_formula`'s real end-to-end usefulness (actually writing a computed
+numeric cost value) is blocked for essentially every realistic formula today, and
+`calculate_cost_item_resource_value` (which always ends in a real numeric formula) is
+thus blocked for every resource with a resolvable cost too. Ported all three functions
+completely and faithfully anyway: every attribute/step that does NOT need to
+materialize a brand-new standalone typed value (the generic `setattr` loop for every
+other `IfcCostValue`/`IfcCostItem`/`IfcCostSchedule` attribute; `Category`/
+`ArithmeticOperator` bookkeeping; reusing an already-`ifc`-paired existing
+sub-`IfcCostValue`; resolving resources/costs/quantities; `addCostValue`/naming) remains
+fully functional and gets real, passing test coverage -- only the exact
+`file.createEntity(<simple/defined-type>, <value>)` call itself throws, at the exact
+point real Python would materialize the value, with no proactive guard, matching
+`editPset.ts`'s/`editSurfaceStyle.ts`'s/`editPropTemplate.ts`'s/
+`editStructuralBoundaryCondition.ts`'s own "let the native call fail naturally"
+precedent. `editCostValue.test.ts`, `editCostValueFormula.test.ts`, and
+`calculateCostItemResourceValue.test.ts` each pin this CURRENT, disclosed, blocked
+behavior with dedicated tests, with comments recording the real, unblocked assertions to
+restore once this gap closes. See `src/api/cost/editCostValue.ts`'s,
+`src/api/cost/editCostValueFormula.ts`'s, and
+`src/api/cost/calculateCostItemResourceValue.ts`'s own header comments for the full
+writeup. No other file across this 20-file, brand-new `api.cost` module touches this gap
+at all -- every other `file.createEntity(...)` call in the module creates a real
+ENTITY (`IfcCostItem`/`IfcCostSchedule`/`IfcCostValue`/`IfcQuantity*`/`IfcRelNests`/
+`IfcRelAssignsToControl`/`IfcDateAndTime`/`IfcCalendarDate`/`IfcLocalTime`), never a
+standalone valued simple/defined-type instance -- confirmed by reading every real file
+in the module, not assumed (`assignCostItemQuantity.ts`'s own `file.createEntity(ifcClass,
+"Unnamed")` quantity-creation calls are unaffected: `IfcQuantityVolume`/etc. are genuine
+multi-attribute ENTITY declarations, not simple/defined types, and their `.setByIndex(3,
+result)` write is on an ALREADY-CONSTRUCTED real entity, not part of the initial
+positional-args construction call).
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
