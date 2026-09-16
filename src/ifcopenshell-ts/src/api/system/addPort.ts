@@ -8,14 +8,10 @@
 // real Python's own `import ifcopenshell.api.system` at the top of `add_port.py` is
 // this exact self-referential call, `ifcopenshell.api.system.assign_port(...)`).
 //
-// Note: since `assignPort` may itself throw the disclosed `editObjectPlacement`
-// blocker (see `./assignPort.ts`'s own header comment and `TODOS.md`), calling
-// `addPort` WITH an `element` can propagate that same throw -- but only in the exact
-// scenario `assignPort` itself would already throw (the new port already has an
-// `IfcLocalPlacement`, which a just-`createEntity`-d bare port never does -- see
-// `./assignPort.ts`'s own disclosure for exactly when this is reachable). Calling
-// `addPort` without an `element`, or with an `element` but no orphaned pre-placed
-// port, is entirely unaffected.
+// `assignPort`'s own placement-relocalization step (`api.geometry.editObjectPlacement`,
+// see `./assignPort.ts`'s own header comment) is fully portable -- calling `addPort`
+// WITH an `element` is unaffected either way, since a just-`createEntity`-d bare port
+// never has an `ObjectPlacement` of its own yet.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";

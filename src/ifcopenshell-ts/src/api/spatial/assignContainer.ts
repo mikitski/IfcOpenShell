@@ -52,46 +52,32 @@
 // module, is ported here. `test_removing_aggregation_if_it_exists` (this chunk's own
 // ported test suite, `assignContainer.test.ts`) exercises this path for real.
 //
-// --- `geometry.edit_object_placement`: NOT ported, a genuine disclosed blocker ---
+// --- `geometry.edit_object_placement`: RESOLVED -- now wired in for real ---
 //
-// `ifcopenshell.api.geometry.edit_object_placement` (201 LOC: 4x4 matrix math via
-// numpy, `ShapeBuilder.create_axis2_placement_3d`, a recursive "move my children too"
-// traversal, `util.unit.calculate_unit_scale` unit conversion) is a substantially
-// larger, independent piece of work -- per the research doc's own §3 framing,
-// `geometry` is one of the seven subpackages "where real design decisions are
-// needed," not a small CRUD dependency like `aggregate.unassign_object` above. This
-// port does NOT inline a partial/simplified reimplementation of it (risking a subtly
-// wrong matrix-math port reviewed under this chunk's much narrower "spatial" scope)
-// nor invoke a stub that throws (which would make `assignContainer` itself throw on
-// every call moving an `IfcLocalPlacement`-having product between containers --
-// a correctness regression far worse than the placement simply not being
-// re-localized). Instead: **the placement-relocalization step is simply not invoked**.
-// This is a real, observable behavior gap versus Python: after calling `assignContainer`
-// to move a product with an `IfcLocalPlacement` between two containers whose own
-// placements differ, the product's raw `ObjectPlacement` matrix is left exactly as it
-// was (still expressed relative to whatever `PlacementRelTo` it already had) -- the
-// product does NOT visually shift in its `PlacementRelTo`'s own frame, but IS
-// visually shifted in absolute world space if the old and new containers sit at
-// different absolute locations, exactly the regression `edit_object_placement` exists
-// to prevent. Tracked as a `TODOS.md` entry (see that file) for whenever `api.geometry.
-// edit_object_placement` lands as its own chunk. The containment *relationship*
-// surgery above -- the actual point of this function -- is fully implemented and
-// correct independent of this gap; `ObjectPlacement` is a wholly separate IFC
-// attribute with no schema-level linkage to `IfcRelContainedInSpatialStructure`.
-// `test_not_updating_placement_if_placement_is_not_relative` (ported, in
-// `assignContainer.test.ts`) is unaffected by this gap -- Python's own guard
-// (`placement.is_a("IfcLocalPlacement")`) already skips non-local placements
-// regardless, so its assertion (`subelement.ObjectPlacement == placement`, unchanged)
-// holds whether or not `edit_object_placement` exists.
-// `test_assigning_a_container_does_not_shift_object_placements` (the one Python test
-// this gap genuinely blocks -- its own setup calls `ifcopenshell.api.geometry.
-// edit_object_placement` directly) is NOT ported here for that reason.
+// `ifcopenshell.api.geometry.edit_object_placement` landed for real (see
+// `../geometry/editObjectPlacement.ts`'s own header comment) -- this function's own
+// final loop now calls it exactly as real Python does: for every product actually
+// changed (`productsToChange`, both the "had no container" and "moved to a different
+// container" groups), if it currently has an `ObjectPlacement` AND that placement
+// `isA("IfcLocalPlacement")`, its placement is re-localized against its own CURRENT
+// (already-updated-above) `getLocalPlacement`-derived absolute matrix, `isSi: false`
+// (matching real Python's own `get_local_placement`, which returns project-unit
+// coordinates, never SI). This preserves each product's absolute world position across
+// the container move, exactly the regression this call exists to prevent.
+// `test_assigning_a_container_does_not_shift_object_placements` (previously NOT
+// ported, since it was the one Python test this gap directly blocked) is now ported
+// for real, below. `test_not_updating_placement_if_placement_is_not_relative` is
+// unaffected either way -- Python's own guard (`placement.is_a("IfcLocalPlacement")`)
+// already skips non-local placements regardless of whether `edit_object_placement`
+// exists.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as guid from "../../guid";
 import * as elementUtil from "../../util/element";
+import { getLocalPlacement } from "../../util/placement";
 import { unassignObject } from "../aggregate/unassignObject";
+import { editObjectPlacement } from "../geometry/editObjectPlacement";
 import { wrapUsecase } from "../hooks";
 import { createOwnerHistory } from "../owner/createOwnerHistory";
 import { updateOwnerHistory } from "../owner/updateOwnerHistory";
@@ -206,11 +192,18 @@ function assignContainerUsecase(file: IfcFile, settings: AssignContainerSettings
 		);
 	}
 
-	// NOTE (disclosed blocker, see this file's header comment): real Python now
-	// re-localizes each changed product's placement here, via
-	// `ifcopenshell.api.geometry.edit_object_placement`, so its absolute world
-	// position doesn't shift when moved between containers. `api.geometry` is not
-	// yet ported in this TS codebase -- this step is skipped, not stubbed/faked.
+	// Localize placement relative to a new container for affected products -- see this
+	// file's header comment (now resolved).
+	for (const product of productsToChange) {
+		const placement = product.get("ObjectPlacement") as EntityInstance | null;
+		if (placement?.isA("IfcLocalPlacement")) {
+			editObjectPlacement(file, {
+				product,
+				matrix: getLocalPlacement(placement),
+				isSi: false,
+			});
+		}
+	}
 
 	return structureRel;
 }

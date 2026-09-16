@@ -1,20 +1,23 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/system/test_assign_port.py` (src/ifcopenshell-python).
-// `test_assigning_a_port_once_only` is ported verbatim (a bare
-// `file.createEntity("IfcDistributionPort")` port has no `ObjectPlacement`, so
-// `updatePortPlacement` no-ops -- see `../../../src/api/system/assignPort.ts`'s own
-// header comment). `test_updating_the_placement_to_be_relative_if_it_exists` needs
-// `ifcopenshell.api.geometry.edit_object_placement` (not ported anywhere in this
-// project) both to set up its own fixture AND to exercise the real assertion --
-// replaced with a dedicated disclosed-throw regression test instead, matching this
-// project's established pattern (see e.g. `../root/copyClass.test.ts`'s own
-// "throws the disclosed blocked error" tests). See `TODOS.md`.
+// Both real Python tests are now ported for real: `test_assigning_a_port_once_only`
+// verbatim (a bare `file.createEntity("IfcDistributionPort")` port has no
+// `ObjectPlacement`, so `updatePortPlacement` no-ops -- see
+// `../../../src/api/system/assignPort.ts`'s own header comment), and
+// `test_updating_the_placement_to_be_relative_if_it_exists` -- previously a
+// disclosed-throw pin, now ported for real since `api.geometry.editObjectPlacement`
+// has landed.
 
+import { mat4 } from "gl-matrix";
 import { describe, expect, test } from "vitest";
+import { editObjectPlacement } from "../../../src/api/geometry/editObjectPlacement";
 import { createEntity } from "../../../src/api/root/createEntity";
+import { addPort } from "../../../src/api/system/addPort";
 import { assignPort } from "../../../src/api/system/assignPort";
+import { assignUnit } from "../../../src/api/unit/assignUnit";
 import type { EntityInstance } from "../../../src/entityInstance";
+import { getLocalPlacement } from "../../../src/util/placement";
 import * as systemUtil from "../../../src/util/system";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
@@ -43,14 +46,30 @@ describe.each(AVAILABLE_SCHEMAS)("api.system.assignPort (%s)", (schema) => {
 		expect(systemUtil.getPorts(element)[0].equals(port)).toBe(true);
 	});
 
-	test("throws the disclosed blocked error when the port already has an IfcLocalPlacement (needs api.geometry.editObjectPlacement)", () => {
+	test("updating the placement to be relative if it exists", () => {
 		const file = createTestFile(schema);
-		const port = file.createEntity("IfcDistributionPort");
-		const axis = file.createEntity("IfcAxis2Placement3D");
-		const placement = file.createEntity("IfcLocalPlacement", null, axis);
-		port.set("ObjectPlacement", placement);
+		file.createEntity("IfcProject");
+		assignUnit(file);
 		const element = createEntity(file, { ifcClass: "IfcFlowSegment" });
+		const subelement = addPort(file, {});
+		const matrix = mat4.fromTranslation(mat4.create(), [1, 1, 1]);
+		const submatrix = mat4.fromTranslation(mat4.create(), [1, 2, 3]);
 
-		expect(() => assignPort(file, { element, port })).toThrow(/editObjectPlacement/);
+		editObjectPlacement(file, { product: element, matrix: mat4.clone(matrix), isSi: false });
+		editObjectPlacement(file, { product: subelement, matrix: mat4.clone(submatrix), isSi: false });
+
+		assignPort(file, { element, port: subelement });
+
+		const actualElement = getLocalPlacement(element.get("ObjectPlacement") as EntityInstance);
+		const actualSubelement = getLocalPlacement(subelement.get("ObjectPlacement") as EntityInstance);
+		for (let i = 0; i < 16; i++) {
+			expect(actualElement[i]).toBeCloseTo(matrix[i], 9);
+			expect(actualSubelement[i]).toBeCloseTo(submatrix[i], 9);
+		}
+		expect(
+			((subelement.get("ObjectPlacement") as EntityInstance).get("PlacementRelTo") as EntityInstance).equals(
+				element.get("ObjectPlacement"),
+			),
+		).toBe(true);
 	});
 });

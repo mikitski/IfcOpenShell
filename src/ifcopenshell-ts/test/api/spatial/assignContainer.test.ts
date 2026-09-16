@@ -1,13 +1,16 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/spatial/test_assign_container.py` (src/ifcopenshell-
-// python). 5 of the real 7 Python test methods are ported:
+// python). 6 of the real 7 Python test methods are ported:
 // `test_assigning_a_container`, `test_doing_nothing_if_the_container_is_already_assigned`,
 // `test_that_old_containment_relationships_are_updated_if_they_still_contain_elements`,
 // `test_that_old_containment_relationships_are_purged_if_no_more_elements_are_contained`,
 // `test_not_updating_placement_if_placement_is_not_relative` (this last one is
-// unaffected by the disclosed `geometry.edit_object_placement` gap below -- see
-// `assignContainer.ts`'s own header comment).
+// unaffected either way by the `geometry.edit_object_placement` gap this file used to
+// disclose -- see `assignContainer.ts`'s own header comment), and, now that
+// `api.geometry.editObjectPlacement` has landed for real,
+// `test_assigning_a_container_does_not_shift_object_placements` (previously NOT
+// ported -- see below).
 //
 // `test_removing_aggregation_if_it_exists` is ported with one disclosed adaptation:
 // real Python's setup calls `ifcopenshell.api.aggregate.assign_object` (not ported in
@@ -18,18 +21,23 @@
 // dropped -- nothing in this test's own assertion (`get_aggregate` returns null)
 // depends on a unit assignment existing.
 //
-// `test_assigning_a_container_does_not_shift_object_placements` is NOT ported: its own
-// setup calls `ifcopenshell.api.geometry.edit_object_placement` directly, and its
-// assertion specifically exercises `assignContainer`'s own (disclosed, unported)
-// placement-relocalization step -- see `assignContainer.ts`'s header comment for the
-// full disclosure.
+// `test_assigning_a_container_does_not_shift_object_placements` -- RESOLVED, now
+// ported for real: real Python's own setup calls `ifcopenshell.api.geometry
+// .edit_object_placement` directly (now landed, see `../geometry
+// /editObjectPlacement.test.ts`) and its assertion exercises `assignContainer`'s own
+// placement-relocalization step (also now landed, see `assignContainer.ts`'s own
+// header comment).
 
+import { mat4 } from "gl-matrix";
 import { beforeEach, describe, expect, test } from "vitest";
+import { editObjectPlacement } from "../../../src/api/geometry/editObjectPlacement";
 import { ownerSettings } from "../../../src/api/owner/settings";
 import { assignContainer } from "../../../src/api/spatial/assignContainer";
+import { assignUnit } from "../../../src/api/unit/assignUnit";
 import type { EntityInstance } from "../../../src/entityInstance";
 import * as guid from "../../../src/guid";
 import { getAggregate, getContainer } from "../../../src/util/element";
+import { getLocalPlacement } from "../../../src/util/placement";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 beforeEach(() => {
@@ -98,6 +106,32 @@ describe.each(AVAILABLE_SCHEMAS)("api.spatial.assignContainer (%s)", (schema) =>
 		assignContainer(file, { products: [subelement1], relatingStructure: element2 });
 
 		expect(() => file.byId(relId)).toThrow();
+	});
+
+	test("assigning a container does not shift object placements", () => {
+		const file = createTestFile(schema);
+		file.createEntity("IfcProject");
+		assignUnit(file);
+		const element1 = file.createEntity("IfcBuilding");
+		const element2 = file.createEntity("IfcBuilding");
+		const subelement = file.createEntity("IfcWall");
+		assignContainer(file, { products: [subelement], relatingStructure: element1 });
+
+		const matrix1 = mat4.fromTranslation(mat4.create(), [1, 1, 1]);
+		const matrix2 = mat4.fromTranslation(mat4.create(), [2, 2, 2]);
+		editObjectPlacement(file, { product: element1, matrix: mat4.clone(matrix1), isSi: false });
+		editObjectPlacement(file, { product: element2, matrix: mat4.clone(matrix2), isSi: false });
+		editObjectPlacement(file, { product: subelement, matrix: mat4.clone(matrix1), isSi: false });
+
+		assignContainer(file, { products: [subelement], relatingStructure: element2 });
+
+		const relTo = (subelement.get("ObjectPlacement") as EntityInstance).get("PlacementRelTo") as EntityInstance;
+		const placesObject = relTo.get("PlacesObject") as EntityInstance[];
+		expect(placesObject[0]?.equals(element2)).toBe(true);
+		const actual = getLocalPlacement(subelement.get("ObjectPlacement") as EntityInstance);
+		for (let i = 0; i < 16; i++) {
+			expect(actual[i]).toBeCloseTo(matrix1[i], 9);
+		}
 	});
 
 	test("not updating placement if placement is not relative", () => {

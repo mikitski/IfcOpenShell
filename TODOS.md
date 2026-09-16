@@ -1365,7 +1365,7 @@ piece of work.
 
 ---
 
-### `api.spatial.assignContainer`/`api.aggregate.assignObject` skip the placement-relocalization step (`api.geometry.edit_object_placement` unported)
+### `api.spatial.assignContainer`/`api.aggregate.assignObject` skip the placement-relocalization step (`api.geometry.edit_object_placement` unported) -- **RESOLVED 2026-09-16, see UPDATE below: `edit_object_placement` landed for real, every call site in this file now wired in**
 
 **What:** Real Python's `ifcopenshell.api.spatial.assign_container` AND
 `ifcopenshell.api.aggregate.assign_object` both finish by calling
@@ -1489,6 +1489,84 @@ Both are pinned by dedicated regression tests, not silently dropped. Neither cha
 this entry's own top-level `assignContainer`/`assignObject` gap, which remains
 unrelated and fully blocked.
 
+**RESOLVED 2026-09-16 (`api.geometry` -- `edit_object_placement` lands for real):**
+`ifcopenshell.api.geometry.edit_object_placement` (201 LOC, this file's own top-level
+gap and the single most-cited disclosed blocker in this project) is now a real, fully
+exported function (`src/ifcopenshell-ts/src/api/geometry/editObjectPlacement.ts`). The
+4x4 matrix math this entry originally called out as "real, independent design work"
+turned out to be directly portable by reusing `util/placement.ts`'s own already-verified
+`a2p`/`getLocalPlacement` (that file's own header comment already established
+`gl-matrix`'s column-major layout and `mat4.multiply`'s argument order against numpy's
+`A @ B`) -- the only NEW verification this chunk needed was `mat4.invert` against
+numpy's `np.linalg.inv`, confirmed empirically with a disposable Node script (see
+`editObjectPlacement.ts`'s own header comment for the worked example). Ported line-for-
+line: the `hasattr` guard, the `is_si`/unit-conversion quirk (mutates the matrix's own
+translation column up to SI when `isSi: false`, ported verbatim including the
+opposite-of-what-the-name-suggests direction), `getPlacementRelTo`'s real 8-branch
+ordered chain (including `ContainedInStructure`'s own distinct early-return shape),
+`getChildrenSettings`'s real `IfcDistributionPort`-skip and `IfcFeatureElement`
+two-level-recursion special cases, and `getRelativePlacement`'s full matrix math.
+
+**One real, EMPIRICALLY VERIFIED, disclosed deviation from Python's own literal
+sequence, load-bearing not stylistic:** clearing `product.ObjectPlacement`/
+`old_placement.PlacementRelTo` to `null` (Python's own `= None` before calling
+`remove_deep2`) hits the EXACT SAME native primitive-layer bug this file's own
+"Native primitive-layer bug" entry (below) already discloses for an AGGREGATE
+attribute -- confirmed here for a SINGLE-entity attribute too (previously unconfirmed
+for that case): `.set(name, null)` does not correctly unregister the old value from the
+file's inverse index, which would otherwise make `removeDeep2`'s own
+`getTotalInverses(element) > 0` guard silently refuse to ever purge the old placement,
+breaking almost every real Python test in this module. Worked around (verified
+empirically, not assumed) by NEVER routing through an explicit `null` intermediate
+state for `product.ObjectPlacement`: a direct entity-to-entity reassignment (old
+placement -> new placement, skipping `null` entirely) was confirmed to correctly
+unregister/register both sides. `oldPlacement.PlacementRelTo` is deliberately never
+cleared at all (not even via a placeholder-entity workaround, which would leave a
+permanent orphan) -- `removeDeep2`'s own inverse-containment check independently
+guarantees a live ancestor placement is never swept into deletion, verified against
+this chunk's own full multi-level nested-placement test suite. See
+`editObjectPlacement.ts`'s own header comment for the complete writeup.
+
+**A second, real, genuine ordering bug found and fixed by this chunk's own test
+suite** (not present in real Python, introduced then caught during this port): an
+early draft passed `placementRelTo` directly to `IfcLocalPlacement`'s constructor
+(an "optimization" over real Python's own two-step "create blank, redirect old
+placement's inverses, THEN assign `PlacementRelTo`" sequence) -- this breaks when
+`placementRelTo` happens to equal `oldPlacement` (a real, reachable scenario: a
+product's relationship target's current placement equals the product's own current
+placement), since the newly-constructed placement would then be incorrectly caught by
+its own redirect loop and pointed at itself. Fixed by reproducing real Python's exact
+ordering (construct with `PlacementRelTo` unset, redirect old placement's inverses,
+THEN assign `PlacementRelTo`) -- caught by
+`test_changing_an_object_placement_shared_by_its_parent` (a real, ported Python test),
+exactly the kind of "subtle transposition/order bug" this chunk's own task brief
+warned about.
+
+**Retroactively resolves every call site this file and its own UPDATEs tracked:**
+1. `api.spatial.assignContainer`/`api.aggregate.assignObject`'s own top-level
+   placement-relocalization step (this entry) -- both now call `editObjectPlacement`
+   for real in their final loops; `test_assigning_a_container_does_not_shift_object_
+   placements`/its `aggregate` counterpart are now ported with real assertions in
+   `assignContainer.test.ts`/`assignObject.test.ts`.
+2. `api.root.reassignClass`'s `type_to_occurrence`-with-representations case (this
+   entry's own UPDATE above) -- `switchBetweenClassTypes` now completes both
+   directions for real; `test_keeping_representations_switching_from_type_class_to_
+   occurrence_class` is ported for real in `reassignClass.test.ts`. Also reproduced
+   real Python's own `resolve_representation` re-binding for the `type_to_occurrence`
+   unassign loop, which had been left un-ported as "dead code" while this path always
+   threw -- now real, since the path is reachable.
+3. `api.root.copyClass`'s distribution-ports branch (see `TODOS.md`'s dedicated
+   `copyClass` entry below) -- fully resolved, no blocked call site left in that file.
+   `test_copying_distribution_ports` is ported for real in `copyClass.test.ts`.
+4. `api.system.assignPort`'s `update_port_placement` step (see `TODOS.md`'s `api.system`
+   entry, folded into this file's own UPDATE above) -- fully resolved.
+   `test_updating_the_placement_to_be_relative_if_it_exists` is ported for real in
+   `assignPort.test.ts`.
+
+Full local suite (2058 passed, 55 skipped, all pre-existing schema-gated skips) run
+against a locally-built IFC4-only native addon (matching CI's own `-DSCHEMA_VERSIONS=4`
+build); `tsc --noEmit`/`biome check` both clean.
+
 ---
 
 ### `api.type.assignType` skips material-usage mapping (`api.material.assign_material` unported -- `api.material` has NO TS port of any kind yet) -- **RESOLVED 2026-09-14, see UPDATE below**
@@ -1606,7 +1684,7 @@ unrelated and remains fully open regardless.
 
 ---
 
-### `api.root.copyClass` skips distribution-port copying (`api.system` unported -- has no TS port of any kind yet) -- **NARROWED 2026-09-15, see UPDATE below: `api.system` half RESOLVED, still blocked on `api.geometry.editObjectPlacement`**
+### `api.root.copyClass` skips distribution-port copying (`api.system` unported -- has no TS port of any kind yet) -- **RESOLVED 2026-09-16, see UPDATE below: both the `api.system` half (2026-09-15) and the `api.geometry.editObjectPlacement` half (2026-09-16) are now real**
 
 **What:** Real Python's `ifcopenshell.api.root.copy_class`, when the product being copied has
 at least one nested `IfcDistributionPort` (via `IfcRelNests` in IFC4+, `IfcRelConnectsPortToElement`
@@ -1686,6 +1764,18 @@ connected to) -- not just a bare "it throws". Real Python's own
 matching the original's absolute matrix) remain unported, still blocked on
 `editObjectPlacement` exactly like every other call site tracked by this file's own
 first entry.
+
+**RESOLVED 2026-09-16 (`api.geometry.editObjectPlacement` lands for real):** The one
+remaining blocker this entry tracked is now real (see `TODOS.md`'s own `edit_object_
+placement` entry's "RESOLVED" UPDATE, above in this file). `copyClass.ts`'s ports
+branch now performs the ENTIRE real sequence for every copied port -- recursive port
+copy, new nest/connection relationship, `unassignPort`/`disconnectPort`, THEN
+`editObjectPlacement` to re-localize the copy's placement to the original's absolute
+matrix -- with no throw left at all. The disclosed-throw regression test is replaced
+with the real Python assertions (`test_copying_distribution_ports`, both the shared
+base class's connected-port-pair variant and the IFC2X3-specific simpler variant,
+ported as one combined test in `copyClass.test.ts` since the former is a strict
+superset of the latter's own assertions).
 
 ---
 
@@ -1914,6 +2004,28 @@ confirmed against the real C++ source for both this port's N-API shim and real P
 binding side by side. Pinned by a dedicated regression test,
 `test/api/geometry/unassignRepresentation.test.ts`'s "undo restores the purged representation
 map (type product path) ... also pins the disclosed inverse-index workaround".
+
+**UPDATE 2026-09-16 (`api.geometry.editObjectPlacement`):** Confirmed empirically (a
+disposable Node script against this worktree's own built native addon, not assumed from
+this entry's own prior aggregate-only confirmation) that the SAME bug applies to a
+SINGLE-entity-typed attribute too, not just an aggregate-of-entities one:
+`IfcProduct.ObjectPlacement`/`IfcLocalPlacement.PlacementRelTo` set to `null` both leave
+the old referenced entity's inverse count stuck, exactly like the aggregate case above.
+This is genuinely load-bearing for `edit_object_placement`'s own core "purge the old
+placement" logic (see `edit_object_placement`'s own `TODOS.md` entry, "RESOLVED" UPDATE
+above), which would otherwise silently fail to remove the old placement in almost every
+real Python test case. No `[]`-then-`null` equivalent exists for a single-entity
+attribute (there's no "empty" intermediate value) -- the workaround applied there
+instead is a direct entity-to-entity reassignment that never routes through `null` at
+all (verified separately: an old-value -> different-non-null-value transition DOES
+correctly register/unregister both sides), and, for the one attribute where the target
+value is genuinely `null` (`IfcLocalPlacement.PlacementRelTo` when purging without a
+disposable placeholder), relying instead on `removeDeep2`'s own independent
+inverse-containment safety net rather than reproducing Python's defensive
+pre-emptive clear (see `editObjectPlacement.ts`'s own header comment for the full
+reasoning). This is this entry's second confirmed real-world hit, not a duplicate --
+the underlying root cause and fix location in `attribute_value_shim.cpp` are identical
+either way.
 
 **Depends on / blocked by:** Nothing blocks other work landing -- the TS-level workaround already
 in place is safe and correct regardless of whether/when the native fix lands. The native fix

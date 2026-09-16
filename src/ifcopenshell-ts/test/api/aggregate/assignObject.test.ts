@@ -14,22 +14,28 @@
 // `test_removing_aggregation_if_it_exists`, which had to work around the *then*-unported
 // `aggregate.assign_object`).
 //
-// `test_assigning_a_container_does_not_shift_object_placements` is NOT ported: its own
-// setup calls `ifcopenshell.api.geometry.edit_object_placement` directly, and its
-// assertion specifically exercises `assignObject`'s own (disclosed, unported)
-// placement-relocalization step -- see `assignObject.ts`'s header comment and `TODOS.md`
-// for the full disclosure.
+// `test_assigning_a_container_does_not_shift_object_placements` -- RESOLVED, now ported
+// for real: real Python's own setup calls `ifcopenshell.api.geometry
+// .edit_object_placement` directly (now landed, see `../geometry
+// /editObjectPlacement.test.ts`) and its assertion exercises `assignObject`'s own
+// placement-relocalization step (also now landed, see `assignObject.ts`'s own header
+// comment).
 //
 // `ifcopenshell.api.unit.assign_unit` (called in several of real Python's test setups,
-// an entirely unrelated, also-unported `api.unit` module) is dropped throughout --
-// nothing in any ported test's own assertions depends on a unit assignment existing.
+// an entirely unrelated module) is dropped for every OTHER test below (nothing in
+// those tests' own assertions depends on a unit assignment existing) -- kept only for
+// the newly-ported placement test, which genuinely needs it.
 
+import { mat4 } from "gl-matrix";
 import { beforeEach, describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
+import { editObjectPlacement } from "../../../src/api/geometry/editObjectPlacement";
 import { ownerSettings } from "../../../src/api/owner/settings";
 import { assignContainer } from "../../../src/api/spatial/assignContainer";
+import { assignUnit } from "../../../src/api/unit/assignUnit";
 import type { EntityInstance } from "../../../src/entityInstance";
 import { getAggregate, getContainer } from "../../../src/util/element";
+import { getLocalPlacement } from "../../../src/util/placement";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 beforeEach(() => {
@@ -89,6 +95,32 @@ describe.each(AVAILABLE_SCHEMAS)("api.aggregate.assignObject (%s)", (schema) => 
 		assignObject(file, { products: [subelement1], relatingObject: element2 });
 
 		expect(() => file.byId(relId)).toThrow();
+	});
+
+	test("assigning a container does not shift object placements", () => {
+		const file = createTestFile(schema);
+		file.createEntity("IfcProject");
+		assignUnit(file);
+		const element1 = file.createEntity("IfcSite");
+		const element2 = file.createEntity("IfcSite");
+		const subelement = file.createEntity("IfcBuilding");
+		assignObject(file, { products: [subelement], relatingObject: element1 });
+
+		const matrix1 = mat4.fromTranslation(mat4.create(), [1, 1, 1]);
+		const matrix2 = mat4.fromTranslation(mat4.create(), [2, 2, 2]);
+		editObjectPlacement(file, { product: element1, matrix: mat4.clone(matrix1), isSi: false });
+		editObjectPlacement(file, { product: element2, matrix: mat4.clone(matrix2), isSi: false });
+		editObjectPlacement(file, { product: subelement, matrix: mat4.clone(matrix1), isSi: false });
+
+		assignObject(file, { products: [subelement], relatingObject: element2 });
+
+		const relTo = (subelement.get("ObjectPlacement") as EntityInstance).get("PlacementRelTo") as EntityInstance;
+		const placesObject = relTo.get("PlacesObject") as EntityInstance[];
+		expect(placesObject[0]?.equals(element2)).toBe(true);
+		const actual = getLocalPlacement(subelement.get("ObjectPlacement") as EntityInstance);
+		for (let i = 0; i < 16; i++) {
+			expect(actual[i]).toBeCloseTo(matrix1[i], 9);
+		}
 	});
 
 	test("not updating placement if placement is not relative", () => {
