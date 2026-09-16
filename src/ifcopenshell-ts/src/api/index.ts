@@ -310,3 +310,19 @@ export * as structural from "./structural";
 // `assignCostValue`, and more).
 export * as cost from "./cost";
 export * as sequence from "./sequence";
+
+// Phase 6, `api.profile` chunk: a brand-new module, all 6 real files ported in one
+// chunk (441 lines total -- no TS port of any kind before this chunk). Manages the
+// definition of cross-sectional profiles (`IfcProfileDef` subtypes) for structural
+// simulation and fabrication/carbon-counting purposes. No unported dependency of any
+// kind (`api.pset.removePset`, `util.element.copy`/`copyDeep`/`removeDeep2`,
+// `util.unit.calculateUnitScale`, all already landed); the `numpy`/`shape_builder`
+// import in `addArbitraryProfile`/`addArbitraryProfileWithVoids` is NOT a blocker
+// either (a trivial elementwise scalar division, no real numpy math -- reuses
+// `../../util/shapeBuilder.ts`'s already-landed `ifcSafeVectorType`/`V` directly).
+// Confirmed real schema divergences (`IfcIndexedPolyCurve`/`IfcCartesianPointList2D`/
+// `3D` don't exist on IFC2X3) and one disclosed real Python bug ported verbatim (
+// `addArbitraryProfileWithVoids`'s outer curve is never dimension-checked on IFC4+,
+// unlike its own inner-profile loop) -- see `profile/index.ts`'s own header comment
+// for the full writeup.
+export * as profile from "./profile";
