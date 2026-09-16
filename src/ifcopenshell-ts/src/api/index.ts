@@ -264,3 +264,27 @@ export * as psetTemplate from "./pset_template";
 // `"RemainingTime"` typo that should be `"RemainingWork"`, and more).
 export * as nest from "./nest";
 export * as resource from "./resource";
+
+// Phase 6, `api.structural` chunk: one brand-new module, all 23 real files ported in
+// one chunk (1113 lines total -- no TS port of any kind before this chunk). Manages
+// analytical properties for structural simulation -- `IfcStructuralAnalysisModel`,
+// `IfcStructuralLoadCase`/`IfcStructuralLoadGroup`, `IfcStructuralLoad*`/
+// `IfcStructuralActivity` subtypes, `IfcBoundaryCondition` subtypes -- via the
+// already-landed `api.group.assignGroup`/`.unassignGroup`, `api.owner.
+// createOwnerHistory`, `api.root.createEntity`, `guid`, `util.element.removeDeep2`,
+// plus this project's own already-landed `util/shapeBuilder.ts` port of
+// `ifcopenshell.util.shape_builder.ifc_safe_vector_type`/`VectorType` (confirmed NOT a
+// numpy blocker -- a trivial float-conversion helper). One call site
+// (`editStructuralBoundaryCondition`'s `"IfcBoolean"`/generic-measure-class branches)
+// is genuinely blocked by the same, already 6-times-confirmed primitive-layer gap
+// `TODOS.md` already tracks (`EntityInstance.setByIndex`/`IfcFile.createEntity` can't
+// write an initial value into a freshly created simple/defined-type instance) --
+// ported completely and faithfully anyway, throwing only at that exact point. Several
+// disclosed real Python quirks/bugs ported verbatim (an unreachable `assert False`, an
+// unguarded orphan-condition `AppliedCondition` clear, an asymmetric crash-on-unset-
+// `Axis` quirk, a missing `if history:` guard) and several confirmed real schema
+// divergences (`IfcStructuralLoadCase`/`IfcStructuralPointConnection.
+// ConditionCoordinateSystem`/`IfcStructuralCurveMember.Axis` don't exist on IFC2X3 at
+// all; `IfcStructuralActivity` subtypes have no `PredefinedType` there either). See
+// `structural/index.ts`'s own header comment for the full scope and disclosures.
+export * as structural from "./structural";

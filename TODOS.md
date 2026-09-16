@@ -815,6 +815,32 @@ call across the chunk creates a real, multi-attribute ENTITY (`IfcRelAssignsToPr
 `IfcRelAssignsToControl`/`IfcPropertySetTemplate`/`IfcSimplePropertyTemplate`/
 `IfcPropertyEnumeration`), never a standalone simple/defined-type value.
 
+**UPDATE 2026-09-16 (`api.structural` chunk, `edit_structural_boundary_condition.ts` file):** found a seventh, independent
+consequence -- `ifcopenshell.api.structural.edit_structural_boundary_condition`'s
+`"IfcBoolean"`/generic-measure-class branches (every `IfcBoundaryCondition` stiffness
+attribute, e.g. `TranslationalStiffnessX`, is a SELECT type -- confirmed against the
+generated `.d.ts`s: `unknown | null` -- so the caller names the concrete class,
+`"IfcBoolean"` or a real measure class like `"IfcLinearStiffnessMeasure"`, to wrap the
+raw value in) need `file.create_entity(data["type"], data["value"])` -- the identical
+`attribute_kind_of`/"Attribute access is only supported on entity instances" throw this
+entry already documents. Confirmed empirically against this exact worktree's own built
+native addon before writing `editStructuralBoundaryCondition.ts`. Ported the whole
+function completely and faithfully anyway: the `"string"`/`"null"` branch (a plain
+`.set()` with the raw value, never touching `createEntity`) is fully functional and
+tested; only the `"IfcBoolean"`/generic-class branches throw, at the exact point real
+Python would materialize the value, with no proactive guard -- matching
+`editPset.ts`'s/`editSurfaceStyle.ts`'s/`editPropTemplate.ts`'s own "let the native call
+fail naturally" precedent. `test/api/structural/editStructuralBoundaryCondition.test.ts`
+pins this CURRENT, disclosed, blocked behavior with 2 dedicated tests, each with a
+comment recording the real, unblocked assertion to restore once this gap closes. See
+`src/api/structural/editStructuralBoundaryCondition.ts`'s own header comment for the
+full writeup. No other file across this 23-file, brand-new `api.structural` module
+touches this gap at all -- every other `file.createEntity(...)` call in the module
+creates a real, multi-attribute ENTITY (`IfcStructuralAnalysisModel`/
+`IfcRelConnectsStructuralActivity`/`IfcBoundaryNodeCondition`/`IfcCartesianPoint`/
+`IfcAxis2Placement3D`/`IfcDirection`/etc.), never a standalone valued simple/
+defined-type instance.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
