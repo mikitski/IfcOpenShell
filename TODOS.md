@@ -1878,6 +1878,26 @@ placement" test for the regression coverage. Every previously-shipped or future 
 nulls a SCALAR entity-typed attribute (not just an aggregate one) and depends on the old
 referenced entity becoming fully unreferenced should be treated as an equally-suspect case.
 
+**UPDATE 2026-09-16 (`api.nest`/`api.resource` chunk): fourth confirmed hit, same SCALAR shape,
+same workaround, this time on `IfcConstructionResource.BaseQuantity` --** Real Python's
+`remove_resource_quantity` nulls `resource.BaseQuantity = None` before calling `remove_deep2(file,
+old_quantity)`, same shape as `remove_product`'s `ObjectPlacement` case above. Confirmed
+empirically (a real repro hit while writing this chunk's own test suite, not assumed) that this
+port's `resource.set("BaseQuantity", null)` hits the exact same bug -- `getTotalInverses
+(oldQuantity)` stayed at 1 after the nulling call, so `removeDeep2` silently refused to remove the
+orphaned quantity (confirmed via `addResourceQuantity.test.ts`'s own resource-type/quantity-type
+matrix test, which failed with a leftover `IfcPhysicalSimpleQuantity` count before this fix).
+Same workaround shape as `removeProduct.ts`: `src/ifcopenshell-ts/src/api/resource/
+removeResourceQuantity.ts` deliberately does NOT null `resource.BaseQuantity` itself -- it calls
+`elementUtil.removeDeep2(file, oldQuantity, [resource])` while `resource.BaseQuantity` is still
+live-pointing at `oldQuantity`, so the `alsoConsider` inverse-containment check succeeds via the
+unaffected code path, and `IfcFile.remove`'s own auto-nulling clears `resource.BaseQuantity` as a
+side effect of deleting `oldQuantity`. See `removeResourceQuantity.ts`'s own inline comment for
+the full writeup, and `removeResourceQuantity.test.ts`/`addResourceQuantity.test.ts` for the
+regression coverage. This is now the SECOND independent confirmation (beyond `removeProduct.ts`)
+that this bug reaches any future chunk's explicit-null-clear-then-`removeDeep2` idiom, not a
+one-off -- strengthens the case for prioritizing the native fix described above.
+
 ---
 
 ### `api.unit.addMonetaryUnit`/`editMonetaryUnit` tests use `"ZWL"`/`"DOLLARYDOO"` currency codes that don't exist in IFC2X3's `IfcCurrencyEnum` -- another `SCHEMA_VERSIONS=4`-only silent-skip casualty
