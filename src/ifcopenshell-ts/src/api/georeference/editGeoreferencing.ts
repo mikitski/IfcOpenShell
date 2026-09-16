@@ -68,6 +68,11 @@
 // `./addGeoreferencing.ts`'s own header comment for the full confirmation against the
 // generated `.d.ts`s; this file's IFC2X3 branch never touches those classes directly,
 // only the `ePSet_ProjectedCRS`/`ePSet_MapConversion` pset stand-ins.
+//
+// The IFC2X3 branch also reproduces real Python's own `if not (project :=
+// file.by_type("IfcProject")): return` early-return guard (a silent no-op for a
+// projectless model) -- found missing in an earlier draft of this port by `/code-review`
+// and fixed before merge; pinned by a dedicated test.
 
 import type { IfcFile } from "../../file";
 import { getPset } from "../../util/element";
@@ -89,7 +94,16 @@ function editGeoreferencingUsecase(file: IfcFile, settings: EditGeoreferencingSe
 	const { projectedCrs, coordinateOperation } = settings;
 
 	if (file.schema === "IFC2X3") {
-		const project = file.byType("IfcProject")[0];
+		// Python: `if not (project := file.by_type("IfcProject")): return` -- a silent
+		// no-op for a projectless model, BEFORE touching either pset. Matches
+		// `../georeference/addGeoreferencing.ts`'s own identical guard shape for the
+		// same real Python pattern. (`removeGeoreferencing.ts`'s own identical-looking
+		// `file.byType("IfcProject")[0]` line has NO such guard in real Python either --
+		// confirmed by reading `remove_georeferencing.py` directly -- so that one is
+		// correctly left unguarded, not an oversight.)
+		const projects = file.byType("IfcProject");
+		if (projects.length === 0) return;
+		const project = projects[0];
 
 		if (projectedCrs) {
 			const crsPset = getPset(project, "ePSet_ProjectedCRS") as Record<string, unknown> | null;

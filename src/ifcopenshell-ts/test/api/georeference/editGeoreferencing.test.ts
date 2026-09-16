@@ -88,4 +88,26 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC2X3"))("api.georeference
 			}),
 		).toThrow(/Attribute access is only supported on entity instances/);
 	});
+
+	test("is a silent no-op on a projectless IFC2X3 model (real Python's own early-return guard)", () => {
+		// Python: `if not (project := file.by_type("IfcProject")): return` -- checked
+		// BEFORE touching either pset. An earlier draft of this port dropped this guard
+		// entirely, so `file.byType("IfcProject")[0]` resolved to `undefined` and
+		// `getPset(undefined, ...)` threw a TypeError instead of silently no-op-ing --
+		// caught by `/code-review` before merge. See
+		// `../../../src/api/georeference/editGeoreferencing.ts`'s own header comment.
+		const file = createTestFile(schema);
+		stripProjectBootstrap(file);
+		expect(file.byType("IfcProject")).toHaveLength(0);
+
+		expect(() =>
+			editGeoreferencing(file, {
+				projectedCrs: { Name: "EPSG:7856" },
+				coordinateOperation: { Eastings: 123.45 },
+			}),
+		).not.toThrow();
+
+		// A genuine no-op: nothing was created.
+		expect(file.byType("IfcPropertySet")).toHaveLength(0);
+	});
 });
