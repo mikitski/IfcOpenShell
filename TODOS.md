@@ -1929,6 +1929,18 @@ directly against the real 223-line `remove_product.py` source.
 
 **Depends on / blocked by:** `ifcopenshell.api.boundary` (Phase 6, not yet started).
 
+**UPDATE 2026-09-16 (`api.boundary` chunk lands):** The dependency itself is now RESOLVED --
+`api.boundary.removeBoundary` is fully ported (`src/ifcopenshell-ts/src/api/boundary/removeBoundary.ts`).
+`removeProduct.ts`'s own guarded throw branch (this entry's own "Impact" section) is **deliberately
+left unwired here**, matching the established precedent that landing a dependency does not itself
+retrofit blocked call sites: `api.grid.removeGridAxis` landed one chunk earlier (PR #108) without
+this same function's own still-throwing `IfcGrid`-axis branch (a few lines above this one) being
+touched either. Wiring both back in (`IfcRelSpaceBoundary` here, `IfcGrid` axes above) is left as a
+single, later, deliberate follow-up chunk, matching how `api.geometry.editObjectPlacement`'s own
+5 blocked callers were retroactively resolved as an explicit, separate step once that function
+landed (see `PROGRESS.md`'s own "UPDATE 2026-09-16" entries for `api.spatial`/`api.aggregate`/
+`api.root.reassignClass`/`.copyClass`).
+
 ---
 
 ### Native primitive-layer bug: clearing an entity/aggregate-of-entity attribute to `null` via `.set()` leaves a stale (unregistered-but-still-counted) inverse-index entry
@@ -2078,6 +2090,24 @@ the full writeup, and `removeResourceQuantity.test.ts`/`addResourceQuantity.test
 regression coverage. This is now the SECOND independent confirmation (beyond `removeProduct.ts`)
 that this bug reaches any future chunk's explicit-null-clear-then-`removeDeep2` idiom, not a
 one-off -- strengthens the case for prioritizing the native fix described above.
+
+**UPDATE 2026-09-16 (`api.boundary` chunk): fifth confirmed hit, same SCALAR shape, same
+workaround, this time on `IfcRelSpaceBoundary.ConnectionGeometry` --** Real Python's
+`remove_boundary` nulls `boundary.ConnectionGeometry = None` before calling `remove_deep2(file,
+geometry)`, the same shape as `remove_product`'s `ObjectPlacement`/`remove_resource_quantity`'s
+`BaseQuantity` cases above. This chunk's own task brief explicitly required verifying this
+specific case empirically rather than assuming the same workaround shape applies unmodified --
+done via a disposable Node script against this worktree's own built native addon: the null-first
+approach (`boundary.set("ConnectionGeometry", null)` then `removeDeep2(file, geometry)`) left
+`getTotalInverses(geometry)` stuck at 1 forever, exactly reproducing this bug; the `alsoConsider`
+workaround (`removeDeep2(file, geometry, [boundary])`, `boundary.ConnectionGeometry` deliberately
+left untouched) correctly purged `geometry` and left `boundary.ConnectionGeometry` reading back as
+`null` afterward (via `IfcFile.remove`'s own auto-nulling side effect). See
+`src/ifcopenshell-ts/src/api/boundary/removeBoundary.ts`'s own header comment for the full writeup,
+and `removeBoundary.test.ts`'s "removing a boundary also removes its connection geometry" test
+(ported from real Python's own `test_removing_connection_geometry`) for the regression coverage.
+This is now the THIRD independent confirmation (beyond `removeProduct.ts`/`removeResourceQuantity.ts`)
+of this exact idiom, further strengthening the case for prioritizing the native fix described above.
 
 ---
 

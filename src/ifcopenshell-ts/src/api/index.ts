@@ -341,3 +341,23 @@ export * as profile from "./profile";
 // `remove_grid_axis` when `AxisCurve` was never set) -- see `grid/index.ts`'s own
 // header comment for the full writeup.
 export * as grid from "./grid";
+
+// Phase 6, `api.boundary` chunk: a brand-new module, all 4 real files ported in one
+// chunk (281 lines total -- no TS port of any kind before this chunk). Manages
+// `IfcRelSpaceBoundary` -- virtual interfaces between spaces (used for energy
+// analysis), optionally including a bounded-plane connection geometry. No unported
+// dependency of any kind (`util.element.copy`/`copyDeep`/`removeDeep2`,
+// `util.unit.calculateUnitScale`, `util.shapeBuilder.V`/`ifcSafeVectorType`, all
+// already landed); `assignConnectionGeometry`'s `numpy`/`shape_builder` import is NOT
+// a blocker either (an elementwise scalar division plus a small `np.allclose` ported
+// as a local helper -- no matrix/linear-algebra work of any kind, unlike
+// `../grid/`/`../geometry/editObjectPlacement.ts`'s own real 4x4 matrix math). No
+// schema divergence found for the geometry entities involved; one real,
+// per-SUBTYPE (not per-schema) attribute-availability difference confirmed and
+// ported verbatim (`ParentBoundary`/`CorrespondingBoundary` don't exist on plain
+// `IfcRelSpaceBoundary` on any schema). One confirmed hit of the already-disclosed
+// native inverse-index bug (`ConnectionGeometry` nulling in `removeBoundary`),
+// worked around via `removeDeep2`'s own `alsoConsider` parameter, verified
+// empirically for this specific case. See `boundary/index.ts`'s own header comment
+// for the full scope and disclosures.
+export * as boundary from "./boundary";
