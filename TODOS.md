@@ -884,6 +884,44 @@ multi-attribute ENTITY declarations, not simple/defined types, and their `.setBy
 result)` write is on an ALREADY-CONSTRUCTED real entity, not part of the initial
 positional-args construction call).
 
+**UPDATE 2026-09-16 (`api.georeference` chunk, `add_georeferencing.ts`/`edit_georeferencing.ts`
+files):** found a ninth (and tenth) independent consequence -- blocking BOTH real IFC2X3
+branches of a brand-new module. `ifcopenshell.api.georeference.add_georeferencing`'s
+IFC2X3 branch needs `edit_pset(file, crs, properties={"Name": name})` (a brand-new
+plain-string property on a just-created, empty pset) followed by three standalone
+`file.createIfcLengthMeasure(0)`-equivalent constructions for `coordinate_operation`'s
+own `Eastings`/`Northings`/`OrthogonalHeight` -- the first of these (the `editPset` call)
+already hits the identical `attribute_kind_of`/"Attribute access is only supported on
+entity instances" throw this entry already documents (its own fourth consequence, above),
+so the function throws there, before the `IfcLengthMeasure` constructions are ever
+reached. `add_georeferencing`'s optional `ifcClass: "IfcRigidOperation"` branch (IFC4X3
+only) hits the SAME gate directly via its own `FirstCoordinate`/`SecondCoordinate`
+`file.createIfcLengthMeasure(0)` calls. `ifcopenshell.api.georeference.edit_georeferencing`'s
+IFC2X3 branch hits the identical gate too, but for a real, INDEPENDENTLY DISCOVERED reason
+distinct from `editPset`'s own already-documented consequence: both of its own loops
+compute a wrapped value (`file.createIfcText`/`createIfcLabel`/`createIfcIdentifier`/
+`createIfcReal`/`createIfcLengthMeasure`) directly via `file.create_entity(class, v)` --
+confirmed, by reading the real source line-by-line, to be genuine DEAD CODE (a real,
+independently-confirmed Python bug: the computed value is reassigned to a loop-local
+variable that is NEVER written back into the `properties`/`coordinate_operation` dict,
+so `edit_pset` is subsequently called with the ORIGINAL, unmodified dict) -- meaning this
+port's own faithful reproduction of that dead computation throws on the very FIRST loop
+iteration, before `edit_pset` is ever reached at all. Confirmed empirically against this
+exact worktree's own built native addon before writing both files. Ported both functions
+completely and faithfully anyway: every code path up to the exact blocked call (both
+`addPset` calls in `add_georeferencing`'s IFC2X3 branch; the real `get_pset`/`file.by_id`
+pset-lookup steps in `edit_georeferencing`'s IFC2X3 branch; the `SourceCRS`/`TargetCRS`
+real-entity setup in `add_georeferencing`'s `IfcRigidOperation` branch) runs to completion,
+then throws naturally with no proactive guard, matching every other confirmed consequence
+of this same gap. `test/api/georeference/addGeoreferencing.test.ts`/
+`editGeoreferencing.test.ts` each pin this CURRENT, disclosed, blocked behavior with
+dedicated tests, with comments recording the real, unblocked assertions to restore once
+this gap closes. See `src/api/georeference/addGeoreferencing.ts`'s and
+`src/api/georeference/editGeoreferencing.ts`'s own header comments for the full writeup.
+The rest of this brand-new module (`editTrueNorth`, `editWcs`, `removeGeoreferencing`,
+and both functions' own IFC4+ default paths) is fully functional and unaffected by this
+gap -- confirmed by reading every real file in the module, not assumed.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
@@ -2133,6 +2171,28 @@ and `removeBoundary.test.ts`'s "removing a boundary also removes its connection 
 (ported from real Python's own `test_removing_connection_geometry`) for the regression coverage.
 This is now the THIRD independent confirmation (beyond `removeProduct.ts`/`removeResourceQuantity.ts`)
 of this exact idiom, further strengthening the case for prioritizing the native fix described above.
+
+**UPDATE 2026-09-16 (`api.georeference` chunk): sixth and seventh confirmed hits, same
+SCALAR shape, same workaround, on `IfcGeometricRepresentationContext.TrueNorth` and
+`IfcProjectedCRS.MapUnit` --** Real Python's `edit_true_north` nulls `context.TrueNorth =
+None` before checking `get_total_inverses(old_true_north)` to decide whether to
+`remove_deep2` it; `remove_georeferencing` nulls `projected_crs.MapUnit = None` before an
+identical check. Both hit this exact root-cause bug, confirmed empirically against this
+worktree's own built native addon before writing either file (not assumed to carry over
+unmodified). Both worked around via the same `alsoConsider`-based reordering
+`removeBoundary.ts`/`removeProduct.ts` already established: the old reference is
+deliberately left LIVE while `removeDeep2(file, oldValue, [holder])` runs (so its
+containment check sees a real, un-stale forward reference), with the actual attribute
+clear happening either as a side effect of `IfcFile.remove`'s auto-nulling (when the old
+value is genuinely deleted) or via an explicit, unconditional `.set(name, null)`
+afterward (when it's shared and must survive -- a plain, un-gapped forward-attribute
+clear on the STILL-LIVE holder entity, not the buggy "clear then check" sequence). See
+`src/ifcopenshell-ts/src/api/georeference/editTrueNorth.ts`'s and
+`src/ifcopenshell-ts/src/api/georeference/removeGeoreferencing.ts`'s own header comments
+for the full writeup, and each file's own test suite for dedicated regression coverage
+asserting the orphaned entity is genuinely removed (not just detached with a stale
+reference) and that a genuinely shared one survives untouched. This is now the FOURTH and
+FIFTH independent confirmations of this exact idiom.
 
 ---
 
