@@ -43,8 +43,7 @@
 // practice input; every real schema class this could be called with has at least one
 // applicable occurrence/type class).
 //
-// --- `switchBetweenClassTypes`: NARROWED (was fully blocked whenever `representations`
-// was non-empty; now only `type_to_occurrence` with representations remains blocked) ---
+// --- `switchBetweenClassTypes`: RESOLVED -- both directions now fully complete ---
 //
 // Real Python's flow: (1) unassign every one of `element`'s representations (fully
 // portable -- `api.geometry.unassignRepresentation`, already landed); (2) do the actual
@@ -53,37 +52,29 @@
 // .unassignPset`, all already landed); (3) reassign the same psets back (`api.pset
 // .assignPset`, already landed); (4) reassign the SAME representations back onto the
 // now-reclassified element, via `ifcopenshell.api.geometry.assign_representation` --
-// **now landed** (`../geometry/assignRepresentation.ts`, this project's own
-// `api.geometry` chunk 2); (5), ONLY for a `type_to_occurrence` switch with
-// representations (real Python's own precise guard: `if switch_type ==
-// "type_to_occurrence" and representations:`, re-read directly, NOT "any switch with
-// representations"), `ifcopenshell.api.geometry.edit_object_placement` -- still
-// unported, and out of scope for the `api.geometry` chunk that landed
-// `assignRepresentation`/`mapRepresentation` (see that chunk's own task brief: matrix
-// math, deliberately deferred).
+// landed (`../geometry/assignRepresentation.ts`, this project's own `api.geometry`
+// chunk 2); (5), ONLY for a `type_to_occurrence` switch with representations (real
+// Python's own precise guard: `if switch_type == "type_to_occurrence" and
+// representations:`, re-read directly, NOT "any switch with representations"),
+// `ifcopenshell.api.geometry.edit_object_placement` -- **now landed**
+// (`../geometry/editObjectPlacement.ts`).
 //
-// Since step (5)'s `edit_object_placement` is needed ONLY for `switch_type ==
+// Since `edit_object_placement` is needed ONLY for `switch_type ==
 // "type_to_occurrence"` (never for `"occurrence_to_type"` -- confirmed by re-reading
-// `switch_between_class_types`'s own final `if` verbatim, not assumed), and step (4)'s
-// `assignRepresentation` is now a real, landed function, this port now DISTINGUISHES the
-// two directions instead of blocking both uniformly:
-//   - `"occurrence_to_type"` with a non-empty `representations`: every remaining step
-//     ((1)-(4)) is portable, and step (5) is unreachable for this direction regardless
-//     (real Python's own guard excludes it) -- so this now completes for real, no throw
-//     at all. Pinned by this chunk's own ported
-//     `test_keeping_representations_switching_from_occurrence_class_to_type_class`
-//     (`reassignClass.test.ts`).
-//   - `"type_to_occurrence"` with a non-empty `representations`: step (5) is
-//     unconditionally reached and still needs the unported `edit_object_placement` --
-//     this still throws, matching this project's established "throw before mutating,
-//     don't leave a worse partial state" discipline (see `../type/mapTypeRepresentations
-//     .ts`'s own header comment for the identical shape this project used before
-//     `assignRepresentation` itself was landed) -- narrowed to cite ONLY
-//     `editObjectPlacement` now, not `assignRepresentation` too. Pinned by this chunk's
-//     own updated `test_keeping_representations_switching_from_type_class_to_occurrence_
-//     class` throw-assertion (`reassignClass.test.ts`).
-// An element/type with NO representations at all hits neither throw and completes the
-// full occurrence<->type switch correctly and independently either direction, as before.
+// `switch_between_class_types`'s own final `if` verbatim, not assumed), and it's real
+// Python's OWN call site (`edit_object_placement(self.file, product=element)`, no
+// `matrix`/`is_si` -- defaults to an identity matrix in SI units, "keeps IFC valid
+// (PlacementForShapeRepresentation)" per real Python's own comment, not an attempt to
+// preserve any particular world position), this now wires in directly: both
+// `"occurrence_to_type"` and `"type_to_occurrence"` switches with representations
+// complete for real, no throw left at all. Pinned by this chunk's own ported
+// `test_keeping_representations_switching_from_occurrence_class_to_type_class`
+// (unaffected, already real) and `test_keeping_representations_switching_from_type_
+// class_to_occurrence_class` (now ported for real too, replacing its own former
+// disclosed-throw pin -- `reassignClass.test.ts`). An element/type with NO
+// representations at all is unaffected either way (step (5)'s own `and
+// representations` guard means it's never reached), completing the full
+// occurrence<->type switch correctly and independently either direction, as before.
 //
 // --- The unassign-representations loop's real `resolve_representation` step: dead code
 // in THIS port, not omitted by oversight ---
@@ -117,6 +108,7 @@ import * as schemaUtil from "../../util/schema";
 import * as typeUtil from "../../util/type";
 import { unassignObject } from "../aggregate/unassignObject";
 import { assignRepresentation } from "../geometry/assignRepresentation";
+import { editObjectPlacement } from "../geometry/editObjectPlacement";
 import { unassignRepresentation } from "../geometry/unassignRepresentation";
 import { wrapUsecase } from "../hooks";
 import { assignPset } from "../pset/assignPset";
@@ -253,9 +245,7 @@ function simpleReassignment(
 
 /**
  * Python: `Usecase.switch_between_class_types(element, switch_type, ifc_class,
- * predefined_type)`. See this file's own header comment for the exact, narrowed shape
- * of this path's one remaining disclosed blocker (`type_to_occurrence` with
- * representations only -- `occurrence_to_type` now fully completes).
+ * predefined_type)`. Fully portable -- see this file's own header comment.
  */
 function switchBetweenClassTypes(
 	file: IfcFile,
@@ -268,24 +258,18 @@ function switchBetweenClassTypes(
 
 	const representations = representationUtil.getRepresentationsIter(originalElement);
 
-	// See this file's own header comment ("throw before mutating", narrowed) -- real
-	// Python's own final step (`if switch_type == "type_to_occurrence" and
-	// representations: edit_object_placement(...)`) is reached ONLY for this exact
-	// direction+non-empty-representations combination, and `edit_object_placement`
-	// remains unported -- so ONLY this combination still throws, before any mutation.
-	// `occurrence_to_type` (with or without representations) now completes for real.
-	if (switchType === "type_to_occurrence" && representations.length > 0) {
-		throw new Error(
-			`reassignClass: switching ${originalElement.isA()}#${originalElement.id()} from a type class to an occurrence class with ${representations.length} representation(s) needs api.geometry.editObjectPlacement (to keep PlacementForShapeRepresentation valid), not ported yet -- see TODOS.md. Unassign the representation(s) first (api.geometry.unassignRepresentation) if you don't need them preserved across the switch.`,
-		);
-	}
-
-	// Unassign every representation first. See this file's own header comment for why
-	// real Python's own `resolve_representation` re-binding (only relevant for
-	// `type_to_occurrence`, which always throws above whenever this loop would have
-	// anything to do) is dead code in this port, and not reproduced.
+	// Unassign every representation first. Real Python re-binds `rep` via
+	// `resolve_representation` ONLY for `type_to_occurrence` (unwrapping a mapped
+	// representation down to its real underlying one before unassigning it from the
+	// type) -- now that this direction is real (not a disclosed throw), ported for
+	// real too, matching real Python's own per-iteration re-binding exactly (the
+	// UNRESOLVED `representation` is still what gets reassigned back onto `element`
+	// below, matching Python's own `representations` list, which is never itself
+	// mutated by this re-binding).
 	for (const representation of representations) {
-		unassignRepresentation(file, { product: originalElement, representation });
+		const toUnassign =
+			switchType === "type_to_occurrence" ? representationUtil.resolveRepresentation(representation) : representation;
+		unassignRepresentation(file, { product: originalElement, representation: toUnassign });
 	}
 
 	let element: EntityInstance;
@@ -330,12 +314,16 @@ function switchBetweenClassTypes(
 		assignRepresentation(file, { product: element, representation });
 	}
 
-	// Real Python's remaining step here -- for a `type_to_occurrence` switch,
-	// `ifcopenshell.api.geometry.edit_object_placement` -- is unreachable at this point:
-	// that combination always throws above whenever `representations` is non-empty, and
-	// is a no-op (real Python's own `and representations` guard) otherwise. Omitted
-	// rather than kept as literal dead code referencing a function this file doesn't
-	// otherwise need to import.
+	// Keep IFC valid (PlacementForShapeRepresentation) -- real Python's own comment,
+	// ported verbatim. Only for a `type_to_occurrence` switch that actually had
+	// representations (real Python's own precise `and representations` guard);
+	// `edit_object_placement` is called with no `matrix`/`isSi` here, matching real
+	// Python's own call site exactly (`edit_object_placement(self.file,
+	// product=element)`) -- defaults to an identity matrix in SI units, not an attempt
+	// to preserve any particular prior world position.
+	if (switchType === "type_to_occurrence" && representations.length > 0) {
+		editObjectPlacement(file, { product: element });
+	}
 
 	return element;
 }
@@ -377,12 +365,8 @@ function reassignClassUsecase(file: IfcFile, settings: ReassignClassSettings): E
  * IFC4 and up. In IFC2X3, this may not occur if the type cannot be unambiguously
  * derived, so you are required to manually check this.
  *
- * Reassigning type class to occurrence (and vice versa) is supported, including
- * carrying representations across the switch -- **except** switching a TYPE to an
- * OCCURRENCE class when it has at least one representation, which still throws (see
- * this file's own header comment and `TODOS.md`: needs `api.geometry
- * .editObjectPlacement`, not ported yet). Switching an OCCURRENCE to a TYPE class with
- * representations now fully succeeds.
+ * Reassigning type class to occurrence (and vice versa) is fully supported, including
+ * carrying representations across the switch in either direction.
  *
  * @example
  * ```ts

@@ -1,39 +1,23 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/root/test_copy_class.py` (src/ifcopenshell-python,
-// `TestCopyClass`/`TestCopyClassIFC2X3`). Real Python's own fixtures lean on several
+// `TestCopyClass`/`TestCopyClassIFC2X3`). Real Python's own fixtures lean on a couple
 // sibling `api.*` functions this codebase hasn't ported yet (`api.feature.add_feature`/
-// `add_filling`, `api.geometry.edit_object_placement`/`connect_path`,
-// `api.unit.assign_unit`) -- every such case is ported here with its fixture built
-// directly via `file.createEntity`/`withAttrs` instead, matching `removeProduct
-// .test.ts`'s own established precedent for this exact substitution. `api.system.add_port`/
-// `assign_port`/`connect_port` are no longer in that list -- `api.system` landed for
-// real and the one test that needs them (`test_copying_distribution_ports`, below) now
-// uses the real functions directly, matching the fixture real Python itself uses.
+// `add_filling`, `api.geometry.connect_path`, `api.unit.assign_unit`) -- every such
+// case is ported here with its fixture built directly via
+// `file.createEntity`/`withAttrs` instead, matching `removeProduct.test.ts`'s own
+// established precedent for this exact substitution. `api.system.add_port`/
+// `assign_port`/`connect_port` and `api.geometry.edit_object_placement`/
+// `.copyMaterial` are no longer in that list -- all landed for real, so every real
+// Python test in this file now runs with its real assertions, no disclosed-throw pin
+// left in this file.
 //
-// 1 real Python test is genuinely blocked (a disclosed dependency on
-// `api.geometry.editObjectPlacement`, which has no TS port at all -- see
-// `../../../src/api/root/copyClass.ts`'s own header comment and `TODOS.md`) and is
-// pinned instead as a dedicated "throws the disclosed blocked error" regression test,
-// not silently dropped: `test_copying_distribution_ports`.
-//
-// `test_copying_material_sets_for_type_elements_only` (needs `api.material.copyMaterial`)
-// was ALSO blocked originally, but `api.material` chunk 1 landed `copyMaterial` for real
-// before this PR merged -- that test now runs with its real assertions instead.
-//
-// `test_copying_distribution_ports` itself was ALSO originally blocked on a second,
-// now-resolved dependency: `api.system` (`unassignPort`/`disconnectPort`) had no TS
-// port of any kind at all. The `api.system` chunk landed those for real, so
-// `copyClass.ts`'s ports branch now performs the ENTIRE real port-copying/cleanup
-// sequence (recursive port copy, new nest/connection relationship, `unassignPort`,
-// `disconnectPort`) -- it throws only at the one step that's still genuinely blocked,
-// `api.geometry.editObjectPlacement`'s own placement-relocalization call, which real
-// Python calls UNCONDITIONALLY for every copied port (unlike `api.system.assignPort`'s
-// own placement-guarded call site) -- so this test still can't run with its real
-// assertions, but the disclosed-throw regression test below is updated to assert the
-// real partial-mutation state up to that exact point (matching this project's
-// "throw only at the exact blocked point, after every mutation real Python would
-// already have made" discipline), not just a bare "it throws".
+// `test_copying_distribution_ports` was previously blocked twice over: first on
+// `api.system` (`unassignPort`/`disconnectPort`, resolved when that module landed),
+// then on `api.geometry.editObjectPlacement` itself (resolved in this chunk) -- see
+// `../../../src/api/root/copyClass.ts`'s own header comment for the full history.
+// `test_copying_material_sets_for_type_elements_only` (needed `api.material
+// .copyMaterial`) was resolved earlier, when `api.material` chunk 1 landed.
 //
 // The 2 pset-copying tests below don't use `api.pset.editPset` to populate their
 // property's value -- `editPset.ts`'s own header comment discloses a real,
@@ -461,75 +445,68 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.copyClass (%s)", (schema) => {
 	});
 });
 
-// --- Disclosed blockers: real, load-bearing dependencies on `api.system`/`api.material`,
-// neither of which has any TS port at all. See
-// `../../../src/api/root/copyClass.ts`'s own header comment and `TODOS.md`. ---
+describe.each(AVAILABLE_SCHEMAS)(
+	"api.root.copyClass -- previously-blocked, now-resolved dependencies (%s)",
+	(schema) => {
+		// Python: `TestCopyClass.test_copying_distribution_ports` (`IfcChiller` + a
+		// connected port pair) / `TestCopyClassIFC2X3.test_copying_distribution_ports`
+		// (`IfcFlowTerminal`, no connection) -- now fully real, since
+		// `api.geometry.editObjectPlacement` has landed (this chunk). Uses the shared
+		// base class's own richer fixture (a connected port pair) since it's a strict
+		// superset of the IFC2X3-specific variant's own assertions.
+		test("copying distribution ports copies the port, re-localizes its placement, and disconnects it from its old connection", () => {
+			const file = createTestFile(schema);
+			const element = file.createEntity("IfcFlowTerminal");
+			const port = addPort(file, { element });
+			const element2 = file.createEntity("IfcFlowTerminal");
+			const port2 = addPort(file, { element2 });
+			connectPort(file, { port1: port, port2: port2, direction: "NOTDEFINED" });
 
-describe.each(AVAILABLE_SCHEMAS)("api.root.copyClass -- disclosed blockers (%s)", (schema) => {
-	test("copying distribution ports performs the real port-copy/cleanup sequence, then throws at the still-blocked editObjectPlacement step (api.geometry.editObjectPlacement not ported)", () => {
-		// Python: `test_copying_distribution_ports` -- adapted per this file's own header
-		// comment: `api.system.addPort`/`connectPort` are real now, used directly (no
-		// substitution needed for those); the fixture is otherwise identical to real
-		// Python's own `TestCopyClass.test_copying_distribution_ports`.
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcFlowTerminal");
-		const port = addPort(file, { element });
-		const element2 = file.createEntity("IfcFlowTerminal");
-		const port2 = addPort(file, { element2 });
-		connectPort(file, { port1: port, port2: port2, direction: "NOTDEFINED" });
+			const newElement = copyClass(file, { product: element });
 
-		expect(() => copyClass(file, { product: element })).toThrow(/api\.geometry\.editObjectPlacement/);
+			const newPorts = systemUtil.getPorts(newElement);
+			expect(newPorts.some((p) => p.equals(port))).toBe(false);
+			expect(newPorts[0]?.isA("IfcDistributionPort")).toBe(true);
+			// The ORIGINAL element's own ports are unaffected -- `unassignPort`'s cleanup
+			// already stripped the recursive copy's own side effect back out.
+			const elementPorts = systemUtil.getPorts(element);
+			expect(elementPorts.length).toBe(1);
+			expect(elementPorts[0].equals(port)).toBe(true);
+			// The new port is disconnected from whatever the original was connected to.
+			expect(systemUtil.getConnectedPort(newPorts[0])).toBeNull();
+		});
 
-		// Real Python's own assertions, verified up to the exact point this now throws:
-		// the port itself WAS recursively copied (a 3rd `IfcDistributionPort` now exists)...
-		const allPorts = file.byType("IfcDistributionPort");
-		expect(allPorts.length).toBe(3);
-		const newPort = allPorts.find((p) => !p.equals(port) && !p.equals(port2)) as EntityInstance;
-		expect(newPort).toBeDefined();
+		// Python: `test_copying_material_sets_for_type_elements_only` -- now real, since
+		// `api.material.copyMaterial` landed for real (api.material chunk 1), matching this
+		// project's established "replace a disclosed-throw test with the real assertions
+		// once the blocker resolves" precedent.
+		test("copying an IfcMaterialLayerSet material association duplicates the whole set", () => {
+			const file = createTestFile(schema);
+			const element = file.createEntity("IfcWallType");
+			const singleMaterial = withAttrs(file, "IfcMaterial", { Name: "Foo" });
+			const layer = withAttrs(file, "IfcMaterialLayer", { Material: singleMaterial, LayerThickness: 0.1 });
+			const materialSet = withAttrs(file, "IfcMaterialLayerSet", { MaterialLayers: [layer] });
+			withAttrs(file, "IfcRelAssociatesMaterial", { RelatedObjects: [element], RelatingMaterial: materialSet });
 
-		// ...and the ORIGINAL element's own ports are unaffected -- `unassignPort`'s
-		// cleanup already stripped the recursive copy's own side effect back out (Python:
-		// `assert ifcopenshell.util.system.get_ports(element) == [port]`).
-		const elementPorts = systemUtil.getPorts(element);
-		expect(elementPorts.length).toBe(1);
-		expect(elementPorts[0].equals(port)).toBe(true);
+			const newElement = copyClass(file, { product: element });
 
-		// ...and the new port is disconnected from whatever the original was connected to
-		// -- `disconnectPort`'s cleanup already ran (Python: `assert not ifcopenshell
-		// .util.system.get_connected_port(new_ports[0])`).
-		expect(systemUtil.getConnectedPort(newPort)).toBeNull();
-	});
+			const originalRel = (element.get("HasAssociations") as EntityInstance[])[0];
+			const newRel = (newElement.get("HasAssociations") as EntityInstance[])[0];
+			const newMaterialSet = newRel.get("RelatingMaterial") as EntityInstance;
+			const originalMaterialSet = originalRel.get("RelatingMaterial") as EntityInstance;
 
-	// Python: `test_copying_material_sets_for_type_elements_only` -- now real, since
-	// `api.material.copyMaterial` landed for real (api.material chunk 1), matching this
-	// project's established "replace a disclosed-throw test with the real assertions
-	// once the blocker resolves" precedent.
-	test("copying an IfcMaterialLayerSet material association duplicates the whole set", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWallType");
-		const singleMaterial = withAttrs(file, "IfcMaterial", { Name: "Foo" });
-		const layer = withAttrs(file, "IfcMaterialLayer", { Material: singleMaterial, LayerThickness: 0.1 });
-		const materialSet = withAttrs(file, "IfcMaterialLayerSet", { MaterialLayers: [layer] });
-		withAttrs(file, "IfcRelAssociatesMaterial", { RelatedObjects: [element], RelatingMaterial: materialSet });
-
-		const newElement = copyClass(file, { product: element });
-
-		const originalRel = (element.get("HasAssociations") as EntityInstance[])[0];
-		const newRel = (newElement.get("HasAssociations") as EntityInstance[])[0];
-		const newMaterialSet = newRel.get("RelatingMaterial") as EntityInstance;
-		const originalMaterialSet = originalRel.get("RelatingMaterial") as EntityInstance;
-
-		expect(newMaterialSet.isA("IfcMaterialLayerSet")).toBe(true);
-		// The set itself is a fresh, independent duplicate...
-		expect(newMaterialSet.equals(originalMaterialSet)).toBe(false);
-		const newLayer = (newMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
-		const originalLayer = (originalMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
-		// ...and so is each layer within it...
-		expect(newLayer.equals(originalLayer)).toBe(false);
-		// ...but the underlying single IfcMaterial each layer references is reused, not copied.
-		expect((newLayer.get("Material") as EntityInstance).equals(singleMaterial)).toBe(true);
-	});
-});
+			expect(newMaterialSet.isA("IfcMaterialLayerSet")).toBe(true);
+			// The set itself is a fresh, independent duplicate...
+			expect(newMaterialSet.equals(originalMaterialSet)).toBe(false);
+			const newLayer = (newMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
+			const originalLayer = (originalMaterialSet.get("MaterialLayers") as EntityInstance[])[0];
+			// ...and so is each layer within it...
+			expect(newLayer.equals(originalLayer)).toBe(false);
+			// ...but the underlying single IfcMaterial each layer references is reused, not copied.
+			expect((newLayer.get("Material") as EntityInstance).equals(singleMaterial)).toBe(true);
+		});
+	},
+);
 
 // --- Transaction/undo-redo regression coverage (no Python counterpart) ---
 

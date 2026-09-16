@@ -26,41 +26,28 @@
 // finding) -- port assignment uses the dedicated `IfcRelConnectsPortToElement` class,
 // found/created via the element's own `HasPorts` inverse.
 //
-// --- THE ONE DISCLOSED BLOCKER: `update_port_placement` needs
-// `api.geometry.edit_object_placement`, not ported anywhere in this project ---
+// --- `update_port_placement`: RESOLVED -- `api.geometry.editObjectPlacement` has landed ---
 //
 // Both `execute`/`execute_ifc2x3` finish (after creating/reusing the rel) by calling
 // `update_port_placement`, which -- ONLY if `port.ObjectPlacement` is set AND is an
 // `IfcLocalPlacement` -- calls `ifcopenshell.api.geometry.edit_object_placement` to
 // re-localize the port's placement (the port now sits under a new `PlacementRelTo`
 // parent, `element`'s own placement, and needs its ABSOLUTE world position preserved,
-// not its raw relative matrix). `api.geometry.editObjectPlacement` has NO TS port of
-// any kind (confirmed by directory listing -- the same pre-existing blocker `TODOS.md`
-// already tracks for `api.spatial.assignContainer`/`api.aggregate.assignObject`/
-// `api.root.copyClass`).
-//
-// Per this project's established "throw only at the exact blocked point, never
-// proactively, never after a mutation real Python wouldn't already have done" rule
-// (see `../style/addSurfaceTextures.ts`'s own header comment for the same discipline):
-// this function performs the ENTIRE rest of `assign_port` -- finding/reusing an
-// existing rel, or creating a brand-new one -- exactly as real Python does BEFORE ever
-// calling `update_port_placement` (real Python's own order: create/reuse the rel
-// FIRST, placement-fixup LAST), then throws only if `port` actually has an
-// `IfcLocalPlacement` set (the one condition under which real Python would actually
-// reach the blocked call). A `port` with no `ObjectPlacement` at all -- true for any
+// not its raw relative matrix). `api.geometry.editObjectPlacement` has landed (see
+// `../geometry/editObjectPlacement.ts`) -- this now calls it directly, matching real
+// Python's own order of operations exactly (create/reuse the rel FIRST,
+// placement-fixup LAST). A `port` with no `ObjectPlacement` at all -- true for any
 // port fresh out of `root.createEntity`/`system.addPort`, which never sets one -- is
-// entirely unaffected and completes normally, matching
-// `test_assigning_a_port_once_only`'s own fixture (a bare `createEntity
-// ("IfcDistributionPort")`, no placement). Only a caller who has ALREADY given `port`
-// its own `IfcLocalPlacement` (e.g. via a real `editObjectPlacement` call happening
-// through some other, non-`api.system` path, or a hand-built fixture) hits the throw --
-// see `test_updating_the_placement_to_be_relative_if_it_exists`'s own Python fixture,
-// which does exactly this, pinned here as a disclosed-throw regression test instead
-// (see `TODOS.md`).
+// unaffected (the guard is a no-op), matching `test_assigning_a_port_once_only`'s own
+// fixture (a bare `createEntity("IfcDistributionPort")`, no placement).
+// `test_updating_the_placement_to_be_relative_if_it_exists` (previously a
+// disclosed-throw pin) is now ported for real.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as guid from "../../guid";
+import { getLocalPlacement } from "../../util/placement";
+import { editObjectPlacement } from "../geometry/editObjectPlacement";
 import { wrapUsecase } from "../hooks";
 import { createOwnerHistory } from "../owner/createOwnerHistory";
 import { updateOwnerHistory } from "../owner/updateOwnerHistory";
@@ -88,19 +75,17 @@ export interface AssignPortSettings {
 }
 
 /**
- * Python: `Usecase.update_port_placement`. See this file's own header comment for the
- * one disclosed blocker this throws for.
+ * Python: `Usecase.update_port_placement`. See this file's own header comment -- now
+ * fully portable.
  */
-function updatePortPlacement(port: EntityInstance): void {
+function updatePortPlacement(file: IfcFile, port: EntityInstance): void {
 	const placement = port.get("ObjectPlacement") as EntityInstance | null;
 	if (placement?.isA("IfcLocalPlacement")) {
-		// See this file's own header comment -- `api.geometry.editObjectPlacement` has no
-		// TS port of any kind. Thrown here, at the exact point real Python would call it,
-		// after the rel has already been created/reused (matching real Python's own
-		// order of operations exactly).
-		throw new Error(
-			`assignPort: re-localizing port#${port.id()}'s IfcLocalPlacement needs api.geometry.editObjectPlacement, not ported yet -- see TODOS.md.`,
-		);
+		editObjectPlacement(file, {
+			product: port,
+			matrix: getLocalPlacement(placement),
+			isSi: false,
+		});
 	}
 }
 
@@ -120,7 +105,7 @@ function assignPortIfc2x3(file: IfcFile, settings: AssignPortSettings): EntityIn
 		port, // RelatingPort
 		element, // RelatedElement
 	);
-	updatePortPlacement(port);
+	updatePortPlacement(file, port);
 	return rel;
 }
 
@@ -154,7 +139,7 @@ function assignPortNonIfc2x3(file: IfcFile, settings: AssignPortSettings): Entit
 		);
 	}
 
-	updatePortPlacement(port);
+	updatePortPlacement(file, port);
 
 	return rel;
 }
@@ -173,9 +158,8 @@ function assignPortUsecase(file: IfcFile, settings: AssignPortSettings): EntityI
  * this function. Ports should typically not be orphaned, but it may be useful when
  * patching up models.
  *
- * See this file's own header comment for the one disclosed case (`port` already has
- * its own `IfcLocalPlacement`) where this throws instead of completing, pending
- * `api.geometry.editObjectPlacement`.
+ * If `port` already has its own `IfcLocalPlacement`, it is re-localized to preserve
+ * its absolute world position under its new parent.
  *
  * @returns The `IfcRelNests` relationship, or the `IfcRelConnectsPortToElement` for
  * IFC2X3.

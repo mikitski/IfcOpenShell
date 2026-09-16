@@ -24,34 +24,16 @@
 // (`createOwnerHistory`/`updateOwnerHistory`), `api.group` (`assignGroup`/
 // `unassignGroup`), `api.root` (`createEntity`), `api.pset` (`removePset`).
 //
-// --- The ONE genuinely unported dependency across this whole module ---
+// --- The ONE dependency this module needed elsewhere -- RESOLVED ---
 //
 // `ifcopenshell.api.geometry.edit_object_placement`, called from `assign_port.py`
-// only (confirmed by grep across all 12 real files, not assumed) -- has no TS port
-// anywhere in this project (the same pre-existing blocker `TODOS.md` already tracks
-// for `api.spatial.assignContainer`/`api.aggregate.assignObject`/`api.root.copyClass`).
-// `./assignPort.ts` ports everything else in `assign_port` completely and faithfully,
-// throwing a clear, loud, descriptive `Error` ONLY at the exact point
-// `edit_object_placement` would actually be called (only reached when the port being
-// assigned already has its own `IfcLocalPlacement` -- never for a freshly-created,
-// placement-less port, the common case and the only one any real Python test other
-// than `test_updating_the_placement_to_be_relative_if_it_exists` ever exercises) --
-// see `./assignPort.ts`'s own header comment and `TODOS.md` for the full disclosure.
-//
-// --- RESOLVED: `../root/copyClass.ts`'s `api.system` half of its distribution-port
-// blocker -- NARROWED, not fully resolved (still needs `editObjectPlacement` too) ---
-//
-// `copyClass.ts`'s own disclosed ports-branch blocker cited TWO missing dependencies:
-// `api.system.unassignPort`/`.disconnectPort` (this chunk) AND
-// `api.geometry.editObjectPlacement` (see above -- still genuinely unported). Real
-// Python's own `copy_class.py` needs BOTH for every copied port (`unassign_port`/
-// `disconnect_port` to sever carried-over connections, THEN `edit_object_placement` to
-// reset the copy's placement) -- landing this chunk alone does not fully unblock that
-// call site. `copyClass.ts`'s own header comment and `TODOS.md`'s matching entry are
-// updated to cite `editObjectPlacement` as the sole remaining blocker (matching the
-// exact "narrowing, not fully resolving" precedent already established for
-// `reassignClass.ts`'s own `edit_object_placement`/`assign_representation` entry --
-// see `TODOS.md`'s `UPDATE 2026-09-14 (api.geometry chunk 2 ...)` note there).
+// only (confirmed by grep across all 12 real files, not assumed), has since landed
+// (see `../geometry/editObjectPlacement.ts`) -- `./assignPort.ts`'s own
+// placement-relocalization step now calls it directly, no disclosed throw left. This
+// also fully resolves `../root/copyClass.ts`'s own distribution-port blocker, which
+// needed BOTH `api.system.unassignPort`/`.disconnectPort` (this chunk) AND
+// `api.geometry.editObjectPlacement` for every copied port -- see `copyClass.ts`'s own
+// header comment.
 //
 // Namespaced per this project's `util/index.ts` per-submodule convention:
 // `api.system.addSystem`/`api.system.connectPort`/etc.

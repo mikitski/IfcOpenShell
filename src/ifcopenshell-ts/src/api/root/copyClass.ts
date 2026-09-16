@@ -26,13 +26,7 @@
 // deliberate MUTATE-the-original-relationship-in-place quirk for a list attribute,
 // vs. duplicate-the-relationship-entity for a single-valued one -- see below).
 //
-// --- One remaining genuinely blocked call site -- NARROWED (not fully resolved) once
-// `api.system` landed -- disclosed via a loud throw, thrown at the exact point real
-// Python would reach the blocked call, after every mutation real Python would already
-// have made by then, per this project's established discipline (see `../root
-// /removeProduct.ts`'s own header comment and `../type/mapTypeRepresentations.ts`'s
-// "throw before mutating" precedent, applied here as "throw exactly where blocked,
-// not proactively before real work that doesn't actually need the blocked call") ---
+// --- Distribution ports: RESOLVED -- now fully portable, no blocked call site left ---
 //
 // **Distribution ports** (`IfcRelNests`/`IfcRelConnectsPortToElement`, IFC2X3's own
 // name for the same concept): real Python recursively `copy_class`-es every nested
@@ -44,19 +38,11 @@
 // placement to the SAME absolute matrix the original port had, since the new nest
 // puts it under a different `PlacementRelTo` parent).
 //
-// `ifcopenshell.api.system` landed for real (Phase 6, `api.system` chunk) -- this now
-// calls the real `unassignPort`/`disconnectPort` directly, exactly matching real
-// Python's own per-port loop. `api.geometry.editObjectPlacement` is still the SAME
-// pre-existing blocker `TODOS.md` already tracks (`api.spatial.assignContainer`/
-// `api.aggregate.assignObject`'s own entry), and real Python's own `copy_class` calls
-// it UNCONDITIONALLY for every copied port (unlike `api.system.assignPort`'s own
-// placement-guarded call site) -- so this still throws, but now only at the exact
-// point `editObjectPlacement` would actually be called, for the first port that
-// reaches it, AFTER the recursive port copy, the new nest/connection relationship,
-// and that port's own `unassignPort`/`disconnectPort` cleanup have already run --
-// matching real Python's own exact order of operations up to the point it would also
-// have called the same blocked function. A product with no nested ports is entirely
-// unaffected.
+// `ifcopenshell.api.system` landed for real (Phase 6, `api.system` chunk), and
+// `ifcopenshell.api.geometry.edit_object_placement` has now landed too (see
+// `../geometry/editObjectPlacement.ts`) -- this now calls all 3 real functions exactly
+// as real Python does, in the same order, for every copied port. A product with no
+// nested ports is entirely unaffected.
 //
 // --- RESOLVED: `IfcMaterialLayerSet`/`IfcMaterialProfileSet`/`IfcMaterialConstituentSet`
 // material associations, previously blocked, now call the real `api.material.copyMaterial` ---
@@ -76,14 +62,10 @@
 //
 // `ifcopenshell.api.root` (self-recursion, both already-landed `createEntity`/
 // `removeProduct` neighbours plus this function calling itself for ports/openings),
-// `ifcopenshell.util.element` (`copy`/`copyDeep`), and, now that `api.system` has
-// landed, `ifcopenshell.api.system.unassignPort`/`.disconnectPort` (the ports branch's
-// own real cleanup calls, see above) are all already landed. `ifcopenshell.util.placement
-// .get_local_placement` is the one real Python call this port still never reaches --
-// it's only ever consumed by the still-blocked `edit_object_placement` call
-// immediately after it (the ports branch, see above), so it's not imported here
-// either; computing it for disclosure-only fidelity with no consumer would just be an
-// unused local.
+// `ifcopenshell.util.element` (`copy`/`copyDeep`), `ifcopenshell.api.system
+// .unassignPort`/`.disconnectPort` and `ifcopenshell.util.placement.getLocalPlacement`/
+// `ifcopenshell.api.geometry.editObjectPlacement` (the ports branch's own real cleanup
+// + placement-relocalization calls, see above) are all landed and wired in for real.
 //
 // --- Self-recursion, matching `../root/removeProduct.ts`'s own established pattern ---
 //
@@ -100,6 +82,8 @@
 import { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as elementUtil from "../../util/element";
+import { getLocalPlacement } from "../../util/placement";
+import { editObjectPlacement } from "../geometry/editObjectPlacement";
 import { wrapUsecase } from "../hooks";
 import { copyMaterial } from "../material/copyMaterial";
 import { disconnectPort } from "../system/disconnectPort";
@@ -151,10 +135,10 @@ function copyDirectAttributes(file: IfcFile, toElement: EntityInstance): void {
 }
 
 /**
- * Python: `Usecase.copy_indirect_attributes(from_element, to_element)`. See this file's
- * own header comment for the full disclosure of the 2 genuinely blocked branches
- * (ports, `*Set` material associations) and how every other branch is either a real,
- * independent duplicate or a deliberate shared/skipped relationship.
+ * Python: `Usecase.copy_indirect_attributes(from_element, to_element)`. Fully portable
+ * -- see this file's own header comment for how each branch (ports,
+ * `*Set` material associations, and every other real, independent-duplicate /
+ * deliberate shared-or-skipped relationship) is handled.
  */
 function copyIndirectAttributes(file: IfcFile, fromElement: EntityInstance, toElement: EntityInstance): void {
 	// Real Python's `self.file.get_inverse(from_element)` -- a fresh snapshot computed
@@ -226,19 +210,18 @@ function copyIndirectAttributes(file: IfcFile, fromElement: EntityInstance, toEl
 				// copied port must not silently inherit the original's own connections.
 				disconnectPort(file, { port: newPort });
 
-				// See this file's own header comment ("Distribution ports", NARROWED as of
-				// `api.system` landing) -- `api.geometry.editObjectPlacement` is the one
-				// remaining blocker (real Python: `matrix = util.placement.
-				// get_local_placement(port.ObjectPlacement); edit_object_placement(...)`,
-				// called UNCONDITIONALLY here, unlike `assignPort.ts`'s own placement-guarded
-				// call site). Thrown for the FIRST port that reaches this point -- this
-				// port's own `unassignPort`/`disconnectPort` cleanup above has already run,
-				// matching real Python's own per-port loop order exactly; any LATER port in
-				// `newPorts` is never reached, matching what real Python's own loop would
-				// also not have reached had it hit this same exception here.
-				throw new Error(
-					`copyClass: re-localizing ${newPort.isA()}#${newPort.id()}'s placement (copied from ${fromElement.isA()}#${fromElement.id()}'s nested port) needs api.geometry.editObjectPlacement, not ported yet -- see TODOS.md.`,
-				);
+				// See this file's own header comment ("Distribution ports", RESOLVED now
+				// that `api.geometry.editObjectPlacement` has landed) -- resets the copied
+				// port's own placement to the SAME absolute matrix the original port had,
+				// since the new nest/connection relationship above puts it under a
+				// different `PlacementRelTo` parent. Called UNCONDITIONALLY here for every
+				// copied port, matching real Python's own call site exactly (unlike
+				// `assignPort.ts`'s own placement-guarded call site).
+				editObjectPlacement(file, {
+					product: newPort,
+					matrix: getLocalPlacement(newPort.get("ObjectPlacement") as EntityInstance),
+					isSi: false,
+				});
 			}
 
 			continue;
@@ -373,10 +356,8 @@ function copyClassUsecase(file: IfcFile, settings: CopyClassSettings): EntityIns
  * The following relationships are also duplicated:
  * - The copy will have the same object placement coordinates as the original.
  * - The copy will have duplicated property sets, properties, and quantities.
- * - The copy will have all nested distribution ports copied too -- **except this
- *   throws today, see this file's own header comment and `TODOS.md`: needs
- *   `api.geometry.editObjectPlacement` (not yet ported) to re-localize each copied
- *   port's placement**.
+ * - The copy will have all nested distribution ports copied too, re-localized to the
+ *   same absolute placement as the original port.
  * - The copy will be part of the same aggregate.
  * - The copy will be contained in the same spatial structure.
  * - The copy, if it is an occurrence, will have the same type.

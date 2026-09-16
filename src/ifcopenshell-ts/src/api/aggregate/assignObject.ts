@@ -56,22 +56,23 @@
 // `IfcRelDecomposes` itself declares (inherited by every subtype, `IfcRelAggregates`
 // included), so this is a real, intentional Python-source generality, not a bug.
 //
-// --- `geometry.edit_object_placement`: NOT ported, the same disclosed blocker as `assignContainer.ts` ---
+// --- `geometry.edit_object_placement`: RESOLVED -- now wired in for real, same as `assignContainer.ts` ---
 //
-// Real Python finishes by calling `ifcopenshell.api.geometry.edit_object_placement` on
-// every changed product, to re-localize its placement so its absolute world position
-// doesn't shift when reparented under a new aggregate whose own placement differs.
-// `api.geometry` still has no TS port of any kind (same gap `assignContainer.ts`
-// disclosed first). This step is skipped here too, exactly as `assignContainer.ts`
-// already does -- not stubbed, not reinvented differently for this call site. Tracked
-// in the same `TODOS.md` entry `assignContainer.ts` created (now updated to name this
-// second call site), not a duplicate entry -- see that entry for the full disclosure
-// (impact, fix, and why this isn't inlined here).
+// `ifcopenshell.api.geometry.edit_object_placement` landed for real (see
+// `../geometry/editObjectPlacement.ts`'s own header comment) -- this function's own
+// final loop now calls it exactly as real Python does, identically to
+// `assignContainer.ts`'s own now-resolved final loop (see that file's own header
+// comment for the full explanation, not duplicated here): for every product actually
+// changed, if it currently has an `ObjectPlacement` that `isA("IfcLocalPlacement")`,
+// its placement is re-localized against its own current absolute matrix, `isSi:
+// false`.
 
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as guid from "../../guid";
 import * as elementUtil from "../../util/element";
+import { getLocalPlacement } from "../../util/placement";
+import { editObjectPlacement } from "../geometry/editObjectPlacement";
 import { wrapUsecase } from "../hooks";
 import { createOwnerHistory } from "../owner/createOwnerHistory";
 import { updateOwnerHistory } from "../owner/updateOwnerHistory";
@@ -203,11 +204,18 @@ function assignObjectUsecase(file: IfcFile, settings: AssignObjectSettings): Ent
 		);
 	}
 
-	// NOTE (disclosed blocker, see this file's header comment and `TODOS.md`): real
-	// Python now re-localizes each changed product's placement here, via
-	// `ifcopenshell.api.geometry.edit_object_placement`, so its absolute world position
-	// doesn't shift when moved between aggregates. `api.geometry` is not yet ported in
-	// this TS codebase -- this step is skipped, not stubbed/faked.
+	// Localize placement relative to a new aggregate for affected products -- see this
+	// file's header comment (now resolved).
+	for (const product of productsToChange) {
+		const placement = product.get("ObjectPlacement") as EntityInstance | null;
+		if (placement?.isA("IfcLocalPlacement")) {
+			editObjectPlacement(file, {
+				product,
+				matrix: getLocalPlacement(placement),
+				isSi: false,
+			});
+		}
+	}
 
 	return isDecomposedBy;
 }
