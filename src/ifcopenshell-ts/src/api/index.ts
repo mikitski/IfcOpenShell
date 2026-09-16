@@ -326,3 +326,18 @@ export * as sequence from "./sequence";
 // unlike its own inner-profile loop) -- see `profile/index.ts`'s own header comment
 // for the full writeup.
 export * as profile from "./profile";
+
+// Phase 6, `api.grid` chunk: a brand-new module, all 3 real files ported in one chunk
+// (216 lines total -- no TS port of any kind before this chunk). Manages `IfcGrid`'s
+// axes (`IfcGridAxis`) -- creating them, giving them curve geometry localized into the
+// grid's own coordinate system via real 4x4 matrix math, and removing them. No
+// unported dependency of any kind (`util.element.removeDeep2`, `util.placement.
+// getLocalPlacement`, `util.unit.calculateUnitScale`, `util.shapeBuilder.V`/
+// `ifcSafeVectorType`/`npApplyMatrix`, all already landed); `createAxisCurve`'s
+// `np.linalg.inv` reuses the exact `mat4.invert` convention `../geometry/
+// editObjectPlacement.ts` already verified, not re-derived. No schema divergence found
+// across `IfcGridAxis`/`IfcGrid`/`IfcPolyline`/`IfcCartesianPoint`. One disclosed real
+// Python bug ported verbatim (an unguarded `remove_deep2(file, None)` call in
+// `remove_grid_axis` when `AxisCurve` was never set) -- see `grid/index.ts`'s own
+// header comment for the full writeup.
+export * as grid from "./grid";
