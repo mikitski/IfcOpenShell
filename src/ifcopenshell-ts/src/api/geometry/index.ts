@@ -1,8 +1,13 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // Barrel for `ifcopenshell.api.geometry` (src/ifcopenshell-python's
-// `ifcopenshell/api/geometry/` package) -- **NOT a full port of that module**. `api.geometry`
-// now has 28 of ~29 real files landed. 17 of its ~29 real files were ported first:
+// `ifcopenshell/api/geometry/` package). `api.geometry` is now FUNCTIONALLY COMPLETE for this
+// port's scope: 29 of ~29 real files landed -- every real, portable file in this module has been
+// ported. The ONE remaining real file, `add_representation.py`, imports `bpy`/`bmesh`/
+// `mathutils` (Blender's own Python API) directly -- it is PERMANENTLY, GENUINELY out of scope
+// for this Node-native-addon TS port (not a gap to track in `TODOS.md`; there is no TS/Node
+// equivalent of a live Blender mesh-editing session to port it onto). 17 of its ~29 real files
+// were ported first:
 // `unassign_representation`/`remove_representation`
 // (an earlier `api.context` chunk, minimal direct dependencies of
 // `api.context.removeContext`'s top-level-context branch -- see
@@ -117,11 +122,35 @@
 // `np_intersect_line_line` raises for near-parallel lines -- see
 // `./addRailingRepresentation.ts`'s own header comment (finding 1) and `TODOS.md` for the full
 // writeup of all 3 findings.
-// Every other `api.geometry` function (`add_representation`, `regenerate_wall_representation`)
-// remains unported; a future `api.geometry` chunk should treat all 28 of these as already landed
-// (reviewed against the real Python source, see each file's own header comment) rather than
-// re-porting them from scratch. Namespaced per this project's `util/index.ts` per-submodule
-// convention:
+// and (landed in THIS chunk, the LAST portable file in this module) `regenerate_wall_representation`
+// (646 lines) -- regenerates a standard (case) wall's body + axis representation, taking into
+// account material-layer-set thicknesses/priorities and `IfcRelConnectsPathElements` connections
+// (notches, butts, mitres) to other walls. Unlike every other file in this module, real Python
+// implements this with an internal `Regenerator` CLASS (not a `Usecase` class -- explicitly
+// checked, per this chunk's own required process, whether the `Usecase.settings`-accessed-before-
+// assignment evaluation-order bug from `addWindowRepresentation`/`addDoorRepresentation` applies
+// here: it does NOT, since `Regenerator` never uses that dict-settings pattern at all -- see
+// `./regenerateWallRepresentation.ts`'s own header comment for the full trace). Every real
+// invocation with a wall that has an `IfcMaterialLayerSet` throws while building the actual body
+// solid, on EVERY schema, via the SAME 2 already-tracked `entityInstance.ts` primitive-layer gaps
+// as `addWindowRepresentation`/`addDoorRepresentation`/`addRailingRepresentation` (matching
+// `addRailingRepresentation`'s own "blocked on literally every input" finding, not window/door's
+// own "most real-world inputs" one) -- but every pure layer/axis/connection-join computation this
+// function performs (the bulk of its own real complexity) never touches `ShapeBuilder` at all and
+// is genuinely, fully UNBLOCKED and independently tested today. Also found and disclosed: a REAL,
+// severe, verbatim-preserved upstream-Python bug in `combine_layers` (attempts item-assignment on
+// an immutable `PrioritisedLayer` namedtuple, crashing whenever a connection actually specifies
+// `RelatingPriorities`/`RelatedPriorities` -- real IFC data, not a contrived edge case) -- see that
+// file's own header comment (Finding 2) and `TODOS.md` for the full writeup of this and 3 further
+// smaller quirks (a double-fetch of the `BBIM_Boolean` pset; a stale-iterator-reference quirk deep
+// inside the mitre-join branch; a "same name, different value" `miny`/`maxy` shadowing trap in the
+// original source).
+//
+// `api.geometry` is now FUNCTIONALLY COMPLETE for this port's scope -- every one of its ~29 real,
+// portable Python files has been ported (reviewed against the real Python source, see each file's
+// own header comment); only the permanently-Blender-only `add_representation.py` remains, by
+// design, unported (see this file's own header comment above). Namespaced per this project's
+// `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
 // `api.geometry.addDoorRepresentation`/
 // `api.geometry.addMeshRepresentation`/`api.geometry.addProfileRepresentation`/
@@ -135,7 +164,8 @@
 // `api.geometry.connectPath`/`api.geometry.connectWall`/`api.geometry.copyRepresentation`/
 // `api.geometry.create2ptWall`/`api.geometry.disconnectElement`/
 // `api.geometry.disconnectPath`/`api.geometry.editObjectPlacement`/
-// `api.geometry.mapRepresentation`/`api.geometry.removeBoolean`/
+// `api.geometry.mapRepresentation`/`api.geometry.regenerateWallRepresentation`/
+// `api.geometry.removeBoolean`/
 // `api.geometry.removeRepresentation`/`api.geometry.unassignRepresentation`/
 // `api.geometry.validateType`.
 export { addAxisRepresentation } from "./addAxisRepresentation";
@@ -224,6 +254,8 @@ export { editObjectPlacement } from "./editObjectPlacement";
 export type { EditObjectPlacementSettings } from "./editObjectPlacement";
 export { mapRepresentation } from "./mapRepresentation";
 export type { MapRepresentationSettings } from "./mapRepresentation";
+export { regenerateWallRepresentation } from "./regenerateWallRepresentation";
+export type { RegenerateWallRepresentationSettings } from "./regenerateWallRepresentation";
 export { removeBoolean } from "./removeBoolean";
 export type { RemoveBooleanSettings } from "./removeBoolean";
 export { removeRepresentation } from "./removeRepresentation";
