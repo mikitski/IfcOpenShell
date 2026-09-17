@@ -922,6 +922,35 @@ The rest of this brand-new module (`editTrueNorth`, `editWcs`, `removeGeoreferen
 and both functions' own IFC4+ default paths) is fully functional and unaffected by this
 gap -- confirmed by reading every real file in the module, not assumed.
 
+**UPDATE 2026-09-16 (`util.data`/`api.geometry` `clip_solid*` chunk):** found an
+eleventh (and twelfth) independent consequence -- `ifcopenshell.api.geometry.clip_solid`'s
+and `clip_solid_bounded`'s own `element` parameter, when provided, always ends in an
+`edit_pset(file, pset=pset, properties={"Data": json.dumps(data)})` call writing a plain
+JS `string` -- the identical `attribute_kind_of`/"Attribute access is only supported on
+entity instances" throw this entry already documents (this module's own fourth
+consequence, above). Confirmed empirically against this exact worktree's own built
+native addon before writing `clipSolid.ts`/`clipSolidBounded.ts`. Unlike several earlier
+consequences of this gate, this one is NOT narrower on the "existing pset" path: both
+functions' `element` branch is byte-for-byte the same `get_pset`/`add_pset`/`edit_pset`
+shape (confirmed by reading both real Python sources side by side), and `edit_pset`'s own
+"update an EXISTING property" path needs `cast_value_to_primary_measure_type` just as much
+as its "create a NEW property" path does (per this entry's own fourth-consequence update,
+above) -- so EVERY call with `element` provided throws here, whether `pset` was just
+created by `add_pset` or already existed from an earlier call. Ported both functions
+completely and faithfully anyway: `calculate_unit_scale`, `Clipping.apply`/the inline
+half-space-solid construction, and the full `get_pset`-or-`add_pset` pset lookup/creation
+logic all run to completion; only the final `edit_pset` call itself throws, at the exact
+point real Python would materialize the value, with no proactive guard -- matching
+`editPset.ts`'s/`addGeoreferencing.ts`'s own "let the native call fail naturally"
+precedent. `test/api/geometry/clipSolid.test.ts`/`clipSolidBounded.test.ts` each pin this
+CURRENT, disclosed, blocked behavior with dedicated tests, with comments recording the
+real, unblocked assertions (`test_element_registers_result_in_bbim_boolean`/
+`test_element_appends_to_existing_bbim_boolean`) to restore once this gap closes. See
+`src/api/geometry/clipSolid.ts`'s and `src/api/geometry/clipSolidBounded.ts`'s own header
+comments for the full writeup. The `element`-omitted path of both functions, and
+`add_axis_representation` (a separate file in this same chunk, no `element`/pset logic at
+all), are fully functional and unaffected by this gap.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
