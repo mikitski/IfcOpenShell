@@ -976,6 +976,30 @@ standalone typed value and IS fully tested here). See `src/api/alignment
 /hasZeroLengthSegment.ts`'s own header comment and `test/api/alignment
 /hasZeroLengthSegment.test.ts`'s own header comment for the full writeup.
 
+**UPDATE 2026-09-17 (`api.alignment` chunk 2 of many -- a scope-narrowing clarification,
+not a new consequence):** while building `getAlignmentStartStation.test.ts`/
+`distanceAlongFromStation.test.ts`'s own real fixtures (`Pset_Stationing.Station`,
+`IfcPointByDistanceExpression.DistanceAlong` -- both SELECT-typed), confirmed
+EMPIRICALLY against this chunk's own freshly-built native addon that this gate is
+narrower than the thirteenth consequence above might suggest: assigning a raw JS
+`number` directly to an ALREADY-REAL entity's own SELECT-typed attribute -- e.g.
+`file.createEntity("IfcPointByDistanceExpression", 100.0, null, null, null, curve)` or
+`somePointByDistanceExpression.set("DistanceAlong", 100.0)` -- works FINE end to end
+(the raw number round-trips through `.get()` unchanged, confirmed with
+`IfcPropertySingleValue.NominalValue` too). The gate only fires for constructing a
+STANDALONE simple/defined-type instance BY NAME (`file.createEntity("IfcLengthMeasure",
+100.0)`, or a zero-arg one followed by `.setByIndex(0, ...)`) -- exactly what this
+entry's own title and every consequence above actually describe, so this is not a
+correction to any of them, just a previously-undocumented boundary of the SAME gate.
+This does not retroactively unblock `hasZeroLengthSegment.test.ts`'s own uncovered
+branch above -- that branch reads `IfcCurveSegment.SegmentLength` off an ALREADY-BUILT
+fixture rather than assigning a fresh raw value to it, so re-visiting that one specific
+test is a decision for whoever next touches that file, not done here (out of this
+chunk's own scope: 5 unrelated files). Did let this chunk's own two files build fully
+real, populated fixtures instead of disclosed-uncoverable ones -- see
+`src/api/alignment/getAlignmentStartStation.test.ts`'s own header comment for the full
+writeup.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
