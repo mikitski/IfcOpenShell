@@ -2859,3 +2859,109 @@ finding, all confirmed empirically, not assumed).
 `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
 above (neither yet scheduled/started) -- same dependency as the `add_window_representation` entry
 immediately above this one.
+
+---
+
+### `api.geometry.addRailingRepresentation` is blocked on LITERALLY EVERY input, on every schema
+(a stronger finding than `addWindowRepresentation`/`addDoorRepresentation`'s own) -- plus a
+genuinely NEW, independent upstream-Python bug (an incomplete `except` clause) found in this
+chunk
+
+**What:** `add_railing_representation.py` (646 lines) is a parametric WALL_MOUNTED_HANDRAIL
+railing-geometry generator. UNLIKE `add_window_representation`/`add_door_representation`, it has NO
+internal `Usecase` class at all -- real Python already splits it (deliberately, per its own
+`ifcopenshell/api/geometry/__init__.py` comment: "the pilot for a 'pure-compute + IFC-wrap' split")
+into a pure-geometry compute function (`compute_wall_mounted_handrail_geometry`, zero
+`ifcopenshell.file` dependency) and a thin `ShapeBuilder`-based IFC-wrapping function
+(`add_railing_representation` itself).
+
+This chunk explicitly checked (per its own required process) whether the SAME evaluation-order bug
+disclosed for `add_window_representation`/`add_door_representation` (`Usecase.settings` accessed via
+`convert_si_to_unit()` before it is ever assigned) applies here too. **It does not** -- there is no
+`Usecase`/`self.settings` in this file at all, and its own `unit_scale`-then-every-other-default
+resolution order, traced line-by-line, is correct.
+
+**Finding A -- `addRailingRepresentation` itself is blocked on literally every input, on every
+schema (stronger than window/door's own "most real-world inputs are blocked"):**
+`ShapeBuilder.createSweptDiskSolid` (`util/shapeBuilder.ts`) reads `pathCurve.get("Dim")` to
+validate the curve is 3D -- the SAME already-tracked `entityInstance.ts` DERIVED-attribute gap as
+`util.representation.guessType`'s entry above (`.get("Dim")` unconditionally throws for ANY entity,
+on every schema, since "Dim" is never a real EXPLICIT attribute). `add_railing_representation` calls
+`create_swept_disk_solid` UNCONDITIONALLY -- once per support (if any) and, with no branch that
+skips it, once more for the handrail polyline itself at the very end. There is no
+input/parameter/schema combination that avoids this call (confirmed by tracing every branch, not
+assumed) -- unlike `add_door_representation`'s own genuinely-unblocked `PLAN_VIEW`+`Annotation`
+sliding-door branch, which never calls `extrude()`/`.profile()` at all. **`addRailingRepresentation()`
+therefore throws for every real invocation, full stop.** The SAME already-tracked `IfcLineIndex`/
+`IfcArcIndex` defined-type-creation gap (`EntityInstance.setByIndex`/`IfcFile.createEntity` entry
+above, IFC4/IFC4X3 only) is typically reached even earlier: every support's own `arc_polyline` is
+swept via a FIXED, always-non-empty `arcPoints=[1]` (every support arc is a 3-point arc), and the
+documented `terminalType="180"` default also always produces a non-empty
+`handrailArcPointIndices` -- so on IFC4/IFC4X3, the very first support (or, with 0 supports, the
+final handrail polyline) typically throws via this gap before `createSweptDiskSolid` is ever
+reached; on IFC2X3 (which never needs `IfcLineIndex`/`IfcArcIndex`), execution gets further but
+still always hits `createSweptDiskSolid`'s own unconditional throw. Net effect: the pure-geometry
+compute function this module was deliberately split out for (`computeWallMountedHandrailGeometry`)
+is genuinely, fully UNBLOCKED today, with zero IFC dependency at all; the thin IFC-wrapping layer on
+top of it is 100% blocked, on every input, on every schema, with no exception -- ported completely
+and faithfully anyway.
+
+**Finding B -- a genuinely NEW, independent upstream-Python bug found by this chunk (not one of the
+2 primitive-layer gaps above): `_add_arcs_on_turning_points`'s degenerate-fillet fallback has an
+incomplete `except` clause.** `_get_fillet_points` calls `np_intersect_line_line`
+(`ifcopenshell.util.shape_builder`, already landed as `npIntersectLineLine` in
+`util/shapeBuilder.ts`) to locate the fillet arc's centre -- confirmed by reading its real source
+directly, that function raises a plain `ValueError` ("Lines are parallel and do not intersect
+uniquely.") for parallel lines. `_add_arcs_on_turning_points`'s own call site, however, only catches
+`except (ZeroDivisionError, FloatingPointError):` -- a `ValueError` is neither, so it propagates
+UNCAUGHT, crashing the whole compute function instead of falling back to a sharp-vertex corner the
+way every OTHER degenerate case already does. This is reachable in practice, not merely
+theoretical: `getFilletPoints`'s own 2 intermediate lines are just `dir1`/`dir2` rotated 90 degrees
+about a shared normal -- a rotation preserves parallelism exactly in exact arithmetic, so
+`np_intersect_line_line`'s own parallel-line check is testing essentially the SAME degeneracy
+condition the caller-side `collinear` check already tests on the un-rotated vectors, just
+recomputed independently through a different floating-point operation chain -- a `dir1`/`dir2` pair
+landing just barely on the "not collinear" side of the caller's own `PRECISION = 1e-5` threshold can
+still land on the "parallel" side of `np_intersect_line_line`'s own independently-computed,
+not-bit-identical threshold. This is the exact same class of precision-boundary instability
+`_collinear`'s own header comment already documents fixing ONE instance of (switching from
+`arccos(dot)` to `|cross|`) -- a second, still-open instance one level deeper in the same call
+chain.
+
+**Why not fixed now:** Finding A needs the same 2 foundational `entityInstance.ts` primitive-layer
+changes as every other entry in this file citing them. Finding B is a genuine upstream-Python bug
+(not a TS-port gap) -- ported verbatim (a dedicated `FilletDegenerateError` class is the ONLY thing
+`addArcsOnTurningPoints`'s own `try`/`catch` treats as "no usable fillet"; any other error,
+including one sourced from `npIntersectLineLine`, propagates uncaught, exactly matching real
+Python's own incomplete `except` clause) rather than silently "fixed" by widening the catch, since
+this port's own discipline is to preserve real upstream bugs, not quietly correct them.
+
+**Impact:** `addRailingRepresentation()` throws for every real invocation today, on every schema
+(finding A). `computeWallMountedHandrailGeometry` (and, transitively, `addRailingRepresentation`)
+additionally crashes with an uncaught error, instead of gracefully degrading to a sharp corner, for
+a railing path whose turning point sits in a specific, narrow, floating-point precision-boundary
+region (finding B) -- not given a dedicated regression test since it is an inherently
+non-deterministic floating-point hazard, fragile to pin exactly; the SELECTIVE catch behavior
+(only `FilletDegenerateError`, matching real Python's own selective `except`) is directly asserted
+instead.
+
+**Fix:** Finding A: same 2 fixes as every other entry in this file citing these 2 gaps (EXPRESS
+DERIVED-attribute execution in `entityInstance.ts`; teaching `EntityInstance.setByIndex` to skip the
+`attribute_kind_of` lookup for a non-entity target instance) -- once either lands,
+`addRailingRepresentation.test.ts`'s own currently-pinned "throws the disclosed error" smoke test
+should be revisited and converted to a real geometry assertion. Finding B is an upstream
+`ifcopenshell-python` bug, not something this TS port should fix unilaterally -- widening
+`_add_arcs_on_turning_points`'s own real Python `except` clause to also catch `ValueError` (or
+using a narrower, more targeted parallel-line check) would need to happen upstream first, and this
+port would then mirror whatever that fix turns out to be.
+
+**Context:** Surfaced while landing `add_railing_representation` (646 lines, bringing `api.geometry`
+to 28 of ~29 real files landed), verified directly against the real source (including
+`ifcopenshell.util.shape_builder.np_intersect_line_line`'s own real implementation, read directly
+to confirm its exact raised exception type) and this project's own locally-built native addon
+(finding A confirmed empirically by actually running this chunk's own test suite).
+
+**Depends on / blocked by:** Finding A depends on the same 2 foundational `entityInstance.ts` fixes
+as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
+above (neither yet scheduled/started). Finding B depends on an upstream `ifcopenshell-python` fix,
+outside this port's own control.
