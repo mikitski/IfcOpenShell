@@ -52,19 +52,27 @@
 // pset that's solely referenced by this type (via `../pset/removePset.ts`, already
 // landed).
 //
-// --- One remaining genuinely new, unported dependency -- disclosed via a loud throw,
-// not silently skipped or reimplemented, per this project's established discipline (see
-// `internalCascadeHelpers.ts`'s own header comment and `../type/mapTypeRepresentations
-// .ts`'s identical treatment of its own unported dependencies) ---
+// --- Two genuinely new dependencies this file's own preamble/openings/grid handling
+// needed, both now RESOLVED (this section used to disclose them via a loud throw,
+// per this project's established discipline -- see `internalCascadeHelpers.ts`'s own
+// header comment and `../type/mapTypeRepresentations.ts`'s identical treatment of its
+// own still-unported dependencies) ---
 //
-// `getattr(product, "HasOpenings", [])` -> `ifcopenshell.api.feature.remove_feature`:
-// `api.feature` has no TS port of any kind. Only reached when `product` actually
-// declares a non-empty `HasOpenings` (an `IfcElement` with at least one void
-// relationship) -- an occurrence with no openings, or a non-`IfcElement`, is unaffected.
-// Still a `TODOS.md` entry, thrown up front the moment it's clear the blocked path would
-// actually be needed -- matching this project's "throw before mutating, don't leave a
-// worse partial state than refusing outright" discipline (`../type/mapTypeRepresentations
-// .ts`'s own header comment is the direct precedent).
+// `getattr(product, "HasOpenings", []) or []` -> `ifcopenshell.api.feature.remove_feature`:
+// RESOLVED -- now wired in for real. `api.feature` landed in full
+// (`../feature/removeFeature.ts`), and this branch now calls it exactly as real Python
+// does: `for opening in getattr(product, "HasOpenings", []) or []:
+// ifcopenshell.api.feature.remove_feature(file, feature=opening.RelatedOpeningElement)`
+// -- `attrOr` reproduces the `getattr(..., [])` default (a non-`IfcElement` simply
+// doesn't declare `HasOpenings` at all), the trailing `?? []` reproduces the `or []`
+// fallback (an `IfcElement` with a `None`/empty `HasOpenings`); either way, only reached
+// when `product` actually declares a non-empty `HasOpenings`. Each `opening` is an
+// `IfcRelVoidsElement`, not the `IfcOpeningElement` itself -- `.RelatedOpeningElement`
+// (confirmed identical across `generated/ifc2x3.d.ts`/`ifc4.d.ts`/`ifc4x3.d.ts`:
+// `RelatedOpeningElement: IfcFeatureElementSubtraction`) is what's actually passed to
+// `removeFeature`. `test_removing_all_openings_of_an_element` (previously pinned as a
+// "throws the disclosed blocked error" regression, per this file's own former framing
+// here) is now restored to its real Python assertion in `removeProduct.test.ts`.
 //
 // `product.is_a("IfcGrid")` -> `ifcopenshell.api.grid.remove_grid_axis`: RESOLVED -- now
 // wired in for real. `api.grid` landed in full (`../grid/removeGridAxis.ts`), and this
@@ -133,6 +141,7 @@ import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as elementUtil from "../../util/element";
 import { removeBoundary } from "../boundary/removeBoundary";
+import { removeFeature } from "../feature/removeFeature";
 import { removeRepresentation } from "../geometry/removeRepresentation";
 import { unassignRepresentation } from "../geometry/unassignRepresentation";
 import { removeGridAxis } from "../grid/removeGridAxis";
@@ -229,13 +238,19 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
 		removeRepresentation(file, { representation });
 	}
 
-	// See this file's own header comment -- `api.feature` has no TS port of any kind.
-	// Only reached when `product` genuinely declares a non-empty `HasOpenings`.
+	// See this file's own header comment -- `api.feature` is now fully ported. Real
+	// Python: `for opening in getattr(product, "HasOpenings", []) or []:
+	// ifcopenshell.api.feature.remove_feature(file, feature=opening
+	// .RelatedOpeningElement)`. `attrOr` reproduces `getattr(product, "HasOpenings",
+	// [])`'s own tolerance of `product` simply not declaring `HasOpenings` at all (a
+	// non-`IfcElement`); the trailing `?? []` reproduces Python's own `or []` tolerance
+	// of the attribute genuinely resolving to `None`/empty. Each `opening` here is an
+	// `IfcRelVoidsElement` (the inverse relationship, not the `IfcOpeningElement`
+	// itself) -- confirmed against `generated/ifc2x3.d.ts`/`ifc4.d.ts`/`ifc4x3.d.ts`,
+	// identical across all 3 schemas: `RelatedOpeningElement: IfcFeatureElementSubtraction`.
 	const openings = attrOr<EntityInstance[] | null>(product, "HasOpenings", null) ?? [];
-	if (openings.length > 0) {
-		throw new Error(
-			"removeProduct: removing an element's HasOpenings needs api.feature.removeFeature, not ported yet -- see TODOS.md.",
-		);
+	for (const opening of openings) {
+		removeFeature(file, { feature: opening.get("RelatedOpeningElement") as EntityInstance });
 	}
 
 	// See this file's own header comment -- `api.grid` is now fully ported. Real Python:
@@ -403,13 +418,14 @@ function removeProductUsecase(file: IfcFile, settings: RemoveProductSettings): v
  * nesting relationships are removed (but naturally, the materials, types, containers,
  * etc themselves remain).
  *
- * **Disclosed, real blocker** (throws, see this file's own header comment and
- * `TODOS.md`): removing an element with `HasOpenings` (needs `api.feature`, which has
- * no TS port of any kind yet). Removing an `IfcGrid` with axes and removing a space
- * boundary are no longer blockers -- `api.grid.removeGridAxis`/`api.boundary
- * .removeBoundary` are both real now (see `../grid/index.ts`/`../boundary/index.ts`),
- * same as `api.material.unassignMaterial` (see `../material/index.ts`). Every other
- * relationship this function cleans up is fully ported.
+ * **No remaining disclosed blockers** (see this file's own header comment and
+ * `TODOS.md`): removing an element with `HasOpenings` (needs `api.feature
+ * .removeFeature`), removing an `IfcGrid` with axes (needs `api.grid.removeGridAxis`),
+ * and removing a space boundary (needs `api.boundary.removeBoundary`) were all once
+ * disclosed blockers here, but are now fully wired in for real (see
+ * `../feature/index.ts`/`../grid/index.ts`/`../boundary/index.ts`), same as
+ * `api.material.unassignMaterial` (see `../material/index.ts`). Every relationship
+ * this function cleans up is fully ported.
  *
  * @example
  * ```ts
