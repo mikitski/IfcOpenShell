@@ -2,7 +2,7 @@
 //
 // Barrel for `ifcopenshell.api.geometry` (src/ifcopenshell-python's
 // `ifcopenshell/api/geometry/` package) -- **NOT a full port of that module**. `api.geometry`
-// now has 27 of ~29 real files landed. 17 of its ~29 real files were ported first:
+// now has 28 of ~29 real files landed. 17 of its ~29 real files were ported first:
 // `unassign_representation`/`remove_representation`
 // (an earlier `api.context` chunk, minimal direct dependencies of
 // `api.context.removeContext`'s top-level-context branch -- see
@@ -98,14 +98,34 @@
 // builds a closed curve and passes an explicit `representationType`, so neither gap is ever
 // reached) -- the one real, working, non-throwing representation either of these 2 large
 // parametric-geometry files can produce as of this chunk.
-// Every other `api.geometry` function (`add_railing_representation`, `add_representation`,
-// `regenerate_wall_representation`) remains unported; a future `api.geometry` chunk should
-// treat all 27 of these as already landed (reviewed against the real Python source, see each
-// file's own header comment) rather than re-porting them from scratch. Namespaced per this
-// project's `util/index.ts` per-submodule convention:
+// and (landed in THIS chunk) `add_railing_representation` (646 lines) -- a parametric
+// WALL_MOUNTED_HANDRAIL railing-geometry generator. UNLIKE `add_window_representation`/
+// `add_door_representation`, real Python here has NO internal `Usecase` class at all -- it is
+// already split (deliberately, per its own `__init__.py` comment: "the pilot for a
+// 'pure-compute + IFC-wrap' split") into a pure-geometry compute function
+// (`compute_wall_mounted_handrail_geometry`, ZERO `ifcopenshell.file` dependency, genuinely
+// UNBLOCKED today) and a thin `ShapeBuilder`-based IFC-wrapping function
+// (`add_railing_representation`, which -- unlike window/door's own "most real-world inputs are
+// blocked" finding -- is blocked on LITERALLY EVERY input, on every schema, via
+// `ShapeBuilder.createSweptDiskSolid`'s own unconditional `.get("Dim")` DERIVED-attribute-gap
+// throw, called unconditionally at least once on every invocation with no code path around it).
+// Also independently re-checked (and confirmed NOT present here, unlike window/door): the
+// evaluation-order `Usecase.settings`-accessed-before-assignment bug does not apply, since this
+// file has no `Usecase` class to have that bug in; its own default-resolution order is correct.
+// A genuinely NEW, different bug was found instead: `addArcsOnTurningPoints`'s degenerate-fillet
+// fallback only catches a `ZeroDivisionError`-shaped failure, not the `ValueError`
+// `np_intersect_line_line` raises for near-parallel lines -- see
+// `./addRailingRepresentation.ts`'s own header comment (finding 1) and `TODOS.md` for the full
+// writeup of all 3 findings.
+// Every other `api.geometry` function (`add_representation`, `regenerate_wall_representation`)
+// remains unported; a future `api.geometry` chunk should treat all 28 of these as already landed
+// (reviewed against the real Python source, see each file's own header comment) rather than
+// re-porting them from scratch. Namespaced per this project's `util/index.ts` per-submodule
+// convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
 // `api.geometry.addDoorRepresentation`/
 // `api.geometry.addMeshRepresentation`/`api.geometry.addProfileRepresentation`/
+// `api.geometry.addRailingRepresentation`/`api.geometry.computeWallMountedHandrailGeometry`/
 // `api.geometry.addShapeAspect`/
 // `api.geometry.addSlabRepresentation`/`api.geometry.addTopologyRepresentation`/
 // `api.geometry.addWallRepresentation`/`api.geometry.addWindowRepresentation`/
@@ -147,6 +167,18 @@ export type {
 	CardinalPointString,
 	Vec3,
 } from "./addProfileRepresentation";
+export {
+	addRailingRepresentation,
+	computeWallMountedHandrailGeometry,
+	FilletDegenerateError,
+} from "./addRailingRepresentation";
+export type {
+	AddRailingRepresentationSettings,
+	ComputeWallMountedHandrailGeometryOptions,
+	RailingSupport,
+	TerminalType,
+	WallMountedHandrailGeometry,
+} from "./addRailingRepresentation";
 export { addSlabRepresentation } from "./addSlabRepresentation";
 export type { AddSlabRepresentationSettings } from "./addSlabRepresentation";
 export { addWallRepresentation } from "./addWallRepresentation";
