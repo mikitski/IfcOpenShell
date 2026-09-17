@@ -53,19 +53,29 @@
 // self-contained, no `ShapeBuilder`/geometry-kernel dependency at all; see
 // `./addWallRepresentation.ts`'s/`./addSlabRepresentation.ts`'s own header comments for
 // their shared `apply_clippings`-LIFO-consumption pattern and 2 real, disclosed
-// `clippings`/`booleans` ALIASING divergences between the two files). Every other
+// `clippings`/`booleans` ALIASING divergences between the two files), and (landed in a
+// later chunk, 2 files, ~226 lines): `create_2pt_wall` (a plain function, no internal
+// `Usecase` class -- wraps this same module's own `addWallRepresentation`/
+// `editObjectPlacement`, see `./create2ptWall.ts`'s own header comment for a real,
+// disclosed unit-mixing bug in its direction-vector math, preserved verbatim) and
+// `add_mesh_representation` (the first `api.geometry` file that genuinely needs the FULL
+// `util/shapeBuilder.ts` `ShapeBuilder` CLASS, not a small per-file duplicate -- its
+// `facetedBrep`/`polygonalFaceSet` methods, both already fully functional -- see
+// `./addMeshRepresentation.ts`'s own header comment for its 4 ported `assert`
+// preconditions and its verified-unconditional `unit_scale` division). Every other
 // `api.geometry` function (`add_door_representation`, `validate_csg`, etc.) remains
-// unported; a future `api.geometry` chunk should treat all 22 of these as already
+// unported; a future `api.geometry` chunk should treat all 24 of these as already
 // landed (reviewed against the real Python source, see each file's own header comment)
 // rather than re-porting them from scratch. Namespaced per this project's
 // `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
-// `api.geometry.addShapeAspect`/`api.geometry.addSlabRepresentation`/
-// `api.geometry.addTopologyRepresentation`/`api.geometry.addWallRepresentation`/
-// `api.geometry.assignRepresentation`/`api.geometry.addFootprintRepresentation`/
-// `api.geometry.clipSolid`/`api.geometry.clipSolidBounded`/
-// `api.geometry.connectElement`/`api.geometry.connectPath`/`api.geometry.connectWall`/
-// `api.geometry.copyRepresentation`/`api.geometry.disconnectElement`/
+// `api.geometry.addMeshRepresentation`/`api.geometry.addShapeAspect`/
+// `api.geometry.addSlabRepresentation`/`api.geometry.addTopologyRepresentation`/
+// `api.geometry.addWallRepresentation`/`api.geometry.assignRepresentation`/
+// `api.geometry.addFootprintRepresentation`/`api.geometry.clipSolid`/
+// `api.geometry.clipSolidBounded`/`api.geometry.connectElement`/
+// `api.geometry.connectPath`/`api.geometry.connectWall`/`api.geometry.copyRepresentation`/
+// `api.geometry.create2ptWall`/`api.geometry.disconnectElement`/
 // `api.geometry.disconnectPath`/`api.geometry.editObjectPlacement`/
 // `api.geometry.mapRepresentation`/`api.geometry.removeBoolean`/
 // `api.geometry.removeRepresentation`/`api.geometry.unassignRepresentation`/
@@ -76,6 +86,8 @@ export { addBoolean } from "./addBoolean";
 export type { AddBooleanSettings } from "./addBoolean";
 export { addFootprintRepresentation } from "./addFootprintRepresentation";
 export type { AddFootprintRepresentationSettings } from "./addFootprintRepresentation";
+export { addMeshRepresentation } from "./addMeshRepresentation";
+export type { AddMeshRepresentationSettings } from "./addMeshRepresentation";
 export { addSlabRepresentation } from "./addSlabRepresentation";
 export type { AddSlabRepresentationSettings } from "./addSlabRepresentation";
 export { addWallRepresentation } from "./addWallRepresentation";
@@ -98,6 +110,8 @@ export { connectWall } from "./connectWall";
 export type { ConnectWallSettings } from "./connectWall";
 export { copyRepresentation } from "./copyRepresentation";
 export type { CopyRepresentationSettings } from "./copyRepresentation";
+export { create2ptWall } from "./create2ptWall";
+export type { Create2ptWallSettings } from "./create2ptWall";
 export { disconnectElement } from "./disconnectElement";
 export type { DisconnectElementSettings } from "./disconnectElement";
 export { disconnectPath } from "./disconnectPath";
