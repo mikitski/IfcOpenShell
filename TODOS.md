@@ -3224,3 +3224,68 @@ values, which lock in the buggy arithmetic as the documented, expected behavior.
 **Depends on / blocked by:** Same foundational `entityInstance.ts` EXPRESS DERIVED-attribute fix as
 `util.representation.guessType`'s entry and every other entry in this family above (not yet
 scheduled/started).
+
+---
+
+### `api.alignment.updateEndPoint` needs the unported `api.alignment.addZeroLengthSegment` -- itself transitively blocked on the already-tracked `_get_segment_endpoint`/geometry-kernel gap
+
+**What:** Real Python's `ifcopenshell.api.alignment.update_end_point` calls
+`ifcopenshell.api.alignment.add_zero_length_segment(file, curve)` whenever
+`has_zero_length_segment(curve)` is `false`. `add_zero_length_segment` is NOT ported in this chunk
+(`api.alignment` chunk 3) -- confirmed absent, and explicitly named in `src/api/alignment/index.ts`'s
+own "Still pending" list. Reading `add_zero_length_segment.py`'s own full body directly (not just its
+top-level imports) confirms it is itself transitively blocked: for every realistic case where the
+layout/curve already has at least one real segment (i.e. every non-empty, already-in-progress
+alignment -- the common case, not an edge case), it calls `_get_segment_endpoint`, which needs the
+real geometry kernel (`ifcopenshell.geom`) -- the SAME gap `./index.ts`'s own header comment already
+discloses and explicitly excludes from this chunk's scope. Only the fully-empty-layout/curve case (no
+segments at all yet) of `add_zero_length_segment` would be geometry-kernel-free, but porting just that
+one narrow slice of a separate, not-yet-reviewed file was judged real, disclosed scope creep rather
+than a small addition -- matching this project's own "do not inline a risky partial port for a
+dependency outside the module under review" discipline (e.g. this file's own
+`util.element.getShapeAspects` entry, or `api.style.addSurfaceTextures`'s `material` entry).
+
+`src/ifcopenshell-ts/src/api/alignment/updateEndPoint.ts` ports every other real behavior of this
+function correctly and completely (the type-check and its own deliberately-preserved unmatched-quote
+message bug; the full `EndPoint`-not-yet-assigned branch construction for BOTH
+`IfcGradientCurve`/`IfcSegmentedReferenceCurve`; the full `getAxis2placement` extraction and both
+classes' own final attribute-assignment tail), and throws a clear, disclosed error ONLY at the exact
+point, and only when, the real `add_zero_length_segment` call would actually be needed -- never
+proactively, and never before the type-check has already run.
+
+**Why:** Same reasoning as every other genuinely-separate-file dependency gap in this file (e.g.
+`util.element.getShapeAspects`, `api.style.addSurfaceTextures`'s Blender-parameter entry) --
+`add_zero_length_segment` is a real, substantial function (uses `ifcopenshell.api.nest`,
+`ifcopenshell.util.unit`, and 3 more of its own module-private helpers besides
+`_get_segment_endpoint`) belonging to its own future chunk's review scope, not squeezed into this
+chunk's.
+
+**Impact:** Calling `updateEndPoint(file, curve)` throws `"updateEndPoint: '<curve.isA()>' has no
+zero-length segment yet, and adding one needs api.alignment.addZeroLengthSegment, which is not ported
+in this chunk (itself transitively blocked on the unported _get_segment_endpoint, which needs the real
+geometry kernel) -- see TODOS.md."` only when `hasZeroLengthSegment(curve)` is `false` -- a `curve`
+that ALREADY ends in a real zero-length segment (the state any fully-constructed alignment's own
+curve is expected to be in, per this module's own docstring: "The manditory zero length segment ...
+are automatically created and maintained") is completely unaffected and computes a real, correct
+`EndPoint`. Pinned by a dedicated regression test in `updateEndPoint.test.ts`
+(`"throws a disclosed error when the curve has no zero-length segment yet"`), alongside full, real,
+passing test coverage for both curve classes' own `EndPoint`-missing and `EndPoint`-already-present
+branches (built via a real, hand-constructed zero-length `IfcCurveSegment`, sidestepping the blocked
+path entirely -- see `updateEndPoint.ts`'s own header comment for the raw-SELECT-value-assignment
+technique reused from chunk 2).
+
+**Fix:** Port `ifcopenshell.api.alignment.add_zero_length_segment` (and its own transitive
+dependency, `_get_segment_endpoint`, which needs the future `ifcopenshell.geom` binding -- see this
+file's own `api.geometry.addProfileRepresentation`/`editProfileUsage`/`getAxis2placement` entries for
+the shared scope of that future binding effort) as their own future chunk, then wire the real call
+back into `updateEndPoint.ts`'s own `if (!hasZeroLengthSegment(curve))` branch.
+
+**Context:** Surfaced during `api.alignment` chunk 3 (5 files: `_sort_nest`/`_get_key_point_tag`/
+`update_fallback_position`/`_get_cant_segment`/`update_end_point`, 2026-09-17), verified directly
+against the real 91-line `update_end_point.py` source and the real 206-line
+`add_zero_length_segment.py` source (including its own `_get_segment_endpoint` import).
+
+**Depends on / blocked by:** The same future `ifcopenshell.geom` binding effort as this file's
+`getAxis2placement`/`util.shape`/`editProfileUsage`/`addProfileRepresentation` entries above (not yet
+scheduled/started), plus porting `add_zero_length_segment` itself as its own future chunk once that
+binding exists.
