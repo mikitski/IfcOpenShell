@@ -46,14 +46,22 @@
 // `./clipSolid.ts`'s/`./clipSolidBounded.ts`'s own header comments for their shared,
 // already-disclosed `BBIM_Boolean`-pset primitive-layer blocker) and
 // `add_axis_representation` (imports only already-landed `util.unit`, no blocker --
-// see `./addAxisRepresentation.ts`'s own header comment). Every other `api.geometry`
-// function (`add_wall_representation`, `add_door_representation`, `validate_csg`,
-// etc.) remains unported; a future `api.geometry` chunk should treat all 20 of these
-// as already landed (reviewed against the real Python source, see each file's own
-// header comment) rather than re-porting them from scratch. Namespaced per this
-// project's `util/index.ts` per-submodule convention:
+// see `./addAxisRepresentation.ts`'s own header comment), and (landed in THIS chunk,
+// alongside `util/data.ts`'s own `Clipping`) `add_wall_representation`/
+// `add_slab_representation` (2 files, ~307 lines -- both only import already-landed
+// `util.element`/`util.unit` plus this same chunk's own `util.data.Clipping`, fully
+// self-contained, no `ShapeBuilder`/geometry-kernel dependency at all; see
+// `./addWallRepresentation.ts`'s/`./addSlabRepresentation.ts`'s own header comments for
+// their shared `apply_clippings`-LIFO-consumption pattern and 2 real, disclosed
+// `clippings`/`booleans` ALIASING divergences between the two files). Every other
+// `api.geometry` function (`add_door_representation`, `validate_csg`, etc.) remains
+// unported; a future `api.geometry` chunk should treat all 22 of these as already
+// landed (reviewed against the real Python source, see each file's own header comment)
+// rather than re-porting them from scratch. Namespaced per this project's
+// `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
-// `api.geometry.addShapeAspect`/`api.geometry.addTopologyRepresentation`/
+// `api.geometry.addShapeAspect`/`api.geometry.addSlabRepresentation`/
+// `api.geometry.addTopologyRepresentation`/`api.geometry.addWallRepresentation`/
 // `api.geometry.assignRepresentation`/`api.geometry.addFootprintRepresentation`/
 // `api.geometry.clipSolid`/`api.geometry.clipSolidBounded`/
 // `api.geometry.connectElement`/`api.geometry.connectPath`/`api.geometry.connectWall`/
@@ -68,6 +76,10 @@ export { addBoolean } from "./addBoolean";
 export type { AddBooleanSettings } from "./addBoolean";
 export { addFootprintRepresentation } from "./addFootprintRepresentation";
 export type { AddFootprintRepresentationSettings } from "./addFootprintRepresentation";
+export { addSlabRepresentation } from "./addSlabRepresentation";
+export type { AddSlabRepresentationSettings } from "./addSlabRepresentation";
+export { addWallRepresentation } from "./addWallRepresentation";
+export type { AddWallRepresentationSettings } from "./addWallRepresentation";
 export { addShapeAspect } from "./addShapeAspect";
 export type { AddShapeAspectSettings } from "./addShapeAspect";
 export { addTopologyRepresentation } from "./addTopologyRepresentation";
