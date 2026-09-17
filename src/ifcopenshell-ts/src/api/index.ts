@@ -413,3 +413,29 @@ export * as georeference from "./georeference";
 // established precedent -- see `api.grid`/`api.boundary` landing before
 // `root/removeProduct.ts` was updated to use them).
 export * as feature from "./feature";
+
+// Phase 6, `api.cogo` chunk: a brand-new module, all 4 real files ported in one chunk
+// (246 lines total -- no TS port of any kind before this chunk). "COGO" (coordinate
+// geometry) functions for survey points and control monuments (site layout, parcels,
+// etc.). No unported DEPENDENCY of any kind for any of the 4 files (every real
+// dependency -- `util.representation.getContext`, `api.spatial.assignContainer`,
+// `util.geolocation.dms2dd` -- already landed). BUT 2 of the 4 (`addSurveyPoint`,
+// `editSurveyPoint`) ARE blocked at runtime, each by a DIFFERENT confirmed
+// consequence of the SAME pre-existing, already-disclosed, cross-cutting
+// `entityInstance.ts` EXPRESS DERIVED-attribute gap (`.get()` unconditionally throws
+// for any derived attribute, no fallback at all) -- `addSurveyPoint` via
+// `IfcGeometricRepresentationSubContext.WorldCoordinateSystem` (derived from
+// `ParentContext`, confirmed to fire on every real invocation that finds a matching
+// context, i.e. the common case), `editSurveyPoint` via `IfcCartesianPoint.Dim`
+// (derived from `Coordinates`'s own length) -- both confirmed EMPIRICALLY against a
+// locally-built multi-schema native addon, not just reasoned about.
+// `assignSurveyPoint`/`bearing2dd` are fully unblocked and functional today. This
+// whole module is also effectively IFC4X3-only: `IfcAnnotation.PredefinedType`
+// (needed by `addSurveyPoint`) doesn't exist on IFC2X3/IFC4 at all, confirmed against
+// all 3 generated `.d.ts`s -- matching the real Python test suite's own
+// `IFC4X3_AVAILABLE`-gated tests. One real, verbatim-preserved Python-source bug
+// found in `bearing2dd.py` itself: its 4th `dms2dd` argument is neither real
+// microseconds nor even correctly-scaled milliseconds, confirmed against the real
+// ported test fixture's own expected values. See `cogo/index.ts`'s own header
+// comment and each file's own header comment for the full writeup.
+export * as cogo from "./cogo";

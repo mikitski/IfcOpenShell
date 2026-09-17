@@ -3092,3 +3092,86 @@ foundational blocker prevents test-fixture construction).
 fixes as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry
 (gap 2) above (neither yet scheduled/started). Finding B depends on an upstream
 `ifcopenshell-python` fix, outside this port's own control.
+
+### `api.cogo.addSurveyPoint`/`editSurveyPoint` are BOTH blocked by the pre-existing EXPRESS
+DERIVED-attribute gap -- 2 more confirmed consequences, via 2 DIFFERENT derived attributes,
+neither previously covered by this file's existing entries
+
+**What:** `ifcopenshell.api.cogo` (a brand-new module, 4 real files, 246 lines) ported in full,
+including its own 2 real dependencies (`util.representation.get_context`, `api.spatial
+.assign_container`, both already landed). 2 of the 4 functions hit the SAME already-tracked,
+cross-cutting `entityInstance.ts` gap this file already has an entire family of entries for
+(`EntityInstance.get()` has no EXPRESS DERIVED-category fallback at all -- see
+`util.representation.guessType`'s entry above, the first to surface it, via `IfcCurve.Dim`/
+`IfcSurface.Dim`) -- but via 2 attributes/entity classes not previously covered by any existing
+entry in this file:
+
+1. **`addSurveyPoint`** reads `context.WorldCoordinateSystem` where `context` is guaranteed (by
+   its own call to `get_context(file, "Model", "Annotation", "MODEL_VIEW")`, which always resolves
+   to a *subcontext* whenever both a subcontext identifier and a target view are given) to be an
+   `IfcGeometricRepresentationSubContext` -- confirmed by reading `getContext`'s own implementation
+   directly. On that class, `WorldCoordinateSystem` is NOT a stored attribute at all: it's a real
+   EXPRESS DERIVED attribute (`DERIVE WorldCoordinateSystem := ParentContext.WorldCoordinateSystem`,
+   confirmed via `ifcopenshell.express.rules.IFC4X3`'s own compiled
+   `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem`), confirmed absent from
+   `IfcGeometricRepresentationSubContext`'s own generated interface on all 3 schemas identically.
+   This throws on literally every real invocation that finds a matching context at all -- the
+   common, intended case -- confirmed EMPIRICALLY by running this chunk's own test suite against a
+   locally-built multi-schema native addon.
+2. **`editSurveyPoint`** reads `Items[0].Dim` where `Items[0]` is an `IfcCartesianPoint`.
+   `IfcCartesianPoint.Dim` is a DIFFERENT real EXPRESS DERIVED attribute
+   (`DERIVE Dim := HIINDEX(Coordinates)`, confirmed via `ifcopenshell.express.rules.IFC4X3`'s own
+   compiled `calc_IfcCartesianPoint_Dim`) -- a much simpler formula than `IfcCurveDim`/
+   `IfcSurfaceDim` (this file's existing entry's own ~20-line recursive functions), but the SAME
+   category of gap, and this port's discipline (per this task's own required process: "throw a
+   clear loud error only at the exact point actually needed, never proactively guard around a
+   foundational gap") means it is NOT special-cased as a narrow `Coordinates.length` shortcut even
+   though that would happen to produce an identical numeric answer for this one class -- it throws
+   via the real, already-clear `.get()` error instead, exactly like every other entry in this
+   family. This is this function's very FIRST statement, so it throws on every invocation, on
+   every schema.
+
+`assignSurveyPoint` (a single, direct, already-forward-attribute reassignment) and `bearing2dd`
+(pure string/number math, no entity access at all) are NOT affected -- both fully functional and
+given real, passing tests (not "throws" pins), including `assignSurveyPoint`'s own fixture, which
+could not reuse real Python's own `add_survey_point`-based fixture (blocked, per finding 1 above)
+and was instead built directly via raw `file.createEntity(...)` calls reproducing the same shape.
+
+**Why not fixed now:** Same reasoning as every other entry in this family -- general EXPRESS
+DERIVED-attribute execution in `entityInstance.ts` is a foundational, cross-cutting primitive-layer
+change, not something a single `api.cogo` chunk should patch unilaterally (whether via the general
+fix or a narrow per-attribute reimplementation).
+
+**Impact:** `addSurveyPoint` throws for every real invocation that finds a matching
+Model/Annotation/MODEL_VIEW context (`"entity instance of type '...IfcGeometricRepresentation
+SubContext' has no attribute 'WorldCoordinateSystem'"`) -- the only way it does NOT throw is the
+already-disclosed "no context exists at all" edge case, which throws a DIFFERENT, earlier,
+already-guarded error instead. `editSurveyPoint` throws unconditionally, on its very first
+statement (`"entity instance of type '...IfcCartesianPoint' has no attribute 'Dim'"`). Both pinned
+by dedicated regression tests (`addSurveyPoint.test.ts`/`editSurveyPoint.test.ts`) asserting the
+exact disclosed error, not a loose "either" net. `assignSurveyPoint`/`bearing2dd` are unaffected
+and have real, fully-passing test coverage.
+
+**Fix:** Same as every other entry in this family: (a) general EXPRESS DERIVED-attribute execution
+in `entityInstance.ts` (unblocks every module that ever needs any derived attribute, not just
+these 2), or (b) narrow, per-attribute local reimplementations (`WorldCoordinateSystem` ->
+`ParentContext.get("WorldCoordinateSystem")`; `Dim` -> `Coordinates.length`) -- both trivial
+one-liners once someone decides this project wants that narrower pattern for cogo specifically,
+but deliberately NOT done in this chunk, per this task's own required process.
+
+**Context:** Surfaced while landing `api.cogo` (a brand-new module, all 4 real files, 246 lines,
+Phase 6). Also confirmed a genuine, real, IFC4X3-only schema constraint independent of this gap:
+`IfcAnnotation.PredefinedType` (needed by `addSurveyPoint`) doesn't exist on IFC2X3/IFC4 at all,
+confirmed against all 3 generated `.d.ts`s -- matching the real Python test suite's own
+`IFC4X3_AVAILABLE`-gated tests, so `addSurveyPoint.test.ts`/`editSurveyPoint.test.ts`'s own
+`describe.each` blocks are filtered to IFC4X3 (`editSurveyPoint`'s own `Dim` gap is schema-
+independent, but its ported test still uses the same `addContext`/`IfcAnnotation` fixture shape
+for consistency with `addSurveyPoint.test.ts`). Also confirmed a real, verbatim-preserved
+upstream-Python bug in `bearing2dd.py` itself, unrelated to this gap: its 4th `dms2dd` argument is
+neither real microseconds nor even correctly-scaled milliseconds (`100.0 * fractional_seconds`,
+not `1000000.0 *`) -- confirmed against the real ported test fixture's own expected numeric
+values, which lock in the buggy arithmetic as the documented, expected behavior.
+
+**Depends on / blocked by:** Same foundational `entityInstance.ts` EXPRESS DERIVED-attribute fix as
+`util.representation.guessType`'s entry and every other entry in this family above (not yet
+scheduled/started).
