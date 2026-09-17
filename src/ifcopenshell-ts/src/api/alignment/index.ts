@@ -9,8 +9,8 @@
 // construction, and their derived `IfcCompositeCurve`/`IfcGradientCurve`/
 // `IfcSegmentedReferenceCurve` geometric representations.
 //
-// **THIS IS CHUNK 2 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 22 of ~50 real files (~991 lines) are landed as of this
+// **THIS IS CHUNK 3 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
+// module of this size) -- 27 of ~50 real files (~1272 lines) are landed as of this
 // chunk. None of these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
@@ -144,6 +144,58 @@
 // exercised indirectly by tests outside this chunk's scope) -- original test coverage
 // was written for these, following the same fixture pattern.
 //
+// --- Landed in chunk 3 (5 more files, ~281 lines) ---
+//
+// 3 module-private (`_`-prefixed, not re-exported from this barrel -- see
+// `./_sortNest.ts`'s own header comment for the convention) helpers: `_sortNest`
+// (in-place `RelatedObjects` sort by an arbitrary key function, generic over a
+// `number`/`string` key type), `_getKeyPointTag` (station-and-label text builder,
+// reusing already-landed `util.alignment.stationAsString`), `_getCantSegment`
+// (horizontal-segment -> corresponding cant-layout segment, reusing this module's own
+// already-landed `getAlignment`) -- none has any unported dependency. Plus 2 public
+// functions: `updateFallbackPosition` (`IfcLinearPlacement.CartesianPosition`
+// fallback-position computation, reusing already-landed `util.placement
+// .getLocalPlacement`) and `updateEndPoint` (`IfcGradientCurve`/
+// `IfcSegmentedReferenceCurve.EndPoint` computation, reusing this module's own
+// already-landed `hasZeroLengthSegment` and already-landed `util.placement
+// .getAxis2placement`).
+//
+// **One genuinely NEW blocker found by reading `update_end_point.py`'s own full body
+// (not just its top-level imports), disclosed with its own dedicated `TODOS.md`
+// entry**: it calls `ifcopenshell.api.alignment.add_zero_length_segment` whenever
+// `has_zero_length_segment(curve)` is `false` -- `add_zero_length_segment` is NOT
+// ported in this chunk (still in the "still pending" list below), and is itself
+// transitively blocked on the unported `_get_segment_endpoint` (the SAME real
+// geometry-kernel gap this file's own header comment already discloses) for every
+// realistic, non-empty case. Ported every other real behavior of `update_end_point`
+// correctly and completely, and throws a clear, disclosed error ONLY at the exact
+// point, and only when, the real `add_zero_length_segment` call would actually be
+// needed -- never proactively (`updateEndPoint.ts`'s own header comment has the full
+// writeup). `updateFallbackPosition` has NO new blocker of its own, but its real-world
+// usage almost always reaches the SAME, already-tracked (chunk 1's own `util
+// /placement.ts` header comment / `TODOS.md`'s very first entry)
+// `getAxis2placement`-needs-`ifcopenshell.geom` gap, since a real alignment
+// `IfcLinearPlacement.RelativePlacement.Location` is normally an
+// `IfcPointByDistanceExpression`, not a plain `IfcCartesianPoint` --
+// `updateFallbackPosition.ts`'s own header comment discloses this without adding a
+// new, redundant `TODOS.md` entry for what is the identical, already-tracked gap.
+//
+// Real Python has no dedicated test file for any of this chunk's 5 files (confirmed
+// by reading the whole real test directory) except `test_update_fallback_position.py`,
+// whose own fixture builds via the unported `create_by_pi_method`/`get_basis_curve`
+// and ends up exercising the disclosed-blocked `IfcPointByDistanceExpression` path
+// above -- not reusable. `updateFallbackPosition.test.ts` instead builds an
+// `IfcAxis2PlacementLinear` whose `Location` is a real, schema-valid
+// `IfcCartesianPoint` (exercising the exact same `a2p` logic with real, hand-verified
+// rotation/translation values); `updateEndPoint.test.ts` builds a real zero-length
+// `IfcCurveSegment` directly (`SegmentStart`/`SegmentLength` set to a raw `0.0` at
+// construction time, reusing chunk 2's own empirically-confirmed
+// raw-SELECT-value-assignment technique) rather than going through the blocked
+// `addZeroLengthSegment` path; `_sortNest`/`_getKeyPointTag`/`_getCantSegment` all get
+// original coverage following this module's established fixture pattern. All 5 files
+// use `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1/2's
+// own established convention.
+//
 // --- Still pending (future chunks) ---
 //
 // Every other real file in `ifcopenshell/api/alignment/`: the segment-by-segment and
@@ -153,17 +205,15 @@
 // `create_segment_representations`, `layout_horizontal_alignment_by_pi_method`,
 // `layout_vertical_alignment_by_pi_method`, `add_vertical_layout`,
 // `add_zero_length_segment`, `add_positioning_referent`, `add_stationing_referent`,
-// `update_alignment_parameter_segment_tags`, `update_end_point`,
-// `update_fallback_position`, `update_key_point_referents`,
+// `update_alignment_parameter_segment_tags`, `update_key_point_referents`,
 // `get_curve_segment_transition_code` (the ONE file needing the real geometry kernel,
-// see below -- do not attempt), their private `_`-prefixed helper files (`_add_segment_to_curve`,
-// `_add_segment_to_layout`, `_add_zero_length_segment`,
+// see below -- do not attempt), their private `_`-prefixed helper files
+// (`_add_segment_to_curve`, `_add_segment_to_layout`, `_add_zero_length_segment`,
 // `_create_geometric_representation`, `_create_offset_curve_representation`,
-// `_create_polyline_representation`, `_get_cant_segment`, `_get_key_point_tag`,
-// `_get_segment_endpoint`, `_get_segment_start_point_label`,
-// `_map_alignment_cant_segment`, `_map_alignment_horizontal_segment`,
-// `_map_alignment_segment`, `_map_alignment_vertical_segment`, `_sort_nest`,
-// `_update_curve_segment_transition_code`,
+// `_create_polyline_representation`, `_get_segment_endpoint`,
+// `_get_segment_start_point_label`, `_map_alignment_cant_segment`,
+// `_map_alignment_horizontal_segment`, `_map_alignment_segment`,
+// `_map_alignment_vertical_segment`, `_update_curve_segment_transition_code`,
 // `_update_zero_length_segment_placement`) -- and, separately from all of the above,
 // **`util.py`, a REAL, CONFIRMED, SEPARATE blocker** (not attempted in any chunk
 // until the underlying gap is closed): it genuinely needs the real geometry kernel
@@ -195,3 +245,5 @@ export { getStationingNest } from "./getStationingNest";
 export { getVerticalLayout } from "./getVerticalLayout";
 export { hasZeroLengthSegment } from "./hasZeroLengthSegment";
 export { nameSegments } from "./nameSegments";
+export { updateEndPoint } from "./updateEndPoint";
+export { updateFallbackPosition } from "./updateFallbackPosition";
