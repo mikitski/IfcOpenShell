@@ -5,9 +5,11 @@
 // as `util.element.getPset` here, rather than flattening every util module's exports
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
 // port more `util` modules; `alignment`/`attribute`/`classification`/`constraint`/`cost`/
-// `date`/`doc`/`element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/`pset`/
-// `representation`/`resource`/`schema`/`selector`/`shape`/`shapeBuilder`/`system`/`type`/
-// `unit` are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4).
+// `data`/`date`/`doc`/`element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/
+// `pset`/`representation`/`resource`/`schema`/`selector`/`shape`/`shapeBuilder`/`system`/
+// `type`/`unit` are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4).
+// `data` is a single small dataclass (`Clipping`), not a usecase -- see `data.ts`'s own
+// header comment.
 // `shapeBuilder` is now `util/shape_builder.py` in full (landed across two PRs given its
 // unusual size -- see `shapeBuilder.ts`'s own header comment for the split). `alignment`
 // ports only `stationAsString` for real -- its other three functions are genuine,
@@ -22,6 +24,7 @@ export * as attribute from "./attribute";
 export * as classification from "./classification";
 export * as constraint from "./constraint";
 export * as cost from "./cost";
+export * as data from "./data";
 export * as date from "./date";
 export * as doc from "./doc";
 export * as element from "./element";
