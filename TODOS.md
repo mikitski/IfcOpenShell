@@ -2646,3 +2646,66 @@ even attempted here).
 2026-09-15), verified directly against the real 204-line `add_surface_textures.py` source.
 
 **Depends on / blocked by:** Nothing scheduled -- see "Fix" above.
+
+---
+
+### `api.geometry.addProfileRepresentation`'s `getX`/`getY` need `ifcopenshell.geom`/`util.shape.get_x`/`get_y` for any profile outside a 10-class closed-form allowlist (not yet ported)
+
+**What:** Real Python's `ifcopenshell.api.geometry.add_profile_representation` computes a
+profile's own bounding-box X/Y extent (needed for `CardinalPoint` values `"bottom left"`/
+`"bottom centre"`/`"bottom right"`/`"mid-depth left"`/`"mid-depth right"`/`"top left"`/
+`"top centre"`/`"top right"`) via `Usecase.get_x`/`get_y`. Both methods special-case exactly 10
+concrete profile classes with a closed-form formula (`IfcAsymmetricIShapeProfileDef`,
+`IfcCShapeProfileDef`, `IfcCircleProfileDef`, `IfcEllipseProfileDef`, `IfcIShapeProfileDef`,
+`IfcLShapeProfileDef`, `IfcRectangleProfileDef`, `IfcTShapeProfileDef`, `IfcUShapeProfileDef`,
+`IfcZShapeProfileDef`) -- all 10 ported completely, faithfully, and for real in this chunk. Any
+OTHER profile (an arbitrary/composite/derived profile, or any parameterized profile class outside
+that list) falls to the real `else` branch: build `ifcopenshell.geom.settings()`, call
+`ifcopenshell.geom.create_shape(settings, self.profile)` (a real OpenCASCADE-backed BRep/
+triangulation build), then read `ifcopenshell.util.shape.get_x(shape)`/`get_y(shape)` off the
+resulting mesh's own bounding box. This TS port has no `ifcopenshell.geom` binding of any kind --
+the SAME pre-existing, already-tracked gap this file's own earlier entries cover
+(`getAxis2placement`'s `IfcAxis2PlacementLinear` fallback, `util.shape`'s entire kernel-dependent
+surface, and `api.material.editProfileUsage`'s own `CardinalPoint`-change branch, which needs the
+identical `get_x`/`get_y` pair for the identical reason) -- not a genuinely new binding gap, just
+the 4th real call site to hit it. `src/ifcopenshell-ts/src/api/geometry/addProfileRepresentation.ts`
+ports every other real behavior of this function correctly and completely (every one of the 10
+allowlisted profile classes' own closed-form `getX`/`getY`; every `CardinalPoint` value that never
+needs either method at all -- falsy/`null`, `"mid-depth centre"`, and the 10 values from
+`"geometric centroid"` onward, which real Python's own unfinished `# TODO other cardinal points`
+comment already never implements either; the full `clippings`/`Clipping.apply`/existing-
+`IfcBooleanResult`-copy chain; `placementZxAxes`; unit-scale conversion of `depth`), and throws a
+clear, disclosed error ONLY at the exact point, for the exact axis, where the real kernel call
+would actually be needed -- never proactively, and never for a profile/`CardinalPoint` combination
+that doesn't actually reach the blocked `else` branch.
+
+**Why:** Same reasoning as this file's earlier `ifcopenshell.geom` entries: a real OpenCASCADE-
+class BRep/triangulation kernel is a substantial, separate native-binding effort, not something a
+single `api.geometry` chunk should build unilaterally.
+
+**Impact:** Calling `addProfileRepresentation` with a `cardinalPoint` that resolves to one of the
+8 kernel-dependent values (see "What") against a `profile` outside the 10-class allowlist throws
+`"addProfileRepresentation: computing the bounding-box <X|Y> extent of a '<profile.isA()>' profile
+(needed for the 'bottom left'/'bottom centre'/'bottom right'/'mid-depth left'/'mid-depth right'/
+'top left'/'top centre'/'top right' cardinalPoint values) needs a real geometry kernel (Python:
+ifcopenshell.geom.create_shape + ifcopenshell.util.shape.get_x/get_y), which this TS port doesn't
+have -- see TODOS.md."`. Every other combination (any profile with a non-kernel-dependent
+`cardinalPoint`; OR any `cardinalPoint` at all against one of the 10 allowlisted profile classes)
+completes normally, with a real, correct result. Pinned by a dedicated regression test in
+`addProfileRepresentation.test.ts` (a hand-built `IfcArbitraryClosedProfileDef`, adapted from real
+Python's own `test_run` -- see that test file's own header comment for why real Python's own test
+fixture, built via `ShapeBuilder.rectangle()`/`.profile()`, itself always lands on this exact
+blocked path, on every schema, today), alongside full, real, passing test coverage for all 10
+allowlisted profile classes and every non-kernel-dependent `CardinalPoint` value.
+
+**Fix:** Port an `ifcopenshell.geom` binding (see this file's first two entries' own "Fix"
+sections for the shared scope: `create_shape`, `ifcopenshell_wrapper.CURVES_SURFACES_AND_SOLIDS`,
+`W.triangulation`/`get_x`/`get_y` at minimum), then wire the real kernel call back into `getX`/
+`getY`'s own final `else` branch, restoring real Python's own `test_run` assertion (currently
+pinned as a "throws" test) in its place.
+
+**Context:** Surfaced during the `api.geometry` chunk landing `add_profile_representation` (224
+lines, the 26th of ~29 real `api.geometry` files), verified directly against the real source.
+
+**Depends on / blocked by:** Same future `ifcopenshell.geom` binding effort as this file's
+`getAxis2placement`/`util.shape`/`editProfileUsage` entries above (not yet scheduled/started).
