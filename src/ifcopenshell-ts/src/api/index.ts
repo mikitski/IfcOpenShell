@@ -407,9 +407,9 @@ export * as georeference from "./georeference";
 // just this port. See `feature/index.ts`'s own header comment and each file's own
 // header comment for the full writeup.
 //
-// Retroactive unblock available as a follow-up (deliberately NOT wired up in this
-// chunk, matching this project's established precedent -- see `api.grid`/
-// `api.boundary` landing before `root/removeProduct.ts` was updated to use them):
-// `root/removeProduct.ts`'s disclosed `HasOpenings` cleanup blocker (`TODOS.md`) can
-// now be resolved with this module's own `removeFeature`.
+// Retroactive unblock: RESOLVED -- `root/removeProduct.ts`'s disclosed `HasOpenings`
+// cleanup blocker (`TODOS.md`) is now wired up for real via this module's own
+// `removeFeature`, in a small, focused follow-up chunk (matching this project's
+// established precedent -- see `api.grid`/`api.boundary` landing before
+// `root/removeProduct.ts` was updated to use them).
 export * as feature from "./feature";

@@ -1919,7 +1919,7 @@ the pre-existing `edit_object_placement` entry, not a duplicate of either.
 
 ---
 
-### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet) -- **`IfcGrid` half RESOLVED 2026-09-16; `HasOpenings`/`api.feature` half now RESOLVABLE 2026-09-17 (not yet wired up), see UPDATEs below**
+### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet) -- **RESOLVED 2026-09-17 (both halves), see UPDATEs below**
 
 **What:** Real Python's `ifcopenshell.api.root.remove_product` has two more small, genuinely
 new blocked call sites beyond the `api.material`/`api.boundary` ones this file already tracks
@@ -1992,6 +1992,23 @@ after their own dependency). This entry's blocker is now genuinely RESOLVABLE (b
 `test_removing_all_openings_of_an_element`'s real passing assertion in
 `removeProduct.test.ts` (currently still pinned as a "throws the disclosed blocked error"
 regression test).
+
+**UPDATE 2026-09-17 (follow-up chunk wires it in for real -- entry now FULLY RESOLVED):**
+The small, dedicated follow-up promised in the UPDATE directly above has now landed:
+`src/ifcopenshell-ts/src/api/root/removeProduct.ts`'s `HasOpenings` branch now calls the
+real `removeFeature(file, { feature: opening.get("RelatedOpeningElement") })` for every
+`opening` (an `IfcRelVoidsElement`) in `product`'s own `HasOpenings`, exactly matching
+real Python's own `for opening in getattr(product, "HasOpenings", []) or []:
+ifcopenshell.api.feature.remove_feature(file, feature=opening.RelatedOpeningElement)`.
+Confirmed `RelatedOpeningElement` (not `HasOpenings` itself) is the actual
+`IfcFeatureElementSubtraction`/`IfcOpeningElement` to pass along, identical across
+`generated/ifc2x3.d.ts`/`ifc4.d.ts`/`ifc4x3.d.ts`.
+`test_removing_all_openings_of_an_element`'s real passing assertion is restored in
+`removeProduct.test.ts` ("removing all openings of an element"), replacing its former
+"throws the disclosed blocked error" pin -- built via the real `api.feature.addFeature`
+fixture call (not `withAttrs`), matching real Python's own fixture exactly now that
+`api.feature` is fully ported. This entry is now fully resolved -- no remaining blocked
+call site in this function.
 
 ---
 

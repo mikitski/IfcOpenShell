@@ -18,13 +18,13 @@
 // `AdheresToElement`), a genuine upstream bug that crashes for any real IFC4X3 surface
 // feature in real Python too.
 //
-// Retroactive unblock available as a follow-up (NOT wired up in this chunk, per this
+// Retroactive unblock: RESOLVED in a small, focused follow-up chunk (matching this
 // project's established "land the module, wire up the retroactive unblock separately"
 // precedent -- see e.g. `api.grid`/`api.boundary` landing before `removeProduct.ts`
-// was updated to use them): `src/ifcopenshell-ts/src/api/root/removeProduct.ts` has a
-// disclosed, still-throwing blocker for an `IfcElement`'s `HasOpenings` cleanup
+// was updated to use them): `src/ifcopenshell-ts/src/api/root/removeProduct.ts`'s
+// disclosed, formerly-throwing blocker for an `IfcElement`'s `HasOpenings` cleanup
 // (`TODOS.md`'s "`api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup"
-// entry) that can now be resolved with this module's own `removeFeature`.
+// entry) is now wired up for real, calling this module's own `removeFeature`.
 export { addFeature } from "./addFeature";
 export type { AddFeatureSettings } from "./addFeature";
 export { addFilling } from "./addFilling";

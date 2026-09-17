@@ -22,26 +22,24 @@
 // creates no `OwnerHistory` at all, `add_feature` does) -- the underlying
 // relationship-cascade behavior under test is unaffected either way.
 //
-// Only 1 real Python test is genuinely blocked now (a real, disclosed dependency on
-// `api.feature`, which has no TS port at all -- see `../../../src/api/root
-// /removeProduct.ts`'s own header comment and `TODOS.md`) and is pinned instead as a
-// dedicated "throws the disclosed blocked error" regression test, matching
-// `../type/mapTypeRepresentations.test.ts`'s/`../pset/editPset.test.ts`'s established
-// precedent -- not silently dropped: `test_removing_all_openings_of_an_element` (needs
-// `api.feature.remove_feature`).
-//
-// 3 more tests USED to be in this blocked group -- `test_removing_all_material_
-// relationships_of_an_element` (needed `api.material.unassign_material`),
-// `test_removing_axes_of_a_grid` (needed `api.grid.remove_grid_axis`), and
-// `test_removing_all_space_boundaries_of_an_element` (needed `api.boundary
-// .remove_boundary`) -- but are now all ported for real: see "removing all material
-// relationships of an element"/"removing axes of a grid"/"removing all space boundaries
-// of an element" below, and the `api.material`/`api.grid`/`api.boundary` chunks that
-// landed `unassignMaterial` (`../material/index.ts`), `removeGridAxis`
-// (`../grid/index.ts`), and `removeBoundary` (`../boundary/index.ts`) respectively.
+// No real Python test is genuinely blocked anymore. 4 tests USED to be in a blocked
+// group (each pinned as a dedicated "throws the disclosed blocked error" regression
+// test, matching `../type/mapTypeRepresentations.test.ts`'s/`../pset/editPset
+// .test.ts`'s established precedent) -- `test_removing_all_material_relationships_of_an
+// _element` (needed `api.material.unassign_material`), `test_removing_axes_of_a_grid`
+// (needed `api.grid.remove_grid_axis`), `test_removing_all_space_boundaries_of_an
+// _element` (needed `api.boundary.remove_boundary`), and `test_removing_all_openings_of
+// _an_element` (needed `api.feature.remove_feature`) -- but are now all ported for
+// real: see "removing all material relationships of an element"/"removing axes of a
+// grid"/"removing all space boundaries of an element"/"removing all openings of an
+// element" below, and the `api.material`/`api.grid`/`api.boundary`/`api.feature` chunks
+// that landed `unassignMaterial` (`../material/index.ts`), `removeGridAxis`
+// (`../grid/index.ts`), `removeBoundary` (`../boundary/index.ts`), and `removeFeature`
+// (`../feature/index.ts`) respectively.
 
 import { describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
+import { addFeature } from "../../../src/api/feature/addFeature";
 import { createGridAxis } from "../../../src/api/grid/createGridAxis";
 import { assignGroup } from "../../../src/api/group/assignGroup";
 import { assignMaterial } from "../../../src/api/material/assignMaterial";
@@ -222,6 +220,28 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 		removeProduct(file, { product: element });
 
 		expect(file.byType("IfcWallType").length).toBe(0);
+	});
+
+	// Real Python: `test_removing_all_openings_of_an_element`. Ported for real now that
+	// `api.feature.removeFeature` exists (this used to be one of this file's disclosed-
+	// blocker tests -- see this file's own header comment). `blankFile` (not
+	// `createTestFile`) matches this test's own `len(list(self.file)) == 0` assertion --
+	// with the default project bootstrap still present, removing the element and its
+	// opening alone would never bring the file down to zero entities. The `IfcRelVoidsElement`
+	// itself is built via the real `addFeature` (not `withAttrs`), matching real Python's
+	// own `ifcopenshell.api.feature.add_feature` fixture call exactly.
+	test("removing all openings of an element", () => {
+		const file = blankFile(schema);
+		const element = file.createEntity("IfcWall");
+		const opening = file.createEntity("IfcOpeningElement");
+		addFeature(file, { feature: opening, element });
+
+		removeProduct(file, { product: element });
+
+		expect([...file]).toHaveLength(0);
+		expect(file.byType("IfcWall").length).toBe(0);
+		expect(file.byType("IfcOpeningElement").length).toBe(0);
+		expect(file.byType("IfcRelVoidsElement").length).toBe(0);
 	});
 
 	// Real Python: `test_removing_axes_of_a_grid`. Ported for real now that
@@ -601,24 +621,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
 	});
 });
 
-// --- Disclosed blocker: a real, load-bearing dependency on `api.feature`, which has no
-// TS port at all. See `../../../src/api/root/removeProduct.ts`'s own header comment and
-// `TODOS.md`. (`api.material`/`api.grid`/`api.boundary` are no longer among these --
-// `unassignMaterial`/`removeGridAxis`/`removeBoundary` all now exist, see the real
-// "removing all material relationships of an element"/"removing axes of a grid"/
-// "removing all space boundaries of an element" tests above, and `TODOS.md`'s updated
-// entries.) ---
-
-describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct -- disclosed blockers (%s)", (schema) => {
-	test("removing an element with openings throws (api.feature.removeFeature not ported)", () => {
-		const file = createTestFile(schema);
-		const element = file.createEntity("IfcWall");
-		const opening = file.createEntity("IfcOpeningElement");
-		withAttrs(file, "IfcRelVoidsElement", { RelatingBuildingElement: element, RelatedOpeningElement: opening });
-
-		expect(() => removeProduct(file, { product: element })).toThrow(/api\.feature\.removeFeature/);
-	});
-});
+// --- No remaining disclosed blockers: `api.material`/`api.grid`/`api.boundary`/
+// `api.feature` are no longer among these -- `unassignMaterial`/`removeGridAxis`/
+// `removeBoundary`/`removeFeature` all now exist, see the real "removing all material
+// relationships of an element"/"removing axes of a grid"/"removing all space boundaries
+// of an element"/"removing all openings of an element" tests above, and `TODOS.md`'s
+// updated entries. (This section used to hold a dedicated "throws the disclosed
+// blocked error" regression test for `api.feature`; see `../../../src/api/root
+// /removeProduct.ts`'s own header comment for the resolution.) ---
 
 // --- Transaction/undo-redo regression coverage (no Python counterpart) ---
 
