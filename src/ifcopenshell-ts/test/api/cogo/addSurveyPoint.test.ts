@@ -30,9 +30,15 @@
 // IFC4X3_AVAILABLE, ...)` -- `IfcAnnotation.PredefinedType` doesn't exist on
 // IFC2X3/IFC4 at all (a separate, additional, genuine schema constraint on top of the
 // DERIVED-attribute gap above -- see `addSurveyPoint.ts`'s own header comment). Uses
-// `AVAILABLE_SCHEMAS.filter(...)` (never a hardcoded `describe`) so this suite
-// collects zero tests, rather than failing with "No schema loaded", in CI's own
-// IFC4-only native build.
+// `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))` (this project's established
+// convention for a single-schema-gated file, e.g. `test/util/schema.test.ts`), NOT
+// `describe.each(AVAILABLE_SCHEMAS.filter(...))` -- the latter registers ZERO blocks
+// (not one, skipped) when the filtered array is empty, which is exactly what happens
+// on CI's own IFC4-only native build (`AVAILABLE_SCHEMAS = ["IFC4"]`), and vitest
+// treats a file with no registered test suite at all as a collection-time error
+// ("No test suite found in file"), not a graceful 0-tests/skip result. `skipIf`
+// always registers this file's one `describe` block -- just marked skipped when the
+// condition fails -- so the file is never empty.
 
 import { describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
@@ -42,9 +48,9 @@ import { createFile } from "../../../src/api/project/createFile";
 import * as guid from "../../../src/guid";
 import { AVAILABLE_SCHEMAS } from "../../bootstrap";
 
-describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC4X3"))("api.cogo.addSurveyPoint (%s)", (schema) => {
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.cogo.addSurveyPoint (IFC4X3)", () => {
 	test('adding a survey point -- BLOCKED by the entityInstance.ts `.get("WorldCoordinateSystem")` DERIVED-attribute gap', () => {
-		const file = createFile(undefined, { version: schema });
+		const file = createFile(undefined, { version: "IFC4X3" });
 		const project = file.createEntity("IfcProject", null, null, "Test");
 		const site = file.createEntity("IfcSite", guid.new(), null, "MySite");
 		assignObject(file, { relatingObject: project, products: [site] });
