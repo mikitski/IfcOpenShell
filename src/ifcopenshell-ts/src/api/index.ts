@@ -439,3 +439,22 @@ export * as feature from "./feature";
 // ported test fixture's own expected values. See `cogo/index.ts`'s own header
 // comment and each file's own header comment for the full writeup.
 export * as cogo from "./cogo";
+
+// Phase 6+, `api.alignment` chunk 1 of many: a brand-new, LARGE module (~50 real
+// files, 6282 lines total) for IFC4X3-era road/rail alignment geometry
+// (horizontal/vertical/cant layouts, stationing, segments). This chunk lands only 17
+// dependency-clean getter/query files (~680 lines) -- no unported dependency for any
+// of them (every real dependency -- `util.representation.getContext`/
+// `getRepresentationsIter`, `api.context.addContext` -- already landed). This whole
+// module is effectively IFC4X3-only: `IfcAlignment`/`IfcAlignmentHorizontal`/
+// `IfcAlignmentVertical`/`IfcAlignmentCant`/`IfcAlignmentSegment`/`IfcReferent` don't
+// exist on IFC2X3/IFC4 at all, confirmed against all 3 generated `.d.ts`s. A REAL,
+// CONFIRMED, SEPARATE blocker for a future chunk: `util.py` genuinely needs the real
+// geometry kernel (`ifcopenshell.geom.create_shape`/`ifcopenshell_wrapper
+// .map_shape`/`.function_item_evaluator`), the same architectural boundary already
+// disclosed for `api.geometry.addProfileRepresentation`'s own `getX`/`getY`
+// else-branch -- not attempted here. Namespaced as `api.alignment.getHorizontalLayout`/
+// etc. See `alignment/index.ts`'s own header comment for the full 17-file scope, the
+// still-pending file list, and every disclosed real Python-source quirk preserved
+// verbatim in this chunk.
+export * as alignment from "./alignment";

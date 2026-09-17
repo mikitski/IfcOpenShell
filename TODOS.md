@@ -951,6 +951,31 @@ comments for the full writeup. The `element`-omitted path of both functions, and
 `add_axis_representation` (a separate file in this same chunk, no `element`/pset logic at
 all), are fully functional and unaffected by this gap.
 
+**UPDATE 2026-09-17 (`api.alignment` chunk 1 of many, `has_zero_length_segment.ts`
+file):** found a thirteenth independent consequence -- this time in TEST-FIXTURE
+construction rather than in ported production code. `has_zero_length_segment`'s own
+`IfcCompositeCurve`/`IfcGradientCurve`/`IfcSegmentedReferenceCurve` branch reads a
+wrapped `IfcCurveSegment.SegmentLength` (an `IfcCurveMeasureSelect` SELECT-typed
+attribute, confirmed `unknown` in the generated `.d.ts`s). Building a real regression
+test for this branch requires constructing a fresh, standalone declared-type value
+(e.g. `file.createEntity("IfcLengthMeasure", 0)`) to assign there -- confirmed
+EMPIRICALLY, while writing `test/api/alignment/hasZeroLengthSegment.test.ts`, to throw
+the identical `attribute_kind_of`/"Attribute access is only supported on entity
+instances" this entry already documents. Unlike every earlier consequence above, this
+one never appears in any SHIPPED production code path at all -- `has_zero_length_segment
+.ts`'s own ported logic for this branch (`wrappedValueOf`'s `.getByIndex(0)` read) is a
+READ, not a write, and reads of an already-existing wrapped value are unaffected by this
+gap (only *constructing* one via `createEntity` is blocked); the gap only blocked this
+chunk's own attempt to build a fresh TEST FIXTURE exercising that read. No proactive
+workaround was added -- the composite-curve branch's own dedicated test was left out of
+`hasZeroLengthSegment.test.ts` entirely (with a header-comment cross-reference to this
+entry) rather than forcing a broken fixture, matching this project's "disclose, don't
+work around" discipline. Real Python's own `test_has_zero_length_segment.py` doesn't
+exercise this branch either (only the horizontal/vertical/cant branch, which needs no
+standalone typed value and IS fully tested here). See `src/api/alignment
+/hasZeroLengthSegment.ts`'s own header comment and `test/api/alignment
+/hasZeroLengthSegment.test.ts`'s own header comment for the full writeup.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
