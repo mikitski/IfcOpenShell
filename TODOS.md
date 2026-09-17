@@ -2965,3 +2965,96 @@ to confirm its exact raised exception type) and this project's own locally-built
 as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
 above (neither yet scheduled/started). Finding B depends on an upstream `ifcopenshell-python` fix,
 outside this port's own control.
+
+### `api.geometry.regenerateWallRepresentation` is blocked on every wall with a real
+`IfcMaterialLayerSet`, on every schema (same 2 already-tracked primitive-layer gaps as
+window/door/railing) -- plus a genuinely NEW, severe upstream-Python bug in `combine_layers`
+
+**What:** `regenerate_wall_representation.py` (646 lines) -- the LAST portable file in
+`api.geometry` (28 of ~29 real files landed before this chunk; `add_representation.py` is
+permanently, genuinely Blender-only, not tracked here) -- regenerates a standard (case) wall's
+body + axis representation, taking into account `IfcMaterialLayerSet` thicknesses/priorities and
+`IfcRelConnectsPathElements` connections to other walls. Unlike `add_railing_representation`, real
+Python implements this with an internal `Regenerator` CLASS -- explicitly checked (per this
+chunk's own required process) whether the `Usecase.settings`-accessed-before-assignment
+evaluation-order bug from `add_window_representation`/`add_door_representation` applies here: **it
+does not** -- `Regenerator` never uses that dict-settings pattern at all, and every `self.*`
+attribute is assigned strictly before it is ever read (traced line-by-line, not assumed).
+
+**Finding A -- blocked on every wall with a real `IfcMaterialLayerSet`, on every schema (matches
+`add_railing_representation`'s own "blocked on literally every input" shape, not window/door's
+"most real-world inputs" one):** both of `regenerate`'s own 2 top-level branches (`isAngled`'s
+single sloped extrusion + boolean-differenced caps; `!isAngled`'s composite-profile assembly)
+unconditionally call `ShapeBuilder.polyline(points, closed=true, ...)` at least once while
+building the body solid -- there is no branch that skips it. On IFC4/IFC4X3 this throws
+immediately (the same already-tracked `IfcLineIndex`/`IfcArcIndex` defined-type-creation gap,
+`EntityInstance.setByIndex`/`IfcFile.createEntity` entry above). On IFC2X3, `polyline(closed=true)`
+succeeds, but the very next step -- `extrude()`'s own internal `profile()` upgrade call
+(`isAngled`), or a direct `builder.profile(...)` call (`!isAngled`) -- hits the SAME already-
+tracked `Dim` DERIVED-attribute gap (`util.representation.guessType`'s entry above) on every
+schema, confirmed EMPIRICALLY against this worktree's own locally-built native addon (IFC4), not
+just reasoned about. Every pure layer/axis/connection-join computation this function performs
+(`join` never touches `ShapeBuilder` at all -- confirmed by tracing every line) is genuinely, fully
+UNBLOCKED today and is this file's own primary test-coverage target, exercised indirectly through
+the single exported function's own observable throw timing/message (every helper is module-
+private, matching real Python's own entirely-private `Regenerator` class -- tested the same way
+`editObjectPlacement.test.ts` already established precedent for a similarly helper-heavy file).
+
+**Finding B -- a genuinely NEW, severe, upstream-Python bug, independent of any primitive-layer
+gap: `combine_layers` attempts to mutate an immutable value whenever a connection specifies
+`RelatingPriorities`/`RelatedPriorities`.** Real Python's `PrioritisedLayer = namedtuple(
+"PrioritisedLayer", "priority thickness")` is an immutable tuple subclass. `combine_layers`'s own
+override-priorities loop does `layers[i][0] = priority` -- positional item-assignment on a
+`PrioritisedLayer` INSTANCE, which namedtuples never support
+(`TypeError: 'PrioritisedLayer' object does not support item assignment`, confirmed against
+Python's own namedtuple semantics directly). `RelatingPriorities`/`RelatedPriorities`
+(`IfcRelConnectsPathElements`'s own real `LIST [0:?] OF INTEGER` attributes) are ordinary, real IFC
+data -- a model author overriding layer join priorities on a wall connection is not a contrived
+edge case. **So: any real connection that actually specifies a non-empty override crashes
+`regenerate_wall_representation` upstream, with an uncaught `TypeError`, before `join` is even
+called for that connection.** Reproduced here (not silently avoided) by representing
+`PrioritisedLayer` as a FROZEN plain object -- `combineLayers`'s own override loop attempts
+`layers[i].priority = priority` (the natural TS analogue of "mutate positional field 0"), which
+throws `TypeError: Cannot assign to read only property 'priority' of object` in strict-mode ES
+modules, reproducing the exact crash class and reachability. Confirmed empirically (both the crash
+itself, and that an EMPTY-priorities connection -- the common real case -- reaches `join` and
+completes it without any premature error, landing on the identical Finding A blocker instead).
+
+**Why not fixed now:** Finding A needs the same 2 foundational `entityInstance.ts` changes as
+every other entry in this file citing them. Finding B is a genuine upstream `ifcopenshell-python`
+bug (not a TS-port gap) -- ported verbatim (a frozen object whose attempted mutation throws)
+rather than silently "fixed" by making layer-priority overrides actually work, since this port's
+own discipline is to preserve real upstream bugs, not quietly correct them.
+
+**Impact:** `regenerateWallRepresentation` throws for every wall with a real `IfcMaterialLayerSet`,
+on every schema, while building the body solid (Finding A). Separately, ANY real connection
+specifying a non-empty `RelatingPriorities`/`RelatedPriorities` crashes even earlier, with a
+different, distinguishable error (Finding B) -- both pinned by dedicated regression tests. A wall
+with no `IfcMaterialLayerSet` returns `undefined` immediately and is fully functional and
+unaffected by either finding.
+
+**Fix:** Finding A: same 2 fixes as every other entry in this file citing these 2 gaps (EXPRESS
+DERIVED-attribute execution in `entityInstance.ts`; teaching `EntityInstance.setByIndex` to skip
+the `attribute_kind_of` lookup for a non-entity target instance). Finding B is an upstream
+`ifcopenshell-python` bug, not something this TS port should fix unilaterally -- it would need to
+be fixed upstream first (e.g. by not mutating `PrioritisedLayer` in place, or by not using an
+immutable namedtuple for a value the code means to mutate), and this port would then mirror
+whatever that fix turns out to be.
+
+**Context:** Surfaced while landing `regenerate_wall_representation` (646 lines, bringing
+`api.geometry` to 29 of ~29 real files landed -- the module's own portable scope is now
+FUNCTIONALLY COMPLETE; `add_representation.py` remains permanently unported, by design, as it is
+genuinely Blender-only). Verified directly against the real source and this project's own locally-
+built native addon (both findings confirmed empirically, not just reasoned about). Also confirmed:
+this file's own `getManualBooleans` (a pure `BBIM_Boolean` pset READ, `get_pset`-based) does NOT
+hit `clipSolid.ts`'s own already-disclosed `editPset` WRITE-side gap -- but constructing ANY
+populated pset value at all (even a bare `file.createEntity("IfcText", "hello")`, no pset API
+involved) hits that SAME already-tracked foundational gap, so `getManualBooleans`'s own JSON-
+parsing logic could not be given a dedicated test with real fixture data either (disclosed in the
+test file's own header comment, not silently skipped -- not a new gap, just a new place the same
+foundational blocker prevents test-fixture construction).
+
+**Depends on / blocked by:** Finding A depends on the same 2 foundational `entityInstance.ts`
+fixes as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry
+(gap 2) above (neither yet scheduled/started). Finding B depends on an upstream
+`ifcopenshell-python` fix, outside this port's own control.
