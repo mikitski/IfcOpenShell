@@ -69,17 +69,33 @@
 // `cardinalPoint` values on a profile outside a 10-class closed-form allowlist -- see
 // `./addProfileRepresentation.ts`'s own header comment and `TODOS.md` for the full
 // writeup; a fundamentally different, architecturally out-of-scope kind of gap from
-// every primitive-layer/unported-`util.*` blocker disclosed elsewhere in this module).
-// Every other `api.geometry` function (`add_door_representation`, `validate_csg`, etc.)
-// remains unported; a future `api.geometry` chunk should treat all 25 of these as
-// already landed (reviewed against the real Python source, see each file's own header
-// comment) rather than re-porting them from scratch. Namespaced per this project's
-// `util/index.ts` per-submodule convention:
+// every primitive-layer/unported-`util.*` blocker disclosed elsewhere in this module), and
+// (landed in THIS chunk) `add_window_representation` (779 lines -- by far the largest
+// `api.geometry` file yet, `api.geometry` now has 26 of ~29 real files landed) -- a
+// parametric window-geometry generator (frame/lining/sash/glazing panels across 9
+// "partitioning types"). No real Python test file exists for it. Hits TWO independent,
+// severe blockers, both fully disclosed in `./addWindowRepresentation.ts`'s own header
+// comment rather than silently worked around: (1) a genuine, verbatim-preserved upstream-
+// Python evaluation-order BUG (not a TS-port gap) that crashes every real call omitting
+// either `overallHeight`/`overallWidth` -- their own documented defaults -- before any
+// geometry work even begins; (2) once both are supplied explicitly, the actual geometry
+// work hits the SAME 2 pre-existing, already-tracked `util/shapeBuilder.ts`/
+// `entityInstance.ts` primitive-layer gaps disclosed by that file's own header comment
+// (`.profile()`'s `Dim`-DERIVED-attribute gap; `.rectangle()`'s `IfcLineIndex`/`IfcArcIndex`
+// defined-type-creation gap) -- not new findings, just this project's most pervasive real-
+// world call site for them so far (every `TargetView`/schema combination is blocked
+// somewhere, traced precisely in that file's header comment).
+// Every other `api.geometry` function (`add_door_representation`, `add_railing_representation`,
+// `add_representation`, `regenerate_wall_representation`) remains unported; a future
+// `api.geometry` chunk should treat all 26 of these as already landed (reviewed against the
+// real Python source, see each file's own header comment) rather than re-porting them from
+// scratch. Namespaced per this project's `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
 // `api.geometry.addMeshRepresentation`/`api.geometry.addProfileRepresentation`/
 // `api.geometry.addShapeAspect`/
 // `api.geometry.addSlabRepresentation`/`api.geometry.addTopologyRepresentation`/
-// `api.geometry.addWallRepresentation`/`api.geometry.assignRepresentation`/
+// `api.geometry.addWallRepresentation`/`api.geometry.addWindowRepresentation`/
+// `api.geometry.assignRepresentation`/
 // `api.geometry.addFootprintRepresentation`/`api.geometry.clipSolid`/
 // `api.geometry.clipSolidBounded`/`api.geometry.connectElement`/
 // `api.geometry.connectPath`/`api.geometry.connectWall`/`api.geometry.copyRepresentation`/
@@ -108,6 +124,19 @@ export { addSlabRepresentation } from "./addSlabRepresentation";
 export type { AddSlabRepresentationSettings } from "./addSlabRepresentation";
 export { addWallRepresentation } from "./addWallRepresentation";
 export type { AddWallRepresentationSettings } from "./addWallRepresentation";
+export {
+	addWindowRepresentation,
+	createIfcWindow,
+	createIfcWindowFrameSimple,
+	DEFAULT_PANEL_SCHEMAS,
+	windowLShapeCheck,
+} from "./addWindowRepresentation";
+export type {
+	AddWindowRepresentationSettings,
+	WindowLiningProperties,
+	WindowPanelProperties,
+	WindowType,
+} from "./addWindowRepresentation";
 export { addShapeAspect } from "./addShapeAspect";
 export type { AddShapeAspectSettings } from "./addShapeAspect";
 export { addTopologyRepresentation } from "./addTopologyRepresentation";
