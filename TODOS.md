@@ -2784,3 +2784,78 @@ confirmed empirically, not assumed).
 **Depends on / blocked by:** Same 2 foundational `entityInstance.ts` fixes as
 `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
 above (neither yet scheduled/started).
+
+### `api.geometry.addDoorRepresentation` hits the SAME 2 pre-existing primitive-layer gaps as
+`addWindowRepresentation` above, plus its own independently-reverified copy of the same
+upstream-Python evaluation-order bug -- NOT a new gap, but with one genuinely NEW positive
+finding (a real, unblocked code path)
+
+**What:** `add_door_representation.py` (675 lines, landed directly after `add_window_representation`)
+is a parametric door-geometry generator (lining/threshold/casing/panel/handle solids across
+single/double-swing, double-door, and sliding `operation_type`s, plus an optional on-top "transom"
+window built via `add_window_representation`'s own `create_ifc_window`). It hits the exact same 2
+`util/shapeBuilder.ts`/`entityInstance.ts` primitive-layer gaps as the entry immediately above this
+one (the `.profile()` `Dim`-DERIVED-attribute gap; the `.rectangle()`/`.polyline(closed=true)`
+`IfcLineIndex`/`IfcArcIndex` defined-type-creation gap) -- not a new binding gap, just another
+pervasive real-world call site. One structural difference from `add_window_representation`: this
+file's own `createIfcDoorLining`/`createIfcBox` never call `.profile()` explicitly themselves --
+they pass a raw curve/rectangle straight into `builder.extrude()`, whose own internal
+`if (!profile.isA("IfcProfileDef")) profile = this.profile(profile)` auto-wrap is what reaches gap 1
+(reached one call-frame deeper than window's own explicit `.profile()` call sites, same underlying
+gap).
+
+A SEPARATE, independent, genuine upstream-Python BUG (not a TS-port gap) also applies here, THE SAME
+SHAPE as the one already documented above for `add_window_representation`, independently
+re-verified against THIS file's own actual source lines (not assumed identical): real Python's own
+public wrapper calls `Usecase.convert_si_to_unit()` to compute `overall_height`/`overall_width`'s
+own documented defaults BEFORE `Usecase.settings` is ever assigned, raising `AttributeError:
+'Usecase' object has no attribute 'settings'` for every real call omitting either dimension. This
+file's own documented defaults are 2.0m/0.9m (confirmed by reading this file's own docstring and
+`settings.update(...)` call directly -- DIFFERENT from window's own 0.9m/0.6m, not assumed
+identical). Preserved verbatim as an explicit, same-shaped throw; not tracked as a "fix later" item
+for the same reason as window's own entry.
+
+**One genuinely NEW finding, not present in `add_window_representation`:** this file's own
+`PLAN_VIEW` + `ContextIdentifier === "Annotation"` sub-branch (the sliding-door arrow-symbol
+representation; non-sliding doors just return `null` here, no representation, no throw) is
+**genuinely UNBLOCKED today, on every schema.** Traced precisely and confirmed EMPIRICALLY (by
+actually running this chunk's own test suite): its own 2 `builder.polyline(...)` calls are both
+left `closed` at the default `false` (real Python never passes `closed=True` here, unlike every
+other lining/panel curve in this entire file), so gap 2 is never reached; its own final
+`builder.getRepresentation(context, items2d, "Curve2D")` call passes an EXPLICIT
+`representationType`, bypassing `guessType()` entirely, so gap 1 is never reached either. This is
+the ONE code path across BOTH this file and `add_window_representation`'s own equally-blocked
+branches that actually produces a real, non-throwing `IfcShapeRepresentation` today -- pinned with
+real geometry assertions (not "throws the disclosed error") in `addDoorRepresentation.test.ts`. A
+further quirk found while building those tests: `door_swing_type` is never computed or read in this
+early-return branch, so `SLIDING_TO_LEFT`/`SLIDING_TO_RIGHT` produce byte-identical annotation
+geometry -- confirmed empirically, preserved verbatim (see `addDoorRepresentation.ts`'s own header
+comment for the full writeup).
+
+**Why not fixed now:** Same reasoning as the entry immediately above: both gaps are foundational
+`entityInstance.ts` primitive-layer changes, not something a single `api.geometry` chunk should
+patch unilaterally.
+
+**Impact:** `addDoorRepresentation()` throws for every real invocation today except the
+`PLAN_VIEW`+`Annotation` sliding-door case: the settings-order bug's own descriptive error if either
+`overallHeight`/`overallWidth` is omitted; otherwise, on IFC4/IFC4X3, `"Attribute access is only
+supported on entity instances"` (gap 2); on IFC2X3, `"entity instance of type '...' has no attribute
+'Dim'"` (gap 1). Pinned by 26 dedicated regression tests in `addDoorRepresentation.test.ts` covering
+every `TargetView`/`ContextIdentifier` combination, all 9 `operationType`s, both exported helper
+functions (`createIfcDoorLining`/`createIfcBox`), the pure-logic `doorLShapeCheck`, and the
+genuinely-unblocked `Annotation` branch's own real geometry.
+
+**Fix:** Same 2 fixes as the entry immediately above (EXPRESS DERIVED-attribute execution in
+`entityInstance.ts` for gap 1; teaching `EntityInstance.setByIndex` to skip the
+`attribute_kind_of` lookup for a non-entity target instance for gap 2) -- once either lands, this
+file's own tests should be revisited the same way as `addWindowRepresentation.test.ts`'s own.
+
+**Context:** Surfaced while landing `add_door_representation` (675 lines, bringing `api.geometry` to
+27 of ~29 real files landed), verified directly against the real source and this project's own
+locally-built native addon (both gaps, the upstream Python bug, and the `Annotation`-branch positive
+finding, all confirmed empirically, not assumed).
+
+**Depends on / blocked by:** Same 2 foundational `entityInstance.ts` fixes as
+`util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
+above (neither yet scheduled/started) -- same dependency as the `add_window_representation` entry
+immediately above this one.
