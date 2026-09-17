@@ -1919,7 +1919,7 @@ the pre-existing `edit_object_placement` entry, not a duplicate of either.
 
 ---
 
-### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet) -- **`IfcGrid` half RESOLVED 2026-09-16, see UPDATE below: `HasOpenings`/`api.feature` half remains blocked**
+### `api.root.removeProduct` skips `HasOpenings`/`IfcGrid` axis cleanup (`api.feature.remove_feature`/`api.grid.remove_grid_axis` unported -- neither module has any TS port of any kind yet) -- **`IfcGrid` half RESOLVED 2026-09-16; `HasOpenings`/`api.feature` half now RESOLVABLE 2026-09-17 (not yet wired up), see UPDATEs below**
 
 **What:** Real Python's `ifcopenshell.api.root.remove_product` has two more small, genuinely
 new blocked call sites beyond the `api.material`/`api.boundary` ones this file already tracks
@@ -1975,6 +1975,23 @@ tolerance), exactly matching real Python's own `for axis in product.UAxes + prod
 ("removing axes of a grid"), replacing its former "throws the disclosed blocked error" pin. The
 `HasOpenings`/`api.feature` half of this entry is UNCHANGED and still genuinely blocked --
 `api.feature` still has no TS port of any kind.
+
+**UPDATE 2026-09-17 (`api.feature` lands for real -- `HasOpenings` half now RESOLVABLE, not yet
+wired up):** `api.feature` landed in full (`src/ifcopenshell-ts/src/api/feature/`, all 4 real
+files -- see PR [#122](https://github.com/mikitski/IfcOpenShell/pull/122) and `PROGRESS.md`'s own
+`api.feature` row), including a real, exported `removeFeature` matching real Python's
+`ifcopenshell.api.feature.remove_feature` exactly. `root/removeProduct.ts`'s own `HasOpenings`
+branch was deliberately NOT retrofitted in that same chunk -- matching this file's own
+established "land the module, wire up the retroactive unblock separately" precedent (see this
+entry's own `IfcGrid`/`IfcRelSpaceBoundary` sibling updates above/below, both landed one chunk
+after their own dependency). This entry's blocker is now genuinely RESOLVABLE (both
+`ifcopenshell.api.feature`/`ifcopenshell.api.grid` are fully ported), but the throw in
+`removeProduct.ts` itself is UNCHANGED until a small, dedicated follow-up chunk wires in the real
+`for opening in getattr(product, "HasOpenings", []) or []: ifcopenshell.api.feature.remove_feature
+(file, feature=opening.RelatedOpeningElement)` call and restores
+`test_removing_all_openings_of_an_element`'s real passing assertion in
+`removeProduct.test.ts` (currently still pinned as a "throws the disclosed blocked error"
+regression test).
 
 ---
 
