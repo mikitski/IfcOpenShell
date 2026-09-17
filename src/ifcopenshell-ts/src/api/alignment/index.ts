@@ -9,8 +9,8 @@
 // construction, and their derived `IfcCompositeCurve`/`IfcGradientCurve`/
 // `IfcSegmentedReferenceCurve` geometric representations.
 //
-// **THIS IS CHUNK 3 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 27 of ~50 real files (~1272 lines) are landed as of this
+// **THIS IS CHUNK 4 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
+// module of this size) -- 32 of ~50 real files (~2169 lines) are landed as of this
 // chunk. None of these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
@@ -196,6 +196,97 @@
 // use `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1/2's
 // own established convention.
 //
+// --- Landed in chunk 4 (5 more files, ~897 lines) ---
+//
+// `_getSegmentStartPointLabel` (module-private -- see its own header comment for why
+// it's NOT re-exported here, unlike its sibling public function below) plus the
+// genuinely PUBLIC `registerReferentNameCallback` (real Python's own
+// `register_referent_name_callback`, confirmed present in real Python's own
+// `__init__.py` `__all__` -- unlike every other `_`-prefixed helper landed so far,
+// this one IS re-exported from this barrel); `addPositioningReferent`/
+// `addStationingReferent` (create an `IfcReferent` marking a product's/a stationing
+// point's position along an alignment); `updateKeyPointReferents` (creates
+// `IfcReferent` key-point markers, e.g. "P.C."/"P.T.", for every real segment
+// transition in a layout); `updateAlignmentParameterSegmentTags` (the referent-free
+// sibling of `updateKeyPointReferents` -- sets `StartTag`/`EndTag` string attributes
+// directly on each segment's own `DesignParameters`, no `IfcReferent`/`IfcRelNests`
+// created at all). Dependency order ported: `_getSegmentStartPointLabel` first (zero
+// dependencies of its own), then `addPositioningReferent` (chunk 1's `getCurve`,
+// chunk 3's `updateFallbackPosition`), then `addStationingReferent` (chunk 1's
+// `getBasisCurve`/`getCurve`/`getStationingNest`, chunk 3's `_sortNest`/
+// `updateFallbackPosition`), then `updateKeyPointReferents` (chunk 1/2's
+// `getAlignment`/`getLayoutSegments`/`hasZeroLengthSegment`/
+// `getAlignmentStartStation`/`getLayoutCurve`, chunk 3's `_getKeyPointTag`/
+// `_sortNest`/`updateFallbackPosition`, this chunk's own
+// `_getSegmentStartPointLabel`), then `updateAlignmentParameterSegmentTags` (chunk
+// 1/2's `getAlignment`/`getLayoutSegments`/`hasZeroLengthSegment`/
+// `getAlignmentStartStation`, this chunk's own `_getKeyPointTag`/
+// `_getSegmentStartPointLabel`). Confirmed by reading every real file's own imports
+// AND full body: `update_key_point_referents.py` does NOT use
+// `get_horizontal_layout` at all (only reads FROM the `layout` its own caller passes
+// in); `file.get_inverse`/`file.get_total_inverses` (needed by
+// `update_key_point_referents.py`'s own private `_remove_referent` helper, the
+// `clear=true` code path) were verified to already exist on this port's own
+// `IfcFile` (`../../file.ts`'s `getInverse`/`getTotalInverses`) -- genuinely NOT a
+// new blocker, confirmed by reading `file.ts` directly rather than assumed either way.
+//
+// **TWO INDEPENDENT, ALREADY-DISCLOSED primitive-layer gaps -- not one -- block every
+// real referent-creating code path across 3 of this chunk's 5 files**
+// (`addPositioningReferent`/`addStationingReferent`/`updateKeyPointReferents`), each
+// re-confirmed EMPIRICALLY against this chunk's own freshly-built native addon before
+// writing any of the 3 files (see `./addPositioningReferent.ts`'s own header comment
+// for the full writeup of both, and `TODOS.md`'s dedicated entry for its own
+// "fourteenth consequence" update recording this chunk's specific finding):
+// 1. The SAME `EntityInstance.setByIndex`/`IfcFile.createEntity`
+//    standalone-simple/defined-type-instance gap tracked since PR #124, hit by
+//    `IfcPointByDistanceExpression.DistanceAlong`'s own `IfcLengthMeasure`
+//    construction whenever `curve` is a real, non-empty `IfcCompositeCurve`.
+// 2. `api.pset.editPset`'s own SEPARATE, already-disclosed "cannot create a
+//    brand-new plain-scalar property" consequence of that SAME root gate (`TODOS.md`'s
+//    same entry, "fourth consequence" update, `api.pset` `edit_pset` chunk) -- hit by
+//    every one of these 3 files' own `editPset(file, {pset, properties: {Station:
+//    station}})` call, REGARDLESS of which placement branch was taken. This is the
+//    finding that makes this chunk's situation narrower than either gap's own
+//    existing write-up alone would suggest: the "fully portable, non-composite-curve
+//    fallback placement" branch each of these 3 files also has is NOT independently
+//    end-to-end functional in this port today either -- it reaches further (a real,
+//    addressable `IfcReferent` with a real placement and an empty `Pset_Stationing`
+//    already exist in the file) before throwing at gap 2 instead of gap 1. Ported all
+//    3 files completely and faithfully regardless -- every line, every branch,
+//    including each file's own portable `else` construction -- with no proactive
+//    guard anywhere; each throws naturally at whichever of the two gaps its own
+//    `curve` shape reaches first. `updateAlignmentParameterSegmentTags` has NEITHER
+//    gap (confirmed: `IfcAlignmentParameterSegment.StartTag`/`EndTag` are plain
+//    `string | null` attributes on an already-real entity, not SELECT-typed) and is
+//    fully portable and fully tested; `updateKeyPointReferents`'s own validation,
+//    zero-real-segments early return, and `clear=true` referent-REMOVAL cleanup (a
+//    pure deletion path, touching no standalone-value construction at all) are ALSO
+//    fully portable and fully tested, independent of the 2 gaps above.
+//
+// Real Python has a dedicated test file for every one of this chunk's 5 files
+// (`test_referent_names.py`, `test_add_positioning_referent.py`,
+// `test_add_stationing_referent.py`, `test_update_key_point_referents.py`,
+// `test_update_alignment_parameter_segment_tags.py`) -- but every one of the latter
+// 4's own fixtures builds via the unported `create`/`create_by_pi_method`, and (for
+// `add_positioning_referent`/`add_stationing_referent`/`update_key_point_referents`)
+// exercises exactly the composite-curve/`editPset` code paths this chunk's own 2 gaps
+// above block, so none is reusable as-is for those 3 files -- this chunk's own tests
+// for them are original, hand-rolled fixtures (matching this module's established
+// precedent) with dedicated regression tests pinning the CURRENT disclosed throw at
+// each gap. `updateAlignmentParameterSegmentTags.test.ts` (fully portable) DOES port
+// every one of `test_update_alignment_parameter_segment_tags.py`'s own real
+// assertions faithfully, including its exact numeric/string station-tag format
+// (`test_exact_tag_format`) and its documented "xx" unfilled-lookup-table-entry
+// regression (`test_cant_layout_boundary_tags`). `_getSegmentStartPointLabel
+// .test.ts` ports every real lookup-table entry and boundary case from
+// `test_referent_names.py`'s own `_hcallback`/`_vcallback` callback-override
+// scenario, plus an `afterEach` resetting the module-level callback state between
+// tests (see `_getSegmentStartPointLabel.ts`'s own header comment for why real
+// Python's own test suite does NOT reliably do this, and why this port's test suite
+// deliberately improves on that rather than copying the same order-dependent
+// fragility). All 5 files use `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`,
+// matching chunks 1-3's own established convention.
+//
 // --- Still pending (future chunks) ---
 //
 // Every other real file in `ifcopenshell/api/alignment/`: the segment-by-segment and
@@ -204,14 +295,13 @@
 // `create_as_offset_curve`, `create_representation`,
 // `create_segment_representations`, `layout_horizontal_alignment_by_pi_method`,
 // `layout_vertical_alignment_by_pi_method`, `add_vertical_layout`,
-// `add_zero_length_segment`, `add_positioning_referent`, `add_stationing_referent`,
-// `update_alignment_parameter_segment_tags`, `update_key_point_referents`,
+// `add_zero_length_segment`,
 // `get_curve_segment_transition_code` (the ONE file needing the real geometry kernel,
 // see below -- do not attempt), their private `_`-prefixed helper files
 // (`_add_segment_to_curve`, `_add_segment_to_layout`, `_add_zero_length_segment`,
 // `_create_geometric_representation`, `_create_offset_curve_representation`,
 // `_create_polyline_representation`, `_get_segment_endpoint`,
-// `_get_segment_start_point_label`, `_map_alignment_cant_segment`,
+// `_map_alignment_cant_segment`,
 // `_map_alignment_horizontal_segment`, `_map_alignment_segment`,
 // `_map_alignment_vertical_segment`, `_update_curve_segment_transition_code`,
 // `_update_zero_length_segment_placement`) -- and, separately from all of the above,
@@ -223,6 +313,8 @@
 // architectural boundary already disclosed for `api.geometry.addProfileRepresentation`'s
 // own `getX`/`getY` else-branch (see that file's own header comment and its
 // `TODOS.md` entry for the established precedent).
+export { addPositioningReferent } from "./addPositioningReferent";
+export { addStationingReferent } from "./addStationingReferent";
 export { distanceAlongFromStation } from "./distanceAlongFromStation";
 export { getAlignment } from "./getAlignment";
 export { getAlignmentLayoutNest } from "./getAlignmentLayoutNest";
@@ -245,5 +337,9 @@ export { getStationingNest } from "./getStationingNest";
 export { getVerticalLayout } from "./getVerticalLayout";
 export { hasZeroLengthSegment } from "./hasZeroLengthSegment";
 export { nameSegments } from "./nameSegments";
+export { registerReferentNameCallback } from "./_getSegmentStartPointLabel";
+export type { ReferentNameCallback } from "./_getSegmentStartPointLabel";
+export { updateAlignmentParameterSegmentTags } from "./updateAlignmentParameterSegmentTags";
 export { updateEndPoint } from "./updateEndPoint";
 export { updateFallbackPosition } from "./updateFallbackPosition";
+export { updateKeyPointReferents } from "./updateKeyPointReferents";

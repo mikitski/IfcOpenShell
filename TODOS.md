@@ -1000,6 +1000,51 @@ real, populated fixtures instead of disclosed-uncoverable ones -- see
 `src/api/alignment/getAlignmentStartStation.test.ts`'s own header comment for the full
 writeup.
 
+**UPDATE 2026-09-17 (`api.alignment` chunk 4 of many, `addPositioningReferent.ts`/
+`addStationingReferent.ts`/`updateKeyPointReferents.ts` files):** found a fourteenth
+independent consequence -- and, distinctively, the FIRST one confirmed to combine with
+an entirely SEPARATE, already-disclosed consequence of this SAME gate (this entry's
+own "fourth consequence" update, `api.pset` `edit_pset` chunk) to block BOTH branches
+of 3 functions at once, not just one. All 3 files construct a placement via
+`file.createIfcLinearPlacement(RelativePlacement=file.createIfcAxis2PlacementLinear(
+Location=file.createIfcPointByDistanceExpression(DistanceAlong=file.createIfcLengthMeasure(
+distance_along), ...)))` whenever `curve` is a real, non-empty `IfcCompositeCurve` --
+the identical `attribute_kind_of`/"Attribute access is only supported on entity
+instances" throw this entry already documents, re-confirmed EMPIRICALLY
+(`file.createEntity("IfcLengthMeasure", 1.0)` throws) against this chunk's own
+freshly-built native addon before writing any of the 3 files. Separately, and
+regardless of that branch, ALL 3 files' own `editPset(file, {pset, properties:
+{Station: station}})` call (creating a brand-new `Pset_Stationing.Station` property)
+hits this entry's own already-documented "fourth consequence" (the `api.pset`
+`edit_pset` chunk's finding) -- also re-confirmed EMPIRICALLY for this chunk's own
+exact call shape. The result: for `addPositioningReferent`/`addStationingReferent`/
+`updateKeyPointReferents`, BOTH of the real Python function's two placement branches
+are currently non-functional end to end in this port, just at different points -- the
+composite-curve branch throws immediately (no side effect at all); the non-composite-
+curve fallback-placement branch reaches much further (constructs a real, addressable
+`IfcReferent` with a correct `Name`/`PredefinedType`/`ObjectPlacement`, and a real,
+empty `Pset_Stationing` via `addPset`) before throwing at the `editPset` gap instead.
+Ported all 3 files completely and faithfully anyway -- every line, every branch,
+including each file's own portable `else` construction and (for
+`updateKeyPointReferents`) its fully-portable validation/zero-real-segments early
+return/`clear=true` referent-removal cleanup (a pure deletion path untouched by either
+gap) -- with no proactive guard anywhere; each throws naturally at whichever of the 2
+gaps its own `curve` shape reaches first. `addPositioningReferent.test.ts`/
+`addStationingReferent.test.ts`/`updateKeyPointReferents.test.ts` each pin the CURRENT,
+disclosed, blocked behavior for both branches with dedicated regression tests,
+including one confirming `addStationingReferent`'s own `onBasisCurve` curve-selection
+logic (`getBasisCurve` vs. `getCurve`) still resolves correctly despite the blocker --
+observable because the two curve choices, in a fixture deliberately built so they
+differ, hit DIFFERENT gaps. `updateAlignmentParameterSegmentTags.ts` (this chunk's
+5th file) touches NEITHER gap at all -- confirmed `IfcAlignmentParameterSegment
+.StartTag`/`EndTag` are plain `string | null` attributes on an already-real entity
+(not SELECT-typed), directly against `ifc4x3.d.ts` -- and is fully portable, with full,
+real, passing test coverage porting every one of real Python's own
+`test_update_alignment_parameter_segment_tags.py` assertions. See
+`src/api/alignment/addPositioningReferent.ts`'s own header comment for the full
+writeup (reused verbatim by `addStationingReferent.ts`'s/`updateKeyPointReferents.ts`'s
+own header comments).
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
