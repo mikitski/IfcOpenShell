@@ -62,14 +62,22 @@
 // `util/shapeBuilder.ts` `ShapeBuilder` CLASS, not a small per-file duplicate -- its
 // `facetedBrep`/`polygonalFaceSet` methods, both already fully functional -- see
 // `./addMeshRepresentation.ts`'s own header comment for its 4 ported `assert`
-// preconditions and its verified-unconditional `unit_scale` division). Every other
-// `api.geometry` function (`add_door_representation`, `validate_csg`, etc.) remains
-// unported; a future `api.geometry` chunk should treat all 24 of these as already
-// landed (reviewed against the real Python source, see each file's own header comment)
-// rather than re-porting them from scratch. Namespaced per this project's
+// preconditions and its verified-unconditional `unit_scale` division), and (landed in
+// THIS chunk) `add_profile_representation` (224 lines) -- the first `api.geometry` file
+// to hit a REAL geometry-kernel dependency (`ifcopenshell.geom.create_shape` +
+// `ifcopenshell.util.shape.get_x`/`get_y`, needed only for a narrow set of
+// `cardinalPoint` values on a profile outside a 10-class closed-form allowlist -- see
+// `./addProfileRepresentation.ts`'s own header comment and `TODOS.md` for the full
+// writeup; a fundamentally different, architecturally out-of-scope kind of gap from
+// every primitive-layer/unported-`util.*` blocker disclosed elsewhere in this module).
+// Every other `api.geometry` function (`add_door_representation`, `validate_csg`, etc.)
+// remains unported; a future `api.geometry` chunk should treat all 25 of these as
+// already landed (reviewed against the real Python source, see each file's own header
+// comment) rather than re-porting them from scratch. Namespaced per this project's
 // `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
-// `api.geometry.addMeshRepresentation`/`api.geometry.addShapeAspect`/
+// `api.geometry.addMeshRepresentation`/`api.geometry.addProfileRepresentation`/
+// `api.geometry.addShapeAspect`/
 // `api.geometry.addSlabRepresentation`/`api.geometry.addTopologyRepresentation`/
 // `api.geometry.addWallRepresentation`/`api.geometry.assignRepresentation`/
 // `api.geometry.addFootprintRepresentation`/`api.geometry.clipSolid`/
@@ -88,6 +96,14 @@ export { addFootprintRepresentation } from "./addFootprintRepresentation";
 export type { AddFootprintRepresentationSettings } from "./addFootprintRepresentation";
 export { addMeshRepresentation } from "./addMeshRepresentation";
 export type { AddMeshRepresentationSettings } from "./addMeshRepresentation";
+export { addProfileRepresentation, CARDINAL_POINT_VALUES } from "./addProfileRepresentation";
+export type {
+	AddProfileRepresentationSettings,
+	CardinalPoint,
+	CardinalPointNumeric,
+	CardinalPointString,
+	Vec3,
+} from "./addProfileRepresentation";
 export { addSlabRepresentation } from "./addSlabRepresentation";
 export type { AddSlabRepresentationSettings } from "./addSlabRepresentation";
 export { addWallRepresentation } from "./addWallRepresentation";
