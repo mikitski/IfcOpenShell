@@ -2709,3 +2709,78 @@ lines, the 26th of ~29 real `api.geometry` files), verified directly against the
 
 **Depends on / blocked by:** Same future `ifcopenshell.geom` binding effort as this file's
 `getAxis2placement`/`util.shape`/`editProfileUsage` entries above (not yet scheduled/started).
+
+---
+
+### `api.geometry.addWindowRepresentation` is blocked end-to-end, on every `TargetView`/schema
+combination, by the SAME 2 pre-existing primitive-layer gaps `util/shapeBuilder.ts` already
+tracks -- not a new binding gap, just this project's most pervasive real-world call site for
+them so far
+
+**What:** `add_window_representation.py` (779 lines, the largest `api.geometry` file ported so
+far) is a parametric window-geometry generator that makes heavy, load-bearing use of
+`ShapeBuilder.rectangle()`/`.polyline(closed=true)`/`.profile()` -- all three already disclosed
+as blocked in `util/shapeBuilder.ts`'s own header comment by 2 pre-existing `entityInstance.ts`
+gaps: (1) `.profile()` unconditionally throws via `.get("Dim")` (the EXPRESS DERIVED-attribute
+gap, `TODOS.md`'s "`util.representation.guessType`'s `Curve2D`/... branches..." entry above);
+(2) `.rectangle()`/`.polyline(closed=true)` throw on IFC4/IFC4X3 only, via the `IfcLineIndex`/
+`IfcArcIndex` defined-type-creation gap (`TODOS.md`'s "`EntityInstance.setByIndex`/
+`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type
+instance" entry above), but are fully functional on IFC2X3.
+
+Traced precisely and confirmed EMPIRICALLY (by actually running this chunk's own test suite, not
+just reasoned about): **on IFC4/IFC4X3, gap (2) is reached FIRST in literally every code path this
+file has** (`ELEVATION_VIEW`'s/`PLAN_VIEW`'s own `rectangle()` calls; the main `MODEL_VIEW`
+per-panel loop's `createIfcWindowFrameSimple`, whose OWN two branches both call `rectangle()`/
+`polyline(closed=true)` before ever reaching `.profile()`) -- gap (1)'s `.profile()` `Dim` check is
+therefore NEVER actually reached on IFC4/IFC4X3 for this file. Only on IFC2X3 (where `rectangle()`/
+`polyline(closed)` are fully functional) does execution get far enough to hit gap (1) instead (via
+`.profile()` directly in the `MODEL_VIEW` path, or via `util.representation.guessType`'s identical
+`.get("Dim")` call inside `ELEVATION_VIEW`'s/`PLAN_VIEW`'s own final `getRepresentation()` call).
+Net result: **the real 3D solid window geometry this function exists to build cannot be produced
+today, on ANY schema** -- ported completely and faithfully anyway (every branch -- 9 different
+`partitionType` panel layouts, mullion/transom offset math, L-shaped-lining detection, the 2D
+plan-view lining/frame layout, the elevation-view rectangle -- is real, correct, verbatim-
+translated control flow, reachable end-to-end the moment both underlying gaps are fixed, with zero
+further changes needed in `addWindowRepresentation.ts`).
+
+A SEPARATE, independent, genuine upstream-Python BUG (not a TS-port gap, see
+`addWindowRepresentation.ts`'s own header comment for the full writeup) pre-empts even reaching
+either ShapeBuilder gap for the common case: real Python's own public wrapper function calls
+`Usecase.convert_si_to_unit()` to compute `overall_height`/`overall_width`'s own documented
+defaults (0.9m/0.6m) BEFORE `Usecase.settings` is ever assigned, raising
+`AttributeError: 'Usecase' object has no attribute 'settings'` -- i.e. every real call omitting
+either dimension (the documented default, most-common usage) crashes upstream too, before any
+geometry work begins. Preserved verbatim as an explicit, same-shaped throw; not tracked here as a
+"fix later" item since there is nothing to port differently without deviating from real Python's
+own actual behavior.
+
+**Why not fixed now:** Same reasoning as every other entry in this file citing these 2 gaps: both
+are foundational `entityInstance.ts` primitive-layer changes (EXPRESS DERIVED-attribute execution;
+freshly-created-defined-type initial-value support), not something a single `api.geometry` chunk
+should patch unilaterally.
+
+**Impact:** `addWindowRepresentation()` throws for every real invocation today: the settings-order
+bug's own descriptive error if either `overallHeight`/`overallWidth` is omitted; otherwise, on
+IFC4/IFC4X3, `"Attribute access is only supported on entity instances"` (gap 2); on IFC2X3,
+`"entity instance of type '...' has no attribute 'Dim'"` (gap 1). Pinned by ~50 dedicated
+regression tests in `addWindowRepresentation.test.ts` covering every `TargetView` x schema
+combination, all 9 `partitionType`s, both exported helper functions (`createIfcWindowFrameSimple`/
+`createIfcWindow`), and the pure-logic `windowLShapeCheck`/`DEFAULT_PANEL_SCHEMAS` (unaffected by
+either gap).
+
+**Fix:** Same 2 fixes as this file's other entries citing these gaps (EXPRESS DERIVED-attribute
+execution in `entityInstance.ts`, or a narrower `util.representation`-local re-implementation for
+gap 1; teaching `EntityInstance.setByIndex` to skip the `attribute_kind_of` lookup for a non-entity
+target instance for gap 2) -- once either lands, this file's own tests (currently pinned as
+"throws the disclosed error") should be revisited and, where the underlying call now succeeds,
+converted to real geometry assertions.
+
+**Context:** Surfaced while landing `add_window_representation` (779 lines, bringing `api.geometry`
+to 26 of ~29 real files landed, by far the largest yet), verified directly against the real source
+and this project's own already-built native addon (both gaps, and the upstream Python bug,
+confirmed empirically, not assumed).
+
+**Depends on / blocked by:** Same 2 foundational `entityInstance.ts` fixes as
+`util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
+above (neither yet scheduled/started).
