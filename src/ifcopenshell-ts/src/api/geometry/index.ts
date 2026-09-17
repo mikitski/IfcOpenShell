@@ -1,8 +1,9 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // Barrel for `ifcopenshell.api.geometry` (src/ifcopenshell-python's
-// `ifcopenshell/api/geometry/` package) -- **NOT a full port of that module**. 17 of its
-// ~29 real files are ported so far: `unassign_representation`/`remove_representation`
+// `ifcopenshell/api/geometry/` package) -- **NOT a full port of that module**. `api.geometry`
+// now has 27 of ~29 real files landed. 17 of its ~29 real files were ported first:
+// `unassign_representation`/`remove_representation`
 // (an earlier `api.context` chunk, minimal direct dependencies of
 // `api.context.removeContext`'s top-level-context branch -- see
 // `./unassignRepresentation.ts`'s own header comment), `assign_representation`/
@@ -84,13 +85,26 @@
 // (`.profile()`'s `Dim`-DERIVED-attribute gap; `.rectangle()`'s `IfcLineIndex`/`IfcArcIndex`
 // defined-type-creation gap) -- not new findings, just this project's most pervasive real-
 // world call site for them so far (every `TargetView`/schema combination is blocked
-// somewhere, traced precisely in that file's header comment).
-// Every other `api.geometry` function (`add_door_representation`, `add_railing_representation`,
-// `add_representation`, `regenerate_wall_representation`) remains unported; a future
-// `api.geometry` chunk should treat all 26 of these as already landed (reviewed against the
-// real Python source, see each file's own header comment) rather than re-porting them from
-// scratch. Namespaced per this project's `util/index.ts` per-submodule convention:
+// somewhere, traced precisely in that file's header comment), and (landed in THIS chunk)
+// `add_door_representation` (675 lines) -- a parametric door-geometry generator (lining/
+// threshold/casing/panel/handle solids across single/double-swing, double-door, and sliding
+// `operation_type`s, plus an optional on-top "transom" window built via this same module's
+// own `createIfcWindow`). Hits the SAME 2 blockers as `add_window_representation` (an
+// independently-reverified, same-shaped upstream-Python evaluation-order bug with its own
+// 2.0m/0.9m defaults; the same 2 `ShapeBuilder`/`entityInstance.ts` primitive-layer gaps) --
+// see `./addDoorRepresentation.ts`'s own header comment and `TODOS.md` for the full writeup,
+// including one genuinely NEW finding: its `PLAN_VIEW` + `ContextIdentifier === "Annotation"`
+// sliding-door arrow-symbol sub-branch is actually UNBLOCKED today, on every schema (it never
+// builds a closed curve and passes an explicit `representationType`, so neither gap is ever
+// reached) -- the one real, working, non-throwing representation either of these 2 large
+// parametric-geometry files can produce as of this chunk.
+// Every other `api.geometry` function (`add_railing_representation`, `add_representation`,
+// `regenerate_wall_representation`) remains unported; a future `api.geometry` chunk should
+// treat all 27 of these as already landed (reviewed against the real Python source, see each
+// file's own header comment) rather than re-porting them from scratch. Namespaced per this
+// project's `util/index.ts` per-submodule convention:
 // `api.geometry.addAxisRepresentation`/`api.geometry.addBoolean`/
+// `api.geometry.addDoorRepresentation`/
 // `api.geometry.addMeshRepresentation`/`api.geometry.addProfileRepresentation`/
 // `api.geometry.addShapeAspect`/
 // `api.geometry.addSlabRepresentation`/`api.geometry.addTopologyRepresentation`/
@@ -108,6 +122,19 @@ export { addAxisRepresentation } from "./addAxisRepresentation";
 export type { AddAxisRepresentationSettings, Coord } from "./addAxisRepresentation";
 export { addBoolean } from "./addBoolean";
 export type { AddBooleanSettings } from "./addBoolean";
+export {
+	addDoorRepresentation,
+	createIfcBox,
+	createIfcDoorLining,
+	doorLShapeCheck,
+	SUPPORTED_DOOR_TYPES,
+} from "./addDoorRepresentation";
+export type {
+	AddDoorRepresentationSettings,
+	DoorLiningProperties,
+	DoorPanelProperties,
+	DoorType,
+} from "./addDoorRepresentation";
 export { addFootprintRepresentation } from "./addFootprintRepresentation";
 export type { AddFootprintRepresentationSettings } from "./addFootprintRepresentation";
 export { addMeshRepresentation } from "./addMeshRepresentation";
