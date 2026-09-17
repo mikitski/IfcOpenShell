@@ -385,3 +385,31 @@ export * as boundary from "./boundary";
 // `alsoConsider` technique. See `georeference/index.ts`'s own header comment for the full
 // scope and disclosures.
 export * as georeference from "./georeference";
+
+// Phase 6, `api.feature` chunk: a brand-new module, all 4 real files ported in one
+// chunk (438 lines total -- no TS port of any kind before this chunk). Manages
+// `IfcFeatureElement` (openings/projections/surface features that void, project from,
+// or adhere to a host element) and `IfcFeatureElementSubtraction` fillings (e.g. a
+// door/window filling an opening). No unported dependency of any kind (`api.aggregate.
+// assignObject`/`.unassignObject`, `api.geometry.editObjectPlacement`, `api.owner
+// .createOwnerHistory`, `api.root.removeProduct`, `guid.new`, `util.element
+// .removeDeep2`, `util.placement.getLocalPlacement`, all already landed). Confirmed
+// real schema divergences: `IfcSurfaceFeature`/`IfcVoidingFeature` don't exist on
+// IFC2X3 at all; `IfcRelAdheresToElement` is IFC4X3-only (IFC4's own `IfcSurfaceFeature`
+// instead attaches via a plain `api.aggregate.assignObject` aggregation, per real
+// Python's own early return). Two real, disclosed quirks/bugs ported verbatim, not
+// silently fixed: `addFilling`'s created `IfcRelFillsElement` never gets an
+// `IfcOwnerHistory` (a kwargs-only `create_entity` call that skips it entirely, unlike
+// every other rel this module -- or this project -- creates); `removeFeature`'s
+// `IfcSurfaceFeature` non-IFC4 branch reads the wrong inverse attribute
+// (`ProjectsElements` instead of the correct `AdheresToElement`), a genuine upstream
+// Python bug that crashes for any real IFC4X3 surface feature in real Python too, not
+// just this port. See `feature/index.ts`'s own header comment and each file's own
+// header comment for the full writeup.
+//
+// Retroactive unblock available as a follow-up (deliberately NOT wired up in this
+// chunk, matching this project's established precedent -- see `api.grid`/
+// `api.boundary` landing before `root/removeProduct.ts` was updated to use them):
+// `root/removeProduct.ts`'s disclosed `HasOpenings` cleanup blocker (`TODOS.md`) can
+// now be resolved with this module's own `removeFeature`.
+export * as feature from "./feature";
