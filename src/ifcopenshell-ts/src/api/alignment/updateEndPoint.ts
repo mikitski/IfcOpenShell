@@ -6,28 +6,25 @@
 // `hasZeroLengthSegment` (chunk 1) and already-landed `util.placement
 // .getAxis2placement` (`../../util/placement.ts`) -- both reused directly.
 //
-// *** A GENUINELY NEW, disclosed blocker, found by reading this file's own full body
-// (not just its top-level imports) -- `ifcopenshell.api.alignment
-// .add_zero_length_segment` is called when `has_zero_length_segment(curve)` is
-// `false`, and `add_zero_length_segment` is NOT ported in this chunk (confirmed: it
-// is explicitly named in `./index.ts`'s own "Still pending" list) ***. Reading
-// `add_zero_length_segment.py` directly confirms it is itself transitively blocked on
-// `_get_segment_endpoint` (needed whenever the layout/curve already has at least one
-// real segment -- i.e. every realistic, non-empty case) -- the SAME real geometry
-// kernel gap `./index.ts`'s own header comment already discloses for
-// `_get_segment_endpoint` itself (excluded from this chunk's scope per this chunk's
-// own task brief). Porting `add_zero_length_segment` here would be real, disclosed
-// scope creep into a separate, not-yet-reviewed file, not a small addition -- matching
-// this project's own "do not inline a risky partial port for a dependency outside the
-// module under review" discipline (e.g. `TODOS.md`'s `util.element.getShapeAspects`
-// entry). Ported every other real behavior of this function correctly and completely
-// (the type-check, the `EndPoint`-not-yet-assigned branch construction for BOTH
-// `IfcGradientCurve`/`IfcSegmentedReferenceCurve`, the full `getAxis2placement`
-// extraction and both classes' own final attribute-assignment tail), and throws a
-// clear, disclosed error ONLY at the exact point, and only when, the real
-// `add_zero_length_segment` call would actually be needed -- never proactively, and
-// never before the type-check has already run. See `TODOS.md`'s own dedicated entry
-// for this gap for the full writeup.
+// *** RESOLVED 2026-09-18 (chunk 7 lands `addZeroLengthSegment` for real) -- see UPDATE
+// in `TODOS.md`'s own dedicated entry for the full writeup ***. This file's own
+// previously-disclosed blocker (`ifcopenshell.api.alignment.add_zero_length_segment`
+// was not ported) is now wired in for real: `api.alignment.addZeroLengthSegment`
+// landed in chunk 7 (`./addZeroLengthSegment.ts`) and is called here exactly as real
+// Python does, in the `if (!hasZeroLengthSegment(curve))` branch below. Since
+// `addZeroLengthSegment` is itself only CONDITIONALLY blocked (see that file's own
+// header comment for the full writeup) -- fully portable for a genuinely empty
+// `curve` (no real segments yet), and throwing a clear, disclosed error for a non-empty
+// one (transitively needing the still-unported, still-permanently-excluded
+// `_get_segment_endpoint`/real geometry kernel) -- `updateEndPoint` now inherits that
+// SAME conditional behavior: a freshly-created, still-empty `IfcGradientCurve`/
+// `IfcSegmentedReferenceCurve` now computes a real, correct `EndPoint` end to end (the
+// zero-length segment `addZeroLengthSegment` builds is placed at the origin, since it
+// has no earlier real segment to derive a position from), while a non-empty `curve`
+// missing its own zero-length segment still throws -- now via `addZeroLengthSegment`'s
+// own disclosed error message, bubbled up transparently, rather than this file's own
+// former bespoke message (which is now stale/incorrect, since `addZeroLengthSegment`
+// IS ported).
 //
 // The `TypeError` message has the SAME genuine unmatched-quote bug as
 // `hasZeroLengthSegment.ts`'s own already-disclosed one (real Python: `f"Expected
@@ -48,6 +45,7 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { getAxis2placement } from "../../util/placement";
+import { addZeroLengthSegment } from "./addZeroLengthSegment";
 import { hasZeroLengthSegment } from "./hasZeroLengthSegment";
 
 const EXPECTED_TYPES = ["IfcGradientCurve", "IfcSegmentedReferenceCurve"];
@@ -71,8 +69,10 @@ function pythonListRepr(items: readonly string[]): string {
  * @param curve The `IfcGradientCurve` or `IfcSegmentedReferenceCurve`.
  * @throws {TypeError} If `curve` is not one of the expected types -- see this file's
  *   own header comment for the exact (deliberately malformed) message text.
- * @throws {Error} If `curve` has no zero length segment yet -- see this file's own
- *   header comment for the disclosed `add_zero_length_segment` blocker.
+ * @throws {Error} If `curve` has no zero length segment yet AND is not empty -- see
+ *   `addZeroLengthSegment.ts`'s own header comment for exactly when this throws
+ *   (transitively needing the still-unported, permanently-excluded
+ *   `_get_segment_endpoint`/real geometry kernel).
  */
 export function updateEndPoint(file: IfcFile, curve: EntityInstance): void {
 	if (!EXPECTED_TYPES.includes(curve.isA())) {
@@ -82,9 +82,7 @@ export function updateEndPoint(file: IfcFile, curve: EntityInstance): void {
 	}
 
 	if (!hasZeroLengthSegment(curve)) {
-		throw new Error(
-			`updateEndPoint: '${curve.isA()}' has no zero-length segment yet, and adding one needs api.alignment.addZeroLengthSegment, which is not ported in this chunk (itself transitively blocked on the unported _get_segment_endpoint, which needs the real geometry kernel) -- see TODOS.md.`,
-		);
+		addZeroLengthSegment(file, curve);
 	}
 
 	const segments = curve.get("Segments") as EntityInstance[];

@@ -3272,7 +3272,7 @@ scheduled/started).
 
 ---
 
-### `api.alignment.updateEndPoint` needs the unported `api.alignment.addZeroLengthSegment` -- itself transitively blocked on the already-tracked `_get_segment_endpoint`/geometry-kernel gap
+### `api.alignment.updateEndPoint` needs the unported `api.alignment.addZeroLengthSegment` -- itself transitively blocked on the already-tracked `_get_segment_endpoint`/geometry-kernel gap -- **RESOLVED 2026-09-18, see UPDATE below: `addZeroLengthSegment` landed for real (conditionally), `updateEndPoint.ts` now wired in**
 
 **What:** Real Python's `ifcopenshell.api.alignment.update_end_point` calls
 `ifcopenshell.api.alignment.add_zero_length_segment(file, curve)` whenever
@@ -3334,3 +3334,26 @@ against the real 91-line `update_end_point.py` source and the real 206-line
 `getAxis2placement`/`util.shape`/`editProfileUsage`/`addProfileRepresentation` entries above (not yet
 scheduled/started), plus porting `add_zero_length_segment` itself as its own future chunk once that
 binding exists.
+
+**UPDATE 2026-09-18 (`api.alignment` chunk 7 lands `addZeroLengthSegment` for real):** The
+dependency itself is now ported (`src/ifcopenshell-ts/src/api/alignment/addZeroLengthSegment.ts`) --
+and, unlike most of chunk 7's own 7 files, it is only CONDITIONALLY blocked on the real geometry
+kernel, not unconditionally: fully portable for a genuinely empty layout/curve (no real segments
+yet -- always for `IfcAlignmentCant`, confirmed to call `_get_segment_endpoint` zero times in its
+own 206-line source; otherwise when the given layout/curve has no segments yet), and still throwing
+a clear, disclosed error for a non-empty one (see `addZeroLengthSegment.ts`'s own header comment for
+the full writeup). `updateEndPoint.ts`'s own `if (!hasZeroLengthSegment(curve))` branch is now wired
+to call the real `addZeroLengthSegment(file, curve)`, exactly as this entry's own "Fix" section
+above prescribed -- `updateEndPoint`'s own former bespoke disclosed-error message is removed
+entirely; a non-empty `curve` missing its own zero-length segment now throws
+`addZeroLengthSegment`'s own disclosed error instead, bubbled up transparently. A genuinely EMPTY
+`IfcGradientCurve`/`IfcSegmentedReferenceCurve` (no real segments at all yet) now computes a real,
+correct `EndPoint` end to end -- pinned by a new real, passing test in `updateEndPoint.test.ts`
+("an empty curve auto-adds a real zero-length segment ... and computes EndPoint at the origin"),
+alongside a regression test for the still-throwing non-empty case. This entry is now fully
+resolved for the empty-curve case; the non-empty-curve case remains blocked on the SAME permanently-
+excluded `_get_segment_endpoint`/geometry-kernel gap as ever -- also reached, unconditionally this
+time, by chunk 7's own new `_addSegmentToCurve`/`_addSegmentToLayout` (both disclosed in their own
+header comments and in `./index.ts`'s own header comment; not given their own new dedicated entries
+here, since this is the SAME already-tracked gap, not a new category -- matching chunk 6's own
+`.Dim`-gap-occurrence precedent for not duplicating an existing entry).
