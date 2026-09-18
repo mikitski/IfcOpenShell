@@ -9,8 +9,8 @@
 // construction, and their derived `IfcCompositeCurve`/`IfcGradientCurve`/
 // `IfcSegmentedReferenceCurve` geometric representations.
 //
-// **THIS IS CHUNK 5 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 37 of ~50 real files (~3535 lines) are landed as of this
+// **THIS IS CHUNK 6 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
+// module of this size) -- 41 of ~50 real files (~3908 lines) are landed as of this
 // chunk. None of these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
@@ -356,21 +356,95 @@
 // `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-4's own
 // established convention.
 //
+// --- Landed in chunk 6 (4 more files, ~373 lines) ---
+//
+// `_createGeometricRepresentation` (creates the alignment's own `IfcCompositeCurve`/
+// `IfcGradientCurve`/`IfcSegmentedReferenceCurve` geometric representation and assigns
+// it via already-landed `api.geometry.assignRepresentation`, reusing chunk 1's own
+// `getAxisSubcontext`/`getAlignmentLayouts`/`getChildAlignments`/`getBasisCurve`),
+// `createSegmentRepresentations` (PUBLIC -- confirmed present in real Python's own
+// `__init__.py` `__all__`, unlike every other file in this chunk -- creates a
+// per-segment "Axis"/"Segment" `IfcShapeRepresentation` for each real
+// `IfcAlignmentSegment`, reusing chunk 1's `getAxisSubcontext`/`getBasisCurve`/
+// `getCurve` plus already-landed `util.representation.getRepresentationsIter`/
+// `util.element.getComponents`), `_createOffsetCurveRepresentation`/
+// `_createPolylineRepresentation` (both create an alternate, non-segmented alignment
+// representation directly from raw points/offsets, reusing `getAxisSubcontext`/
+// `assignRepresentation`). Dependency order ported: `_createGeometricRepresentation`
+// first (no dependency on any other file in this chunk), then the other 3 (mutually
+// independent of each other). Confirmed by reading every real file's own imports AND
+// full body: none of this chunk's 4 files depends on any OTHER, still-unported
+// sibling file in this module.
+//
+// **A real, CONFIRMED Python typo bug, preserved verbatim**: `_create_geometric
+// _representation.py`'s own line 145 (the `len(child_layouts) == 2` branch -- a child
+// alignment with both a Vertical and a Cant layout) reads
+// `file.creatIfcShapeRepresentation(...)` -- missing the "e" in "create" (every OTHER
+// `IfcShapeRepresentation`-creating call site in the SAME real file spells it
+// correctly, including its own `file.create_entity(type="IfcShapeRepresentation", ...)`
+// alternate spelling a few lines earlier). Real Python raises a real `AttributeError`
+// the moment this branch is exercised. This port has no per-class `createIfcXxx`
+// dynamic-dispatch sugar at all (every other real `createIfcXxx` call in this module
+// is ported as a uniform `createEntity("IfcXxx", ...)`), so the identical bug is
+// reproduced by calling the SAME misspelled property name directly on the `file`
+// object itself (via an index-signature cast, not `any`) -- since no such property
+// exists, this throws the natural TS equivalent (`TypeError: file
+// .creatIfcShapeRepresentation is not a function`) at the exact same point, after the
+// same 2 curves have already been created. See `_createGeometricRepresentation.ts`'s
+// own header comment for the full writeup; pinned by a dedicated regression test.
+//
+// **A real, CONFIRMED, genuinely REACHABLE bug in `create_segment_representations.py`,
+// also preserved verbatim**: `curve`/`nested_alignment` are initialized to `None`
+// before the `if`/`elif` chain, but there is no `else`/`continue` -- a representation
+// matching NEITHER expected shape (e.g. an alignment with an extra "Body"
+// representation) falls through to `curve.Segments` with `curve` still `None`, a real
+// Python `AttributeError`. Ported the same way (an unguarded `.get("Segments")` call
+// on what may be `null`); pinned by a dedicated regression test using exactly that
+// "Body"-representation shape. See `createSegmentRepresentations.ts`'s own header
+// comment for the full writeup.
+//
+// **2 genuinely NEW occurrences (for this module) of the pre-existing, already-tracked
+// `entityInstance.ts` EXPRESS DERIVED-attribute gap** (`.get()` has no DERIVED-category
+// fallback at all): `_createOffsetCurveRepresentation`'s own `basis_curve.Dim` read
+// (`IfcCurve.Dim` -- already generically covered by `TODOS.md`'s very first entry in
+// this family, `util.representation.guessType`'s own `Curve2D`/etc. branches, which
+// names `IfcCurve.Dim` explicitly) and `_createPolylineRepresentation`'s own
+// `points[0].Dim` read (`IfcCartesianPoint.Dim` -- already generically covered by
+// `TODOS.md`'s `api.cogo.editSurveyPoint` entry, which reads the identical attribute
+// on the identical class). Neither needed a NEW `TODOS.md` entry (both already
+// specifically named by an existing entry, not just the same general category) --
+// ported everything before each blocked line completely and faithfully (the full
+// type-checking, the `offsets[i].isA()` loop for the offset-curve file), throwing only
+// at the exact point each `.Dim` read would actually happen, matching
+// `../cogo/editSurveyPoint.ts`'s own established "just write the real read, let the
+// pre-existing gap throw naturally" precedent. Both pinned by dedicated regression
+// tests, alongside real, passing tests for every fully-portable branch (the
+// type-checking loops).
+//
+// Real Python has no dedicated test file for `_create_geometric_representation.py`/
+// `_create_offset_curve_representation.py`/`_create_polyline_representation.py`
+// (confirmed by reading the whole real test directory) -- original coverage written
+// for all 3, following this module's established hand-rolled-fixture pattern.
+// `create_segment_representations.py` similarly has no dedicated real Python test file
+// (its own real callers, `create`/`create_by_pi_method`, are both out of scope) --
+// original coverage written here too. All 4 files use
+// `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-5's own
+// established convention.
+//
 // --- Still pending (future chunks) ---
 //
 // Every other real file in `ifcopenshell/api/alignment/`: the segment-by-segment and
 // PI-method construction functions (`create`, `create_by_pi_method`,
 // `create_from_csv`, `create_layout_segment`, `create_as_polyline`,
 // `create_as_offset_curve`, `create_representation`,
-// `create_segment_representations`, `layout_horizontal_alignment_by_pi_method`,
+// `layout_horizontal_alignment_by_pi_method`,
 // `layout_vertical_alignment_by_pi_method`, `add_vertical_layout`,
 // `add_zero_length_segment`,
 // `get_curve_segment_transition_code` (the ONE file needing the real geometry kernel,
 // see below -- do not attempt), their private `_`-prefixed helper files
 // (`_add_segment_to_curve`, `_add_segment_to_layout`, `_add_zero_length_segment`,
-// `_create_geometric_representation`, `_create_offset_curve_representation`,
-// `_create_polyline_representation`, `_get_segment_endpoint`,
-// `_update_curve_segment_transition_code`) -- and, separately from all of the above,
+// `_get_segment_endpoint`, `_update_curve_segment_transition_code`) -- and, separately
+// from all of the above,
 // **`util.py`, a REAL, CONFIRMED, SEPARATE blocker** (not attempted in any chunk
 // until the underlying gap is closed): it genuinely needs the real geometry kernel
 // (`ifcopenshell.geom.create_shape`, `ifcopenshell_wrapper.map_shape`,
@@ -381,6 +455,7 @@
 // `TODOS.md` entry for the established precedent).
 export { addPositioningReferent } from "./addPositioningReferent";
 export { addStationingReferent } from "./addStationingReferent";
+export { createSegmentRepresentations } from "./createSegmentRepresentations";
 export { distanceAlongFromStation } from "./distanceAlongFromStation";
 export { getAlignment } from "./getAlignment";
 export { getAlignmentLayoutNest } from "./getAlignmentLayoutNest";
