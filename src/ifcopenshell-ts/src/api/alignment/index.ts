@@ -1,16 +1,18 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // Barrel for `ifcopenshell.api.alignment` (src/ifcopenshell-python's
-// `ifcopenshell/api/alignment/` package) -- a brand-new, LARGE module (~50 real
-// files, 6282 lines total, no TS port of any kind before this chunk). Real Python's
-// own module docstring: "Manages alignment layout (semantic definition) and
-// alignment geometry (geometric definition)" for IFC4X3-era road/rail alignments --
-// horizontal/vertical/cant layouts, stationing, segment-by-segment or PI-method
-// construction, and their derived `IfcCompositeCurve`/`IfcGradientCurve`/
-// `IfcSegmentedReferenceCurve` geometric representations.
+// `ifcopenshell/api/alignment/` package) -- a brand-new, LARGE module (59 real files,
+// confirmed by `ls ifcopenshell/api/alignment/*.py | grep -v __init__ | wc -l` --
+// correcting this header's own earlier "~50 real files" approximation from chunks
+// 1-6, no TS port of any kind before chunk 1). Real Python's own module docstring:
+// "Manages alignment layout (semantic definition) and alignment geometry (geometric
+// definition)" for IFC4X3-era road/rail alignments -- horizontal/vertical/cant
+// layouts, stationing, segment-by-segment or PI-method construction, and their
+// derived `IfcCompositeCurve`/`IfcGradientCurve`/`IfcSegmentedReferenceCurve`
+// geometric representations.
 //
-// **THIS IS CHUNK 6 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 41 of ~50 real files (~3908 lines) are landed as of this
+// **THIS IS CHUNK 7 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
+// module of this size) -- 48 of 59 real files (~4653 lines) are landed as of this
 // chunk. None of these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
@@ -431,30 +433,103 @@
 // `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-5's own
 // established convention.
 //
-// --- Still pending (future chunks) ---
+// --- Landed in chunk 7 (7 more files, ~745 lines) ---
 //
-// Every other real file in `ifcopenshell/api/alignment/`: the segment-by-segment and
-// PI-method construction functions (`create`, `create_by_pi_method`,
-// `create_from_csv`, `create_layout_segment`, `create_as_polyline`,
-// `create_as_offset_curve`, `create_representation`,
-// `layout_horizontal_alignment_by_pi_method`,
-// `layout_vertical_alignment_by_pi_method`, `add_vertical_layout`,
-// `add_zero_length_segment`,
-// `get_curve_segment_transition_code` (the ONE file needing the real geometry kernel,
-// see below -- do not attempt), their private `_`-prefixed helper files
-// (`_add_segment_to_curve`, `_add_segment_to_layout`, `_add_zero_length_segment`,
-// `_get_segment_endpoint`, `_update_curve_segment_transition_code`) -- and, separately
-// from all of the above,
-// **`util.py`, a REAL, CONFIRMED, SEPARATE blocker** (not attempted in any chunk
-// until the underlying gap is closed): it genuinely needs the real geometry kernel
-// (`ifcopenshell.geom.create_shape`, `ifcopenshell_wrapper.map_shape`,
+// `_updateCurveSegmentTransitionCode` (module-private -- real Python's ENTIRE body is
+// one line calling the OTHER permanently-excluded, kernel-needing file,
+// `get_curve_segment_transition_code`; ported as an unconditional, descriptive throw,
+// keeping the real 2-argument `(prevSegment, segment)` signature so its own real
+// callers below can keep calling it uniformly), `createAsOffsetCurve`/`createAsPolyline`
+// (both PUBLIC -- confirmed in real Python's own `__init__.py` `__all__` -- create a
+// new `IfcAlignment` and aggregate it to `IfcProject`, reusing already-landed
+// `_createOffsetCurveRepresentation`/`_createPolylineRepresentation` (chunk 6) and
+// `api.aggregate.assignObject`; `createAsPolyline` additionally reuses `addStationingReferent`
+// (chunk 4) and `util.alignment.stationAsString`), `_addSegmentToCurve` (module-private
+// -- 2 functions, only the outer one exported even at the file level, matching real
+// Python's own file-vs-module privacy distinction for `_add_curve_segment_to_composite_curve`),
+// `addZeroLengthSegment` (PUBLIC -- see below for this chunk's own standout finding),
+// `_addZeroLengthSegment`/`_addSegmentToLayout` (both module-private thin wrappers).
+// Dependency order ported exactly as listed above; confirmed by reading every real
+// file's own imports AND full body.
+//
+// **CONFIRMED (empirically, against a real installed `ifcopenshell`): `IfcGradientCurve`/
+// `IfcSegmentedReferenceCurve` genuinely ARE schema subtypes of `IfcCompositeCurve`** --
+// so `_add_segment_to_curve.py`'s own blanket, redundant-looking
+// `curve.is_a("IfcCompositeCurve")` check (after 3 earlier, more specific checks) is a
+// real, if defensive-looking, check, NOT a bug -- ported verbatim, not removed.
+//
+// **5 of this chunk's 7 files are unconditionally blocked on the real geometry
+// kernel for every real invocation** (`_updateCurveSegmentTransitionCode`,
+// `_addSegmentToCurve`, `_addSegmentToLayout`, and transitively `createAsOffsetCurve`/
+// `createAsPolyline` via their already-landed, already-disclosed `.Dim`-gap
+// dependencies) -- every real branch up to the exact blocked call is ported completely
+// and faithfully (see each file's own header comment for exactly which real logic runs
+// first, and -- for `_addSegmentToCurve` specifically -- a genuinely nuanced finding
+// about WHICH of 2 disclosed blockers throws first, depending on the target curve's
+// current shape).
+//
+// **THE STANDOUT FINDING OF THIS CHUNK: `addZeroLengthSegment` is only CONDITIONALLY
+// blocked, not unconditionally like every other file here.** It calls the kernel-needing
+// `_get_segment_endpoint` ONLY when the layout/curve it's given ALREADY HAS at least one
+// real segment -- for a genuinely EMPTY layout/curve (e.g. one freshly, hand-built by a
+// test fixture, bypassing the also-unported `create()`), it is FULLY PORTABLE, using the
+// same raw-number-at-construction-time `IfcCurveSegment` technique established since
+// chunk 3, and even correctly RECURSES into a `IfcGradientCurve`/`IfcSegmentedReferenceCurve`'s
+// own `BaseCurve`. Refining this chunk's own original task brief: `IfcAlignmentCant`'s
+// own branch calls the kernel-needing dependency ZERO TIMES, period (confirmed by
+// grepping the whole real 206-line file) -- it is ALWAYS fully portable, regardless of
+// whether it already has real segments, unlike `IfcAlignmentHorizontal`/`Vertical`/the
+// composite-curve family (all 3 conditionally blocked only when non-empty). See
+// `addZeroLengthSegment.ts`'s own header comment for the full, nuanced writeup, and
+// `addZeroLengthSegment.test.ts` for real, passing end-to-end coverage of the portable
+// path (not just a disclosed-throw stub) -- genuinely valuable, testable functionality.
+// `addZeroLengthSegment` also preserves a real, confirmed Python quirk verbatim: its
+// 3-type early-return branch (`IfcOffsetCurveByDistances`/`IfcPolyline`/
+// `IfcIndexedPolyCurve`) is a bare `return` (`None`), not `return False`, despite the
+// function's own `-> bool` type hint and its own docstring's "True if segment is
+// added" claim -- ported as `return undefined`, not silently "fixed".
+//
+// **`updateEndPoint.ts` (chunk 3) is RETROACTIVELY RESOLVED by this chunk** -- its own
+// previously-disclosed blocker (the unported `addZeroLengthSegment`) is now wired in
+// for real, matching this project's own `api.geometry.editObjectPlacement`/
+// `api.root.removeProduct` precedent for retroactively resolving an earlier chunk's
+// disclosed dependency gap once it lands. See `updateEndPoint.ts`'s own header comment
+// and `TODOS.md`'s own dedicated entry's "UPDATE" for the full writeup: a genuinely
+// empty `IfcGradientCurve`/`IfcSegmentedReferenceCurve` now computes a real, correct
+// `EndPoint` end to end.
+//
+// Real Python has no dedicated test file for any of this chunk's 7 files (confirmed by
+// reading the whole real test directory) -- original test coverage was written for all
+// 7, following this module's established hand-rolled-fixture pattern. All 7 files (and
+// `updateEndPoint.test.ts`'s own updated tests) use
+// `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-6's own
+// established convention.
+//
+// --- Still pending (future chunk 8) ---
+//
+// 8 real files remain, all segment-by-segment/PI-method CONSTRUCTION entry points (the
+// "front door" functions that would actually create a usable alignment from scratch,
+// none of which this module has landed yet): `create`, `create_by_pi_method`,
+// `create_from_csv`, `create_layout_segment`, `create_representation`,
+// `layout_horizontal_alignment_by_pi_method`, `layout_vertical_alignment_by_pi_method`,
+// `add_vertical_layout`. Separately, 3 files are PERMANENTLY excluded (not scheduled
+// for any future chunk, until a real geometry-kernel binding effort exists):
+// `_get_segment_endpoint`/`get_curve_segment_transition_code` (both need
+// `ifcopenshell.geom.settings`/`ifcopenshell_wrapper.map_shape`/
+// `function_item_evaluator`) and, separately,
+// **`util.py`, a REAL, CONFIRMED, SEPARATE blocker**: it genuinely needs the real
+// geometry kernel (`ifcopenshell.geom.create_shape`, `ifcopenshell_wrapper.map_shape`,
 // `ifcopenshell_wrapper.function_item_evaluator`) -- the same fundamental
 // "no OpenCASCADE-class geometry kernel in this Node-addon-based TS port"
 // architectural boundary already disclosed for `api.geometry.addProfileRepresentation`'s
 // own `getX`/`getY` else-branch (see that file's own header comment and its
-// `TODOS.md` entry for the established precedent).
+// `TODOS.md` entry for the established precedent). 8 (future chunk 8) + 3 (permanently
+// excluded) + 48 (landed) = 59, the full real file count.
 export { addPositioningReferent } from "./addPositioningReferent";
 export { addStationingReferent } from "./addStationingReferent";
+export { addZeroLengthSegment } from "./addZeroLengthSegment";
+export { createAsOffsetCurve } from "./createAsOffsetCurve";
+export { createAsPolyline } from "./createAsPolyline";
 export { createSegmentRepresentations } from "./createSegmentRepresentations";
 export { distanceAlongFromStation } from "./distanceAlongFromStation";
 export { getAlignment } from "./getAlignment";

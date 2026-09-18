@@ -5,13 +5,21 @@
 // (`create_representation`/`create_segment_representations`) are both out of this
 // chunk's scope. Original test coverage written here, gated to IFC4X3.
 //
-// Fixtures build a REAL zero-length `IfcCurveSegment` directly (`SegmentStart`/
-// `SegmentLength` set to a raw JS `0.0` at construction time, both `IfcCurveMeasureSelect`
-// SELECT-typed attributes) rather than going through the blocked
-// `api.alignment.addZeroLengthSegment` path -- see
+// Fixtures for a `curve` that ALREADY has a zero-length segment build a REAL
+// zero-length `IfcCurveSegment` directly (`SegmentStart`/`SegmentLength` set to a raw
+// JS `0.0` at construction time, both `IfcCurveMeasureSelect` SELECT-typed attributes)
+// rather than going through `api.alignment.addZeroLengthSegment` -- see
 // `../../../src/api/alignment/updateEndPoint.ts`'s own header comment for the
 // empirically-confirmed technique this reuses from chunk 2
 // (`getAlignmentStartStation.test.ts`/`distanceAlongFromStation.test.ts`).
+//
+// UPDATE (chunk 7): `updateEndPoint`'s own previously-disclosed blocker
+// (`addZeroLengthSegment` not ported) is now RESOLVED -- see `updateEndPoint.ts`'s own
+// header comment. A `curve` with an EMPTY `Segments` list now succeeds end to end (the
+// real `addZeroLengthSegment` auto-adds a zero-length segment placed at the origin),
+// while a `curve` with a real, non-zero-length segment but no zero-length one yet still
+// throws -- now via `addZeroLengthSegment`'s own disclosed error message (bubbled up
+// transparently), not `updateEndPoint`'s own former bespoke one.
 
 import { describe, expect, test } from "vitest";
 import { updateEndPoint } from "../../../src/api/alignment/updateEndPoint";
@@ -78,11 +86,46 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.updateEndP
 		);
 	});
 
-	test("throws a disclosed error when the curve has no zero-length segment yet (addZeroLengthSegment not ported)", () => {
+	test("IfcGradientCurve: an empty curve auto-adds a real zero-length segment (via the newly-wired addZeroLengthSegment) and computes EndPoint at the origin", () => {
 		const file = createTestFile("IFC4X3");
 		const curve = file.createEntity("IfcGradientCurve", [], null, dummyBaseCurve(file), null);
 
-		expect(() => updateEndPoint(file, curve)).toThrow(/addZeroLengthSegment/);
+		expect(curve.get("Segments")).toEqual([]);
+
+		updateEndPoint(file, curve);
+
+		const segments = curve.get("Segments") as EntityInstance[];
+		expect(segments.length).toBe(1);
+		expect(segments[0].isA()).toBe("IfcCurveSegment");
+
+		const endPoint = curve.get("EndPoint") as EntityInstance;
+		expect(endPoint).not.toBeNull();
+		expect(endPoint.isA()).toBe("IfcAxis2Placement2D");
+		// The zero-length segment `addZeroLengthSegment` builds for a fresh, empty
+		// composite-curve-family layout is always placed at the 2D origin, facing +X
+		// (no earlier real segment to derive a position from).
+		approxEqual((endPoint.get("Location") as EntityInstance).get("Coordinates") as number[], [0, 0]);
+		approxEqual((endPoint.get("RefDirection") as EntityInstance).get("DirectionRatios") as number[], [1, 0]);
+	});
+
+	test("throws a disclosed error (from addZeroLengthSegment) when the curve already has a real, non-zero-length segment but no zero-length one yet", () => {
+		const file = createTestFile("IFC4X3");
+		const placement = file.createEntity(
+			"IfcAxis2Placement2D",
+			file.createEntity("IfcCartesianPoint", [0.0, 0.0]),
+			file.createEntity("IfcDirection", [1.0, 0.0]),
+		);
+		const nonZeroSegment = file.createEntity(
+			"IfcCurveSegment",
+			"DISCONTINUOUS",
+			placement,
+			0.0,
+			5.0,
+			dummyParentCurve(file),
+		);
+		const curve = file.createEntity("IfcGradientCurve", [nonZeroSegment], null, dummyBaseCurve(file), null);
+
+		expect(() => updateEndPoint(file, curve)).toThrow(/_getSegmentEndpoint/);
 	});
 
 	test("IfcGradientCurve: creates a fresh EndPoint when missing, and computes the correct 2D position", () => {
