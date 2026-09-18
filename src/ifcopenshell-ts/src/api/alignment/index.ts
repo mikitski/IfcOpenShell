@@ -9,8 +9,8 @@
 // construction, and their derived `IfcCompositeCurve`/`IfcGradientCurve`/
 // `IfcSegmentedReferenceCurve` geometric representations.
 //
-// **THIS IS CHUNK 4 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 32 of ~50 real files (~2169 lines) are landed as of this
+// **THIS IS CHUNK 5 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
+// module of this size) -- 37 of ~50 real files (~3535 lines) are landed as of this
 // chunk. None of these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
@@ -287,6 +287,75 @@
 // fragility). All 5 files use `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`,
 // matching chunks 1-3's own established convention.
 //
+// --- Landed in chunk 5 (5 more files, ~1366 lines) ---
+//
+// `_updateZeroLengthSegmentPlacement` (mutates an already-real
+// `IfcAlignmentSegment`/`IfcCurveSegment`'s plain attributes from a 4x4 placement
+// matrix; reuses chunk 1's own `getLayout` and already-landed `util.unit
+// .calculateUnitScale`), `_mapAlignmentVerticalSegment` (pure closed-form parabolic-
+// segment math, 4 `PredefinedType`s), `_mapAlignmentCantSegment` (pure closed-form
+// math for 7 cant-transition-curve types), `_mapAlignmentHorizontalSegment` (pure
+// closed-form math for 9 horizontal-transition-curve types; reuses chunk 3's own
+// `_getCantSegment` and `util.unit.calculateUnitScale`), `_mapAlignmentSegment` (a
+// pure 3-way dispatcher over the previous 3, ported last per this chunk's own
+// dependency order). None of these 5 is in real Python's own `__init__.py`
+// `__all__` (every one's own leading underscore is genuine module-privacy, not just a
+// naming convention) -- none is re-exported from this barrel, matching this module's
+// established convention.
+//
+// **`_updateZeroLengthSegmentPlacement` is, like chunk 3's own
+// `updateFallbackPosition`/`updateEndPoint` before their own later-landed callers
+// arrived, confirmed UNREACHABLE end to end from any currently-ported public entry
+// point today**: its only real caller in the whole module, `_add_segment_to_curve`,
+// is itself still blocked on the unported, geometry-kernel-needing
+// `_get_segment_endpoint` (below). Ported completely and tested directly with
+// hand-built fixtures regardless, matching that same precedent.
+//
+// **`ifcopenshell.ifcopenshell_wrapper.helmert_curve_point` (used by
+// `_map_alignment_horizontal_segment`'s own `HELMERTCURVE` branch) is NOT a
+// geometry-kernel call, despite living in the `ifcopenshell_wrapper` module** --
+// read directly from `src/ifcgeom/function_item_evaluator.cpp` (lines 8-22,
+// `ifcopenshell::geom::helmert_curve_point`), it is a pure numerical integration
+// (trapezoidal-rule quadrature of `cos(theta(t))`/`sin(theta(t))`, `theta(t)` built
+// from the `A0`/`A1`/`A2` coefficients, each term dropped if its own coefficient is
+// `0`) with no OpenCASCADE/kernel dependency at all. Reimplemented as a small, local,
+// pure TS helper (`helmertTheta`/`trapezoidal`/`helmertCurvePoint`) in
+// `_mapAlignmentHorizontalSegment.ts` itself, after reading the real C++ source
+// directly -- see that file's own header comment for the full formula transcription,
+// including the deliberate `fabs`-only-on-the-`a1`-term asymmetry (ported verbatim,
+// not "symmetrized").
+//
+// A cross-cutting, disclosed TS-vs-Python arithmetic divergence shared by
+// `_mapAlignmentVerticalSegment`/`_mapAlignmentCantSegment`/
+// `_mapAlignmentHorizontalSegment`: several of these closed-form formulas divide by a
+// quantity that is legitimately zero only for a genuinely DEGENERATE input (e.g. a
+// "circular arc" segment with equal start/end gradient, or a cant transition with a
+// rail-head distance smaller than its own cant differential). Real Python's own float
+// division by `0.0` raises `ZeroDivisionError` for these; this port's `/`/`Math.sqrt`
+// instead silently produce `Infinity`/`NaN`/`NaN` -- the SAME category of divergence
+// `distanceAlongFromStation.ts`'s own header comment already discloses for an
+// unrelated expression (chunk 2), not specially guarded against here either, since no
+// real caller is expected to pass such a degenerate input.
+//
+// Real Python has no dedicated test file for any of this chunk's 5 files (confirmed
+// by reading the whole real test directory) -- original test coverage was written
+// for all 5, following this module's established fixture pattern.
+// `_updateZeroLengthSegmentPlacement.test.ts` builds hand-rolled
+// `IfcAlignmentSegment`/`IfcCurveSegment` fixtures per branch (matching chunk 3's
+// `updateEndPoint.test.ts` precedent for an unreachable-in-production function); the
+// 3 `_mapAlignment*Segment.test.ts` files compute their own expected numeric values
+// independently, following the real Python source's own formulas line-by-line (a
+// genuine transcription-fidelity cross-check, not a tautological re-assertion of this
+// port's own arithmetic) -- `_mapAlignmentHorizontalSegment.test.ts` additionally
+// cross-checks `_mapAlignmentVerticalSegment.test.ts`'s own `PARABOLICARC` closed-form
+// arc length against an independent Simpson's-rule numeric integration.
+// `_mapAlignmentSegment.test.ts` verifies dispatch correctness via REAL behavioral
+// differences between the 3 `DesignParameters` shapes (no mocking convention exists
+// in this module) and pins the disclosed unguarded `layout.RailHeadDistance` read for
+// a non-cant `layout`. All 5 files use
+// `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-4's own
+// established convention.
+//
 // --- Still pending (future chunks) ---
 //
 // Every other real file in `ifcopenshell/api/alignment/`: the segment-by-segment and
@@ -301,10 +370,7 @@
 // (`_add_segment_to_curve`, `_add_segment_to_layout`, `_add_zero_length_segment`,
 // `_create_geometric_representation`, `_create_offset_curve_representation`,
 // `_create_polyline_representation`, `_get_segment_endpoint`,
-// `_map_alignment_cant_segment`,
-// `_map_alignment_horizontal_segment`, `_map_alignment_segment`,
-// `_map_alignment_vertical_segment`, `_update_curve_segment_transition_code`,
-// `_update_zero_length_segment_placement`) -- and, separately from all of the above,
+// `_update_curve_segment_transition_code`) -- and, separately from all of the above,
 // **`util.py`, a REAL, CONFIRMED, SEPARATE blocker** (not attempted in any chunk
 // until the underlying gap is closed): it genuinely needs the real geometry kernel
 // (`ifcopenshell.geom.create_shape`, `ifcopenshell_wrapper.map_shape`,
