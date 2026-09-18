@@ -1045,6 +1045,23 @@ real, passing test coverage porting every one of real Python's own
 writeup (reused verbatim by `addStationingReferent.ts`'s/`updateKeyPointReferents.ts`'s
 own header comments).
 
+**UPDATE 2026-09-18 (`api.sequence` chunk 1 of many, `assignLagTime.ts` file):** found a
+fifteenth independent consequence -- and, distinctively, one that blocks a function's
+ENTIRE body on EVERY schema, not just one branch or one schema. `assign_lag_time.py`'s
+very first real statement (`file.create_entity("IfcDuration",
+util.date.datetime2ifc(lag_value, "IfcDuration"))`) constructs a brand-new, standalone,
+VALUED `IfcDuration` -- the identical `attribute_kind_of`/"Attribute access is only
+supported on entity instances" throw this entry already documents, confirmed empirically
+against this chunk's own freshly-built native addon (IFC4/IFC4X3) before writing the
+file. Ported completely and faithfully anyway, left to fail naturally at that first line
+-- `test/api/sequence/assignLagTime.test.ts` pins this CURRENT, disclosed, blocked
+behavior with a dedicated test per schema. On IFC2X3, the function fails even earlier and
+for an entirely INDEPENDENT reason (`IfcDuration` itself doesn't exist on that schema --
+it's an IFC4+-only defined type, confirmed empirically: `"Entity with name 'IfcDuration'
+not found in schema 'IFC2X3'"`), so IFC2X3 never actually reaches this gate at all -- both
+throws are pinned separately in the same test file. See
+`src/api/sequence/assignLagTime.ts`'s own header comment for the full writeup.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)

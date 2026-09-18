@@ -107,6 +107,26 @@ function sameRel(a: EntityInstance | null, b: EntityInstance | null): boolean {
 	return a.equals(b);
 }
 
+/**
+ * Python's `getattr(product, "ObjectPlacement", None)` -- a genuine, confirmed FIX found
+ * while building `test/api/sequence/addWorkSchedule.test.ts` (`api.sequence` chunk 1) on
+ * this file's own sibling `../aggregate/assignObject.ts` (see that file's own identical
+ * fix/doc comment for the full writeup): an earlier version of the final localization
+ * loop below used an unguarded `.get("ObjectPlacement")`, which throws for a product
+ * whose declared type doesn't support that attribute at all -- a real divergence FROM
+ * real Python (not a "preserve the Python bug" situation; real Python's own `getattr`
+ * already defaults to `None` here), never previously surfaced since every prior caller of
+ * `assignContainer` only ever contained real `IfcElement`s (which always declare
+ * `ObjectPlacement`).
+ */
+function getObjectPlacementOrNull(product: EntityInstance): EntityInstance | null {
+	try {
+		return product.get("ObjectPlacement") as EntityInstance | null;
+	} catch {
+		return null;
+	}
+}
+
 export interface AssignContainerSettings {
 	/** A list of physical `IfcElement`s existing in the space. */
 	products: readonly EntityInstance[];
@@ -195,7 +215,7 @@ function assignContainerUsecase(file: IfcFile, settings: AssignContainerSettings
 	// Localize placement relative to a new container for affected products -- see this
 	// file's header comment (now resolved).
 	for (const product of productsToChange) {
-		const placement = product.get("ObjectPlacement") as EntityInstance | null;
+		const placement = getObjectPlacementOrNull(product);
 		if (placement?.isA("IfcLocalPlacement")) {
 			editObjectPlacement(file, {
 				product,

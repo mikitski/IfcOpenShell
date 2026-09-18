@@ -119,6 +119,29 @@ function hasContainedInStructure(product: EntityInstance): boolean {
 	}
 }
 
+/**
+ * Python's `getattr(product, "ObjectPlacement", None)` -- see this file's header comment
+ * (the `geometry.edit_object_placement`-wiring section) for why this soft read matters:
+ * a genuine, confirmed FIX found while building `test/api/sequence/addWorkSchedule.test.ts`
+ * (`api.sequence` chunk 1) -- an earlier version of the final localization loop below used
+ * an unguarded `.get("ObjectPlacement")`, which throws for a product whose declared type
+ * doesn't support that attribute at all (e.g. `IfcWorkSchedule`, aggregated via
+ * `api.sequence.addWorkSchedule`'s own `workPlan` branch). This is a real divergence FROM
+ * real Python (not a "preserve the Python bug" situation -- real Python's own `getattr`
+ * already defaults to `None` here) that simply never surfaced before, since every earlier
+ * caller of `assignObject` only ever aggregated real `IfcProduct`s (which always declare
+ * `ObjectPlacement`). `../spatial/assignContainer.ts` has the identical fix for the
+ * identical reason (`assign_container.py`'s own analogous line is the same `getattr(...,
+ * None)`), see that file's own header comment.
+ */
+function getObjectPlacementOrNull(product: EntityInstance): EntityInstance | null {
+	try {
+		return product.get("ObjectPlacement") as EntityInstance | null;
+	} catch {
+		return null;
+	}
+}
+
 export interface AssignObjectSettings {
 	/** The list of parts of the aggregate, typically `IfcElement`s or `IfcSpatialStructureElement` subtypes. */
 	products: readonly EntityInstance[];
@@ -207,7 +230,7 @@ function assignObjectUsecase(file: IfcFile, settings: AssignObjectSettings): Ent
 	// Localize placement relative to a new aggregate for affected products -- see this
 	// file's header comment (now resolved).
 	for (const product of productsToChange) {
-		const placement = product.get("ObjectPlacement") as EntityInstance | null;
+		const placement = getObjectPlacementOrNull(product);
 		if (placement?.isA("IfcLocalPlacement")) {
 			editObjectPlacement(file, {
 				product,
