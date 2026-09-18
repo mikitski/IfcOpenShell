@@ -11,9 +11,11 @@
 // derived `IfcCompositeCurve`/`IfcGradientCurve`/`IfcSegmentedReferenceCurve`
 // geometric representations.
 //
-// **THIS IS CHUNK 7 OF MANY** (matching `api.geometry`'s own 11+-PR precedent for a
-// module of this size) -- 48 of 59 real files (~4653 lines) are landed as of this
-// chunk. None of these is registered with `ifcopenshell.api.run`/an internal
+// **THIS WAS CHUNK 8 OF 8, THE FINAL CHUNK** (matching `api.geometry`'s own 11+-PR
+// precedent for a module of this size) -- this module is now FUNCTIONALLY COMPLETE FOR
+// THIS PORT'S SCOPE: 56 of 59 real files (~5522 lines) are landed, with the remaining 3
+// permanently excluded (see the dedicated section near the end of this comment). None of
+// these is registered with `ifcopenshell.api.run`/an internal
 // `Usecase` class (confirmed: real Python's own `__init__.py` imports every one of
 // them as a plain function, no `Usecase`/`api.run` wiring anywhere in this module at
 // all) -- all exported here as plain functions, matching real Python's own
@@ -505,31 +507,119 @@
 // `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-6's own
 // established convention.
 //
-// --- Still pending (future chunk 8) ---
+// --- Landed in chunk 8 (8 more files, ~869 lines) -- THIS MODULE IS NOW FUNCTIONALLY
+//     COMPLETE FOR THIS PORT'S SCOPE ---
 //
-// 8 real files remain, all segment-by-segment/PI-method CONSTRUCTION entry points (the
-// "front door" functions that would actually create a usable alignment from scratch,
-// none of which this module has landed yet): `create`, `create_by_pi_method`,
-// `create_from_csv`, `create_layout_segment`, `create_representation`,
-// `layout_horizontal_alignment_by_pi_method`, `layout_vertical_alignment_by_pi_method`,
-// `add_vertical_layout`. Separately, 3 files are PERMANENTLY excluded (not scheduled
-// for any future chunk, until a real geometry-kernel binding effort exists):
-// `_get_segment_endpoint`/`get_curve_segment_transition_code` (both need
-// `ifcopenshell.geom.settings`/`ifcopenshell_wrapper.map_shape`/
-// `function_item_evaluator`) and, separately,
-// **`util.py`, a REAL, CONFIRMED, SEPARATE blocker**: it genuinely needs the real
-// geometry kernel (`ifcopenshell.geom.create_shape`, `ifcopenshell_wrapper.map_shape`,
-// `ifcopenshell_wrapper.function_item_evaluator`) -- the same fundamental
-// "no OpenCASCADE-class geometry kernel in this Node-addon-based TS port"
-// architectural boundary already disclosed for `api.geometry.addProfileRepresentation`'s
-// own `getX`/`getY` else-branch (see that file's own header comment and its
-// `TODOS.md` entry for the established precedent). 8 (future chunk 8) + 3 (permanently
-// excluded) + 48 (landed) = 59, the full real file count.
+// `addVerticalLayout` (adds a vertical layout to a previously created alignment, handling
+// the IFC CT 4.1.4.4.1.1 -> 4.1.4.4.1.2 transition when a second vertical is added),
+// `createLayoutSegment` (thin `IfcAlignmentSegment`-construction wrapper over chunk 7's
+// `_addSegmentToLayout`), `createRepresentation` (creates an alignment's geometric
+// representation from a purely-semantic definition), `create` (the alignment "front
+// door" -- horizontal/vertical/cant layouts, geometry, stationing referent, project
+// aggregation), `createByPiMethod`/`createFromCsv` (both thin wrappers over `create`),
+// `layoutHorizontalAlignmentByPiMethod`/`layoutVerticalAlignmentByPiMethod` (PI-method
+// segment-by-segment construction math). All 8 are PUBLIC (confirmed present in real
+// Python's own `__init__.py` `__all__`). Dependency order ported exactly as listed
+// above (files 7-8 ported LAST since `createByPiMethod`/`createFromCsv` both call them).
+//
+// **THE STANDOUT FINDING OF THIS CHUNK, CAREFULLY VERIFIED (correcting, then refining,
+// this chunk's own task brief's hypothesis): `addVerticalLayout` is GENUINELY FULLY
+// FUNCTIONAL END TO END**, for both the first-vertical-layout branch (IFC CT
+// 4.1.4.4.1.1) and the second/subsequent-vertical child-alignment-reuse branch (IFC CT
+// 4.1.4.4.1.2) -- but ONLY under one precise precondition this chunk's own task brief did
+// not spell out: `parentAlignment` must already have a real horizontal geometric
+// representation (any basis curve `getBasisCurve` recognizes). This is also,
+// separately, the ONLY state this port's own currently-portable API surface can ever
+// produce (nothing that could add real segments to a horizontal composite curve is
+// portable yet), so every realistic fixture reachable through this port today
+// satisfies it automatically. Without that precondition (a parent alignment with NO
+// representation at all), the function throws a real, natural
+// `TypeError: Cannot read properties of null` -- the direct TS equivalent of a genuine
+// real-Python `AttributeError` this port faithfully reproduces, not a new port-specific
+// gap. See `addVerticalLayout.ts`'s own header comment for the full, line-by-line trace
+// confirming every dependency resolves the way the hypothesis required, and
+// `addVerticalLayout.test.ts` for full, real, PASSING end-to-end coverage of both
+// branches plus the disclosed throw case.
+//
+// **A SECOND CAREFULLY-VERIFIED FINDING THAT CORRECTS this chunk's own task brief's
+// OTHER hypothesis: `createRepresentation` is NOT reachable end-to-end for any realistic
+// alignment either, though via a more specific path than a naive kernel-gap throw.**
+// The task brief reasoned that a fresh alignment with zero real segments would make its
+// `for segment in layout_nest.RelatedObjects` loop body simply "not execute". Tracing
+// precisely: `get_alignment_segment_nest` returns `null` PRECISELY when a layout has zero
+// real segments (by its own construction, see `getAlignmentSegmentNest.ts`) -- and real
+// Python's own `for segment in layout_nest.RelatedObjects` has NO guard on
+// `layout_nest` itself being `None`, so it crashes evaluating the loop's own iterable
+// expression (`None.RelatedObjects`), before the loop body ever gets the chance to "not
+// execute". Since a non-null `layout_nest` necessarily contains at least 1 real segment
+// (by the same construction), the loop -- whenever actually reached -- always calls the
+// now-unconditionally-blocked `_addSegmentToCurve` (chunk 7) at least once. So: for ANY
+// alignment with at least one real layout, `createRepresentation` always throws, either
+// at the null-nest crash (zero-segment layout) or inside `_addSegmentToCurve`
+// (non-empty layout) -- there is no reachable "genuinely fresh, empty alignment with a
+// real layout" input for which this function completes. The trailing
+// stationing-referent-placement-update branch (reachable only for a fully degenerate
+// zero-LAYOUT alignment) independently hits the SAME already-disclosed `IfcLengthMeasure`
+// standalone-construction gap `addStationingReferent.ts`'s own "gap 1" already tracks --
+// not a new gap. See `createRepresentation.ts`'s own header comment for the full writeup.
+//
+// **`create`/`createByPiMethod`/`createFromCsv` are all CONFIRMED unconditionally
+// blocked** on `create`'s own unconditional (not `include_geometry`-guarded -- verified
+// directly against the real source's own indentation, a common point of confusion)
+// `addStationingReferent` call, itself already confirmed (chunk 4) blocked on 2
+// independent primitive-layer gaps for every real invocation. `createLayoutSegment` is
+// similarly unconditionally blocked on chunk 7's own already-unconditionally-blocked
+// `_addSegmentToLayout`. `layoutHorizontalAlignmentByPiMethod`/
+// `layoutVerticalAlignmentByPiMethod` both have substantial real, portable PI-method
+// geometric math (tangent-run/circular-curve and parabolic-arc/constant-gradient
+// respectively) ported completely and faithfully, throwing only at their own first
+// reached `createLayoutSegment` call -- but since `_addSegmentToLayout`'s own real
+// `nest.assignObject`/`nest.reorderNesting` side effects run BEFORE its own throw, the
+// one real segment that gets created and nested before each function throws lets their
+// own test files verify the real, hand-computed intermediate math (angles, tangent
+// lengths, PC/PT coordinates, gradient/parabolic-arc parameters) against the actual
+// entity in the file, not just assert-throws stubs -- matching this module's own
+// established "port real math even in a function currently blocked on its very last
+// step" precedent. `createFromCsv`'s own real CSV-parsing logic (hand-rolled, no new npm
+// dependency -- no CSV-reading precedent existed anywhere in this port before this
+// chunk) is ported completely and faithfully up to the exact point its first row's
+// `create()` call throws.
+//
+// Real Python has no dedicated test file for any of this chunk's 8 files (confirmed by
+// reading the whole real test directory) -- original test coverage was written for all
+// 8, following this module's established hand-rolled-fixture pattern, with FULL real
+// end-to-end coverage (not disclosed-throw stubs) for `addVerticalLayout`. All 8 files
+// use `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))`, matching chunks 1-7's own
+// established convention.
+//
+// --- THIS MODULE IS NOW FUNCTIONALLY COMPLETE FOR THIS PORT'S SCOPE ---
+//
+// 56 of the 59 real files are landed (chunks 1-8). The remaining 3 are PERMANENTLY
+// excluded (not scheduled for any future chunk, until a real geometry-kernel binding
+// effort exists), matching `api.geometry`'s own established "module complete, N files
+// permanently out of scope" precedent:
+// - `_get_segment_endpoint`/`get_curve_segment_transition_code`: both need
+//   `ifcopenshell.geom.settings`/`ifcopenshell_wrapper.map_shape`/
+//   `function_item_evaluator`.
+// - `util.py`: genuinely needs the real geometry kernel (`ifcopenshell.geom.create_shape`,
+//   `ifcopenshell_wrapper.map_shape`, `ifcopenshell_wrapper.function_item_evaluator`) --
+//   the same fundamental "no OpenCASCADE-class geometry kernel in this Node-addon-based
+//   TS port" architectural boundary already disclosed for
+//   `api.geometry.addProfileRepresentation`'s own `getX`/`getY` else-branch (see that
+//   file's own header comment and its `TODOS.md` entry for the established precedent).
+//
+// 56 (landed) + 3 (permanently excluded) = 59, the full real file count.
 export { addPositioningReferent } from "./addPositioningReferent";
 export { addStationingReferent } from "./addStationingReferent";
+export { addVerticalLayout } from "./addVerticalLayout";
 export { addZeroLengthSegment } from "./addZeroLengthSegment";
+export { create } from "./create";
 export { createAsOffsetCurve } from "./createAsOffsetCurve";
 export { createAsPolyline } from "./createAsPolyline";
+export { createByPiMethod } from "./createByPiMethod";
+export { createFromCsv } from "./createFromCsv";
+export { createLayoutSegment } from "./createLayoutSegment";
+export { createRepresentation } from "./createRepresentation";
 export { createSegmentRepresentations } from "./createSegmentRepresentations";
 export { distanceAlongFromStation } from "./distanceAlongFromStation";
 export { getAlignment } from "./getAlignment";
@@ -552,6 +642,8 @@ export { getParentAlignment } from "./getParentAlignment";
 export { getStationingNest } from "./getStationingNest";
 export { getVerticalLayout } from "./getVerticalLayout";
 export { hasZeroLengthSegment } from "./hasZeroLengthSegment";
+export { layoutHorizontalAlignmentByPiMethod } from "./layoutHorizontalAlignmentByPiMethod";
+export { layoutVerticalAlignmentByPiMethod } from "./layoutVerticalAlignmentByPiMethod";
 export { nameSegments } from "./nameSegments";
 export { registerReferentNameCallback } from "./_getSegmentStartPointLabel";
 export type { ReferentNameCallback } from "./_getSegmentStartPointLabel";
