@@ -6,8 +6,11 @@
 // into one top-level namespace. Re-exports accumulate here as later Phase 3+ chunks
 // port more `util` modules; `alignment`/`attribute`/`classification`/`constraint`/`cost`/
 // `data`/`date`/`doc`/`element`/`file`/`geolocation`/`migrator`/`mvdInfo`/`placement`/
-// `pset`/`representation`/`resource`/`schema`/`selector`/`shape`/`shapeBuilder`/`system`/
-// `type`/`unit` are ported so far (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4).
+// `pset`/`representation`/`resource`/`schema`/`selector`/`sequence`/`shape`/
+// `shapeBuilder`/`system`/`type`/`unit` are ported so far
+// (planning/ifcopenshell-ts/20-roadmap.md Phases 3-4). `sequence` is a brand-new module
+// (no prior TS coverage), ported as a Phase 9 `api.sequence` prerequisite -- see
+// `sequence.ts`'s own header comment for its own scope/findings.
 // `data` is a single small dataclass (`Clipping`), not a usecase -- see `data.ts`'s own
 // header comment.
 // `shapeBuilder` is now `util/shape_builder.py` in full (landed across two PRs given its
@@ -38,6 +41,7 @@ export * as representation from "./representation";
 export * as resource from "./resource";
 export * as schema from "./schema";
 export * as selector from "./selector";
+export * as sequence from "./sequence";
 export * as shape from "./shape";
 export * as shapeBuilder from "./shapeBuilder";
 export * as system from "./system";
