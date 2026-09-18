@@ -458,3 +458,17 @@ export * as cogo from "./cogo";
 // still-pending file list, and every disclosed real Python-source quirk preserved
 // verbatim in this chunk.
 export * as alignment from "./alignment";
+
+// A brand-new, small module discovered outside any previously-planned phase's own
+// chunking: `api.attribute` (1 real file, `edit_attributes.py`, 85 lines) was the ONLY
+// top-level `ifcopenshell.api.*` Python module with zero TS coverage of any kind,
+// surfaced by diffing `ls src/ifcopenshell-python/ifcopenshell/api/` against `ls
+// src/ifcopenshell-ts/src/api/`. Manages basic attribute editing plus
+// `PredefinedType`/`ElementType`/`ObjectType` consistency maintenance. No unported
+// dependency of any kind (`api.owner.updateOwnerHistory`, `util.element.getType`, both
+// already landed). Namespaced as `api.attribute.editAttributes` -- see `attribute/
+// editAttributes.ts`'s own header comment for the full scope, including a correction of
+// this chunk's own task brief (real Python's sibling `__init__.py` DOES wrap this
+// function via `wrap_usecases`, unlike the `api.alignment`/`api.cogo` plain-function
+// modules the brief mistakenly compared it to).
+export * as attribute from "./attribute";
