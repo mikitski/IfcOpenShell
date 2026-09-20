@@ -3446,3 +3446,29 @@ conversion/writing behavior) is unaffected and already correct, only the accompa
 and test expectations needed correcting. A native-layer fix (option (a) above) would need a real
 `cmake` build environment to implement and verify, same as this file's other native-primitive-layer
 entries.
+
+### `api.resource.editResourceTime`'s `calculate_resource_usage`-under-lock blocker is now resolvable -- `api.sequence.calculateTaskDuration` has landed
+
+**What:** `api.resource`'s PROGRESS.md row (PR #103) disclosed that `editResourceTime`'s
+`ScheduleUsage`-under-a-hard-`Usage.ScheduleWork`-constraint branch needs
+`ifcopenshell.api.sequence.calculate_task_duration`, and threw a clear, descriptive `Error` at that
+exact call site since `api.sequence` had no TS port of any kind at the time. `api.sequence` is now
+**functionally complete (40/40 files)** as of chunk 4 (PR #141, 2026-09-20), including
+`calculateTaskDuration` itself (landed even earlier, chunk 2, PR #137) -- this dependency is no
+longer genuinely unported, just not yet wired up in `editResourceTime.ts`.
+
+**Fix:** Re-open `editResourceTime.ts`, replace the thrown `Error` at that call site with a real
+call to the now-landed `calculateTaskDuration`, and un-skip/extend whatever real Python test
+coverage was previously adapted around this blocker (check `editResourceTime.test.ts` for an
+existing pinned-blocked-behavior test to convert, matching this project's established pattern for
+closing a primitive/dependency gap once it's resolved -- e.g. `editPset.ts`'s own history once the
+standalone-value-construction gap eventually closes).
+
+**Depends on / blocked by:** Nothing -- this is now unblocked. Not done as part of the `api.sequence`
+chunk 4 PR itself since it's out of that chunk's own scope (a change to an already-shipped
+`api.resource` file, not a new `api.sequence` port) -- flagged here so it isn't lost, pending a
+small, dedicated follow-up chunk.
+
+**Context:** Found while updating `PROGRESS.md` after `api.sequence` chunk 4 landed (2026-09-20) --
+re-reading `api.resource`'s own PROGRESS.md row for context surfaced the now-stale "has no TS port
+of any kind" framing.
