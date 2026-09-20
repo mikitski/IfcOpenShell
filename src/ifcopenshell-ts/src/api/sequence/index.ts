@@ -197,9 +197,14 @@
 // unconditional recompute; `recalculateSchedule`'s own `addNode` (and `duplicateTask`'s
 // own `copySequenceRelationship`) both call `ifc2datetime` on a `TimeLag.LagValue
 // .wrappedValue` with NO `is_a("IfcDuration")` vs. `"IfcRatioMeasure"` branch, unlike
-// `cascadeSchedule.ts`'s own careful branching -- a real bug, moot in this port since
-// nothing can ever populate a real `TimeLag` (both blocked by the primitive-layer gap
-// below); `recalculateSchedule`'s own cyclic-detection heuristic recalculates its
+// `cascadeSchedule.ts`'s own careful branching -- a real bug, ported verbatim. NOT merely
+// theoretical: while nothing in this port can CONSTRUCT a populated `TimeLag` (both
+// `assignLagTime`/`editLagTime` are blocked by the primitive-layer gap below), a
+// `TimeLag` already present on an `IfcRelSequence` loaded from a real, externally-
+// authored IFC4 file is genuinely reachable and would silently corrupt that task chain's
+// date computation (found by `/code-review`, corrected from this chunk's own initial,
+// too-narrow "moot in practice" framing -- see `recalculateSchedule.ts`'s own header
+// comment for the full writeup); `recalculateSchedule`'s own cyclic-detection heuristic recalculates its
 // worst-case-attempts bound only on the FORWARD pass, with no equivalent guard at all on
 // the backward pass (matching real Python exactly, not "fixed" to add one); two
 // genuinely dead local variables in `recalculateSchedule` (`forward_pass`'s own

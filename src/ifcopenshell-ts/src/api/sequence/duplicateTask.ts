@@ -140,12 +140,13 @@
 // an `IfcRatioMeasure` (a plain float, e.g. "150% of the predecessor's own duration").
 // `util/date.ts`'s own `ifc2datetime` treats a plain `number` input as an `IfcTimeStamp`
 // (epoch seconds) -- so a ratio-typed `LagValue` here would be silently misinterpreted as
-// a moment in time near the Unix epoch, not a ratio. Moot in practice: this whole branch
-// is reached only when `inverse.TimeLag` is truthy, and nothing in this port can ever
-// populate a real, valued `IfcLagTime.TimeLag` in the first place (`assignLagTime`,
-// chunk 1, is fully blocked -- see below), so this specific misinterpretation is
-// currently unreachable via any code path this port can construct. Disclosed for
-// completeness, matching `recalculateSchedule.ts`'s own identical finding.
+// a moment in time near the Unix epoch, not a ratio. NOT merely a theoretical concern:
+// "nothing in this port can CONSTRUCT a populated `IfcLagTime`" (true -- `assignLagTime`,
+// chunk 1, is fully blocked) does NOT mean this branch is unreachable -- `inverse.TimeLag`
+// here could equally be a value already present on an `IfcRelSequence` loaded from a
+// real, externally-authored IFC4 file (never round-tripped through this port's own
+// blocked write path). See `recalculateSchedule.ts`'s own header comment (corrected by
+// `/code-review`) for the fuller writeup of this same, genuinely reachable risk.
 //
 // --- `assignLagTime` call: FULLY BLOCKED (chunk 1's already-tracked primitive-layer
 //     gap), a further confirmed consequence -- ported faithfully, not guarded around ---

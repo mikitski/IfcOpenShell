@@ -83,6 +83,20 @@
 // (not "fixed" to branch like `cascadeSchedule.ts` does). See `duplicateTask.ts`'s own
 // header comment for the second, independent confirmed instance of this exact quirk.
 //
+// IMPORTANT (found by `/code-review`, corrects this section's own earlier "moot in
+// practice" framing): this is genuinely REACHABLE, not just a theoretical concern.
+// "Nothing in this port can CONSTRUCT a populated `IfcLagTime`" (true -- `assignLagTime`/
+// `editLagTime` are fully blocked) does NOT mean nothing can ever REACH one --
+// `recalculateSchedule` operates on whatever `IfcRelSequence.TimeLag` values are already
+// present in the file it's given, including one loaded from a real, externally-authored
+// IFC4 file (e.g. via `file.open`/`from_string`, never round-tripped through this port's
+// own blocked write path). A real-world file with a ratio-typed lag would silently
+// corrupt that task chain's entire forward-pass date computation (a near-1970 `lagTime
+// .days` instead of the intended ratio-based offset) -- a real, live risk for any
+// consumer that loads third-party `.ifc` files and calls `recalculateSchedule` on them,
+// not merely inert dead code. Ported verbatim anyway (matching real Python's own
+// identical bug), but disclosed accurately rather than dismissed as unreachable.
+//
 // --- Two unreachable `print("How did this happen?")` debug lines, ported as
 //     `console.log` -- reachable only if a real `IfcRelSequence.SequenceType` existed
 //     outside the 4 documented literals, which the schema itself forbids ---
