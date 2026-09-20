@@ -155,13 +155,96 @@
 // `IfcContext`-lookup-first bug (above) means `removeTask`/`removeWorkSchedule`
 // themselves still throw before ever reaching them on a real IFC2X3 call.
 //
-// Cumulative file count landed after this chunk: 36 of 40 (`add_date_time` + chunk 1's 9
-// + chunk 2's 12 + this chunk's 14).
+// Cumulative file count after chunk 3: 36 of 40 (`add_date_time` + chunk 1's 9 + chunk
+// 2's 12 + chunk 3's 14).
 //
-// Still pending for a future chunk 4 (deliberately out of scope for this chunk, per its
-// own brief): `duplicate_task`/`recalculate_schedule`/`copy_work_schedule`/
-// `create_baseline` -- these 4 files depend on each other and/or on this chunk's own
-// newly-landed files, forming the module's final dependency-closed batch.
+// --- Landed in chunk 4 (final 4 files) -- `api.sequence` is now FUNCTIONALLY COMPLETE,
+//     40/40 real files ---
+//
+// `duplicateTask` (ported FIRST, per this chunk's own dependency order --
+// `copyWorkSchedule`/`createBaseline` both have a REAL dependency on it),
+// `recalculateSchedule` (independent of the other 3 within this chunk; by far the
+// largest/most complex file in the whole module -- a hand-rolled forward-pass/
+// backward-pass Critical Path Method over the schedule's task graph, no graph library),
+// `copyWorkSchedule`, `createBaseline` (both real dependents of `duplicateTask`, ported
+// last). Cross-module dependencies (all already landed, verified directly against their
+// own TS source): `api.control.assignControl`, `api.nest.assignObject`/
+// `unassignObject`, `api.owner.createOwnerHistory`/`updateOwnerHistory`, `guid`,
+// `util.date.datetime2ifc`/`ifc2datetime`, `util.element.copy`/`copyDeep`,
+// `util.sequence.countWorkingDays`/`deriveCalendar`/`getRootTasks`/
+// `getSequenceAssignment`/`getStartOrFinishDate`/`offsetDate`. Same-module
+// dependencies: `duplicateTask` on this SAME chunk's own already-landed
+// `assignSequence`/`assignLagTime` (chunk 3/chunk 1 respectively); `recalculateSchedule`
+// on chunk 3's own `editTaskTime`; `copyWorkSchedule`/`createBaseline` on this chunk's
+// own `duplicateTask` and (`createBaseline` only) chunk 1's `addWorkSchedule`.
+//
+// Several real, disclosed Python-source quirks/findings, ported verbatim -- see each
+// file's own header comment for the full writeup: `duplicateTask`'s own generic
+// by-index attribute scan uses two genuinely DIFFERENT (not buggy) strategies depending
+// on the matched attribute's cardinality -- a single-valued match clones `inverse`
+// (every attribute, not just the matched one) and redirects just that one attribute to
+// the duplicate, which is genuinely wired into the graph via that attribute value even
+// though no variable keeps a reference to the clone afterward; a list-valued match
+// instead appends the duplicate into the SAME existing list on the ORIGINAL, avoiding a
+// redundant clone where the attribute can hold more than one value -- an earlier pass of
+// this same investigation initially misread the first case as an "orphaned copy" bug
+// before tracing it through fully and correcting that; `duplicateTask`'s own
+// `createObjectReference` is a CONFIRMED,
+// PROVABLY DEAD method (never called anywhere in the class) -- a near-verbatim copy of
+// `createBaseline`'s own `createBaselineReference`, which IS genuinely live/called
+// there; `duplicateTask`'s `copySequenceRelationship` has a provably inert
+// `relatingProcess`/`relatedProcess` initial assignment, always overwritten by a later
+// unconditional recompute; `recalculateSchedule`'s own `addNode` (and `duplicateTask`'s
+// own `copySequenceRelationship`) both call `ifc2datetime` on a `TimeLag.LagValue
+// .wrappedValue` with NO `is_a("IfcDuration")` vs. `"IfcRatioMeasure"` branch, unlike
+// `cascadeSchedule.ts`'s own careful branching -- a real bug, ported verbatim. NOT merely
+// theoretical: while nothing in this port can CONSTRUCT a populated `TimeLag` (both
+// `assignLagTime`/`editLagTime` are blocked by the primitive-layer gap below), a
+// `TimeLag` already present on an `IfcRelSequence` loaded from a real, externally-
+// authored IFC4 file is genuinely reachable and would silently corrupt that task chain's
+// date computation (found by `/code-review`, corrected from this chunk's own initial,
+// too-narrow "moot in practice" framing -- see `recalculateSchedule.ts`'s own header
+// comment for the full writeup); `recalculateSchedule`'s own cyclic-detection heuristic recalculates its
+// worst-case-attempts bound only on the FORWARD pass, with no equivalent guard at all on
+// the backward pass (matching real Python exactly, not "fixed" to add one); two
+// genuinely dead local variables in `recalculateSchedule` (`forward_pass`'s own
+// `successors`, `backward_pass`'s own `predecessors`) are omitted, confirmed inert by
+// re-reading both full function bodies; `createBaseline`'s own name-fallback
+// (`name or work_schedule.Name`) needed a small, disclosed workaround around chunk 1's
+// own `addWorkSchedule.ts` interface, which has no way to distinguish "name omitted,
+// use the 'Unnamed' default" from "explicitly falsy, keep it `null`" -- corrected via a
+// direct `.set("Name", null)` after the call rather than widening that sibling's
+// interface. `duplicateTask`'s own `assignLagTime` call (inherited from chunk 1) and
+// `recalculateSchedule`'s own `TimeLag`-reading step remain subject to the already-
+// tracked `TODOS.md` standalone-valued-simple-type-construction gap -- READS of an
+// existing `TimeLag` are unaffected (not blocked), only CONSTRUCTING a new one is, and
+// nothing in this port can do that, so these paths are untestable end-to-end (disclosed
+// in each file's own header comment, not silently skipped).
+//
+// Schema findings: `createBaseline` throws EARLIER on IFC2X3 than its own documented
+// `ValueError` -- `IfcWorkSchedule.PredefinedType` doesn't exist there at all (confirmed
+// against `ifc2x3.d.ts`, matching chunk 1's own finding), so `.get("PredefinedType")`
+// itself throws an undeclared-attribute error first; IFC4X3 has an identical
+// `PredefinedType` shape to IFC4, so `createBaseline` is IFC4/IFC4X3-only in practice
+// (matching real Python's own IFC4-only test file). `duplicateTask`/`copyWorkSchedule`
+// have no schema-specific logic of their own and are exercised across all 3 schemas
+// (real Python's own `test_copy_work_schedule.py` has explicit IFC2X3/IFC4X3
+// subclasses); `recalculateSchedule` is IFC4+-only in practice (`IfcTaskTime` doesn't
+// exist on IFC2X3), matching `cascadeSchedule`'s own already-disclosed finding and real
+// Python's own IFC4-only test file.
+//
+// Test coverage: real Python tests exist for `recalculateSchedule`
+// (`test_recalculate_schedule.py`, 9 cases -- this CORRECTS an earlier, outdated claim
+// that no such test existed; ported below, ~unmodified for 7 of 9 cases, 2 lag-dependent
+// cases adapted since `assignLagTime` remains fully blocked) and `copyWorkSchedule`/
+// `createBaseline` (`test_copy_work_schedule.py`/`test_create_baseline.py`, ported
+// verbatim, the latter's own IFC4-only scope widened to IFC4X3 too); `duplicateTask` has
+// no real Python test at all (confirmed by listing `test/api/sequence/`), so its own
+// coverage is written directly from source, including dedicated pins for the disclosed
+// orphan-copy bug and dead-method finding above.
+//
+// `api.sequence` is now FUNCTIONALLY COMPLETE: all 40 real files from
+// `src/ifcopenshell-python/ifcopenshell/api/sequence/` are ported.
 export { addDateTime } from "./addDateTime";
 export type { AddDateTimeSettings } from "./addDateTime";
 export { addTask } from "./addTask";
@@ -197,6 +280,12 @@ export { calculateTaskDuration } from "./calculateTaskDuration";
 export type { CalculateTaskDurationSettings } from "./calculateTaskDuration";
 export { cascadeSchedule } from "./cascadeSchedule";
 export type { CascadeScheduleSettings } from "./cascadeSchedule";
+export { copyWorkSchedule } from "./copyWorkSchedule";
+export type { CopyWorkScheduleSettings } from "./copyWorkSchedule";
+export { createBaseline } from "./createBaseline";
+export type { CreateBaselineSettings } from "./createBaseline";
+export { duplicateTask } from "./duplicateTask";
+export type { DuplicateTaskResult, DuplicateTaskSettings } from "./duplicateTask";
 export { editLagTime } from "./editLagTime";
 export type { EditLagTimeSettings } from "./editLagTime";
 export { editRecurrencePattern } from "./editRecurrencePattern";
@@ -215,6 +304,8 @@ export { editWorkSchedule } from "./editWorkSchedule";
 export type { EditWorkScheduleSettings } from "./editWorkSchedule";
 export { editWorkTime } from "./editWorkTime";
 export type { EditWorkTimeSettings } from "./editWorkTime";
+export { recalculateSchedule } from "./recalculateSchedule";
+export type { RecalculateScheduleSettings } from "./recalculateSchedule";
 export { removeTask } from "./removeTask";
 export type { RemoveTaskSettings } from "./removeTask";
 export { removeTimePeriod } from "./removeTimePeriod";
