@@ -93,23 +93,83 @@
 // propagation instead (JS has no divide-by-zero exception) -- a disclosed, narrow
 // failure-mode divergence.
 //
-// Cumulative file count landed after this chunk: 22 of 40 (`add_date_time` + chunk 1's 9
-// + this chunk's 12).
+// --- Landed in chunk 3 (14 more files) ---
 //
-// Still pending for future chunks: the remaining 18 real files (`add_time_period`/
-// `assign_recurrence_pattern`/`assign_sequence`/`cascade_schedule`/`copy_work_schedule`/
-// `create_baseline`/`duplicate_task`/`edit_lag_time`/`edit_recurrence_pattern`/
-// `edit_sequence`/`edit_task_time`/`recalculate_schedule`/`remove_task`/
-// `remove_work_calendar`/`remove_work_schedule`/`remove_work_time`/`unassign_lag_time`/
-// `unassign_sequence`), several of which depend on the already-landed `util.sequence`
-// module (see `../../util/sequence.ts`'s own header comment) that neither chunk 1 nor
-// chunk 2 needed.
+// `cascadeSchedule` (ported FIRST within this chunk -- zero same-batch dependencies, and
+// 5 other files in this chunk call it for real: `assignSequence`/`editLagTime`/
+// `editSequence`/`unassignLagTime`/`unassignSequence`), `removeWorkTime` (ported before
+// `removeWorkCalendar`, which really calls it), `addTimePeriod`/
+// `assignRecurrencePattern`/`editRecurrencePattern` (zero same-batch dependencies),
+// `assignSequence` (a deliberate, disclosed `(RelatingProcess, SequenceType)`-pair match
+// rule -- see that file's own header comment), `editLagTime`/`editSequence`/
+// `unassignLagTime`/`unassignSequence` (all real `cascadeSchedule` callers),
+// `editTaskTime` (a real `Usecase` class; also a real, non-`api.sequence` dependency on
+// `api.resource.calculateResourceUsage`), `removeTask` (self-recursive; a real,
+// confirmed Python source bug -- a duplicated, provably unreachable
+// `IfcRelAssignsToProcess` branch, preserved verbatim), `removeWorkCalendar` (really
+// calls `removeWorkTime`), `removeWorkSchedule` (self-recursive; really calls
+// `removeTask`). Every one of these 14 files' own real (non-docstring) `ifcopenshell.
+// api.sequence.X(...)` references was independently verified against the chunk brief's
+// own pre-derived dependency map, not re-derived from scratch. Cross-module
+// dependencies (all already landed, verified directly against their own TS source):
+// `api.aggregate.unassignObject`, `api.control.unassignControl`, `api.nest.
+// unassignObject`, `api.project.unassignDeclaration`, `api.pset.removePset`, `api.
+// resource.calculateResourceUsage`, `guid`, `util.constraint.isAttributeLocked`, `util.
+// date.datetime2ifc`/`ifc2datetime`/`parseIsoDatetime`, `util.element.removeDeep2`,
+// `util.sequence.deriveCalendar`/`getSequenceAssignment`/`getSoonestWorkingDay`/
+// `getStartOrFinishDate`/`getTaskResources`/`isWorkingDay`/`offsetDate`.
+//
+// Several real, disclosed Python-source quirks/bugs, ported verbatim -- see each file's
+// own header comment for the full writeup: `assignSequence` deliberately matches an
+// existing `IfcRelSequence` on `(RelatingProcess, SequenceType)`, not just the pair (a
+// "ladder" relationship may legitimately have more than one sequence type between the
+// same two tasks); `removeTask` has a duplicated, provably unreachable
+// `IfcRelAssignsToProcess` `elif` branch (a genuine copy-paste bug); `unassignLagTime`
+// calls `file.getTotalInverses` on a possibly-`null` `TimeLag` with no truthiness guard;
+// `unassignSequence`'s optional `sequenceType` parameter is a genuinely later real-source
+// addition (its own docstring cross-references `assignSequence`'s own "ladder"
+// disclosure); `removeWorkPlan`/`removeWorkCalendar`/`removeWorkSchedule` all lack an
+// IFC2X3 guard before their own unconditional `file.byType("IfcContext")[0]` call
+// (`removeWorkPlan` already disclosed this in chunk 2; `removeWorkCalendar`/
+// `removeWorkSchedule` are the same finding, confirmed independently for this chunk).
+// `editLagTime`'s `LagValue`-editing branch and `assignLagTime` (chunk 1) are BOTH fully
+// blocked by the already-tracked `TODOS.md` standalone-valued-simple-type-construction
+// gap -- `editLagTime`'s 16th independent confirmed consequence of that same gap, the
+// 15th being `assignLagTime`'s own (chunk 1). `addTimePeriod`/`editRecurrencePattern`
+// both call `ifcopenshell.util.sequence.is_working_day`/`is_calendar_applicable
+// .cache_clear()` in real Python, which `util/sequence.ts`'s own header comment (finding
+// #9) already anticipated as a no-op in this port (no memoization implemented) --
+// confirmed, not a new finding.
+//
+// Schema-specific findings (consistent with this module's own chunk 1/2 findings):
+// `IfcLagTime`/`IfcRecurrencePattern`/`IfcTimePeriod`/`IfcTaskTime`/`IfcWorkTime`/
+// `IfcWorkCalendar` do NOT exist on IFC2X3 at all (confirmed against the generated
+// `.d.ts`s); `IfcRelSequence` DOES exist on all 3 schemas, but IFC2X3's own `TimeLag`
+// attribute is typed a plain `number`/`IfcTimeMeasure`, not an `IfcLagTime` entity
+// reference (confirmed against `ifc2x3.d.ts` directly -- a genuine, disclosed schema-
+// shape difference, moot for `assignSequence`/`unassignSequence` since neither populates
+// `TimeLag`); `IfcRelAssignsToControl`/`IfcRelAssignsToProcess`/`IfcRelAssignsToProduct`/
+// `IfcRelAssignsToObject`/`IfcRelDefinesByObject`/`IfcRelDefinesByProperties`/`IfcTask`
+// all exist on IFC2X3 (used by `removeTask`/`removeWorkSchedule`'s own inverse-cleanup
+// loops), so those loops' own branches are reachable there even though this chunk's
+// `IfcContext`-lookup-first bug (above) means `removeTask`/`removeWorkSchedule`
+// themselves still throw before ever reaching them on a real IFC2X3 call.
+//
+// Cumulative file count landed after this chunk: 36 of 40 (`add_date_time` + chunk 1's 9
+// + chunk 2's 12 + this chunk's 14).
+//
+// Still pending for a future chunk 4 (deliberately out of scope for this chunk, per its
+// own brief): `duplicate_task`/`recalculate_schedule`/`copy_work_schedule`/
+// `create_baseline` -- these 4 files depend on each other and/or on this chunk's own
+// newly-landed files, forming the module's final dependency-closed batch.
 export { addDateTime } from "./addDateTime";
 export type { AddDateTimeSettings } from "./addDateTime";
 export { addTask } from "./addTask";
 export type { AddTaskSettings } from "./addTask";
 export { addTaskTime } from "./addTaskTime";
 export type { AddTaskTimeSettings } from "./addTaskTime";
+export { addTimePeriod } from "./addTimePeriod";
+export type { AddTimePeriodSettings } from "./addTimePeriod";
 export { addWorkCalendar } from "./addWorkCalendar";
 export type { AddWorkCalendarSettings } from "./addWorkCalendar";
 export { addWorkPlan } from "./addWorkPlan";
@@ -124,12 +184,29 @@ export { assignProcess } from "./assignProcess";
 export type { AssignProcessSettings } from "./assignProcess";
 export { assignProduct } from "./assignProduct";
 export type { AssignProductSettings } from "./assignProduct";
+export { assignRecurrencePattern } from "./assignRecurrencePattern";
+export type {
+	AssignRecurrencePatternSettings,
+	RecurrenceType,
+} from "./assignRecurrencePattern";
+export { assignSequence } from "./assignSequence";
+export type { AssignSequenceSettings } from "./assignSequence";
 export { assignWorkPlan } from "./assignWorkPlan";
 export type { AssignWorkPlanSettings } from "./assignWorkPlan";
 export { calculateTaskDuration } from "./calculateTaskDuration";
 export type { CalculateTaskDurationSettings } from "./calculateTaskDuration";
+export { cascadeSchedule } from "./cascadeSchedule";
+export type { CascadeScheduleSettings } from "./cascadeSchedule";
+export { editLagTime } from "./editLagTime";
+export type { EditLagTimeSettings } from "./editLagTime";
+export { editRecurrencePattern } from "./editRecurrencePattern";
+export type { EditRecurrencePatternSettings } from "./editRecurrencePattern";
+export { editSequence } from "./editSequence";
+export type { EditSequenceSettings } from "./editSequence";
 export { editTask } from "./editTask";
 export type { EditTaskSettings } from "./editTask";
+export { editTaskTime } from "./editTaskTime";
+export type { EditTaskTimeSettings } from "./editTaskTime";
 export { editWorkCalendar } from "./editWorkCalendar";
 export type { EditWorkCalendarSettings } from "./editWorkCalendar";
 export { editWorkPlan } from "./editWorkPlan";
@@ -138,13 +215,25 @@ export { editWorkSchedule } from "./editWorkSchedule";
 export type { EditWorkScheduleSettings } from "./editWorkSchedule";
 export { editWorkTime } from "./editWorkTime";
 export type { EditWorkTimeSettings } from "./editWorkTime";
+export { removeTask } from "./removeTask";
+export type { RemoveTaskSettings } from "./removeTask";
 export { removeTimePeriod } from "./removeTimePeriod";
 export type { RemoveTimePeriodSettings } from "./removeTimePeriod";
+export { removeWorkCalendar } from "./removeWorkCalendar";
+export type { RemoveWorkCalendarSettings } from "./removeWorkCalendar";
 export { removeWorkPlan } from "./removeWorkPlan";
 export type { RemoveWorkPlanSettings } from "./removeWorkPlan";
+export { removeWorkSchedule } from "./removeWorkSchedule";
+export type { RemoveWorkScheduleSettings } from "./removeWorkSchedule";
+export { removeWorkTime } from "./removeWorkTime";
+export type { RemoveWorkTimeSettings } from "./removeWorkTime";
+export { unassignLagTime } from "./unassignLagTime";
+export type { UnassignLagTimeSettings } from "./unassignLagTime";
 export { unassignProcess } from "./unassignProcess";
 export type { UnassignProcessSettings } from "./unassignProcess";
 export { unassignProduct } from "./unassignProduct";
 export type { UnassignProductSettings } from "./unassignProduct";
 export { unassignRecurrencePattern } from "./unassignRecurrencePattern";
 export type { UnassignRecurrencePatternSettings } from "./unassignRecurrencePattern";
+export { unassignSequence } from "./unassignSequence";
+export type { UnassignSequenceSettings } from "./unassignSequence";
