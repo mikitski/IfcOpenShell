@@ -246,9 +246,15 @@ needs one of these before the others.
 ## Phase 9 — `api` Tier 4, non-kernel parts
 
 Per `research/02`'s Tier 4, split as it recommends: `geometry`'s **relationship-CRUD** functions
-(`add_representation`, `assign_representation`, `remove_representation`, `map_representation`,
+(`assign_representation`, `remove_representation`, `map_representation`,
 boolean/clip operations that manipulate the entity graph, `edit_object_placement`, wall-connection
-bookkeeping) — port now. Its **parametric shape-builder** functions
+bookkeeping) — port now. **Correction (found by the Phase 10 parity audit, 2026-09-20):**
+`add_representation.py` does NOT belong in this list — it's a Blender-mesh-to-IFC-representation
+authoring tool (1,045 lines, imports `bpy`/`bmesh`/`mathutils`/`bonsai.tool` throughout, takes a
+`blender_object: bpy.types.Object` parameter), not entity-graph CRUD, and is permanently out of
+scope for this Node-only port. The actual implementation already got this right (see
+`PROGRESS.md`'s `api.geometry` "module complete" row) — only this roadmap line's own text was
+wrong. Its **parametric shape-builder** functions
 (`add_wall_representation`, `add_door_representation`, `add_window_representation`,
 `add_railing_representation`, `create_2pt_wall`, `regenerate_wall_representation`) are real
 CAD-math ports (numpy → TS vector math) but don't touch the kernel — port in this phase too, using

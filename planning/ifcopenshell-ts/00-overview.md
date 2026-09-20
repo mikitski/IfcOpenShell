@@ -92,3 +92,10 @@ for the proposed internal package layout, native-addon build wiring, and CI inte
 - `ifcopenshell.stream` / `ifcopenshell.sql` alternate backends — see `10-architecture.md` for
   whether/when these get a TS equivalent; not required for v1 parity of the *primary* in-memory
   `file` object, which is the thing "full parity" is measured against.
+- Dev-tooling scripts under `ifcopenshell/util/scripts/` (`sync_stub.py`/`validate_stub.py`, SWIG
+  `.pyi`-stub maintenance) and `ifcopenshell/util/generate_pset_templates.py` /
+  `ifc4x3dev_scrape_data_for_docs.py` (external-repo-dependent, dev-time data-regeneration tooling)
+  — none has a TS/N-API analog, and each one's own *output* data is already present in this port as
+  a static asset (`data/pset-templates`, `data/doc`, etc.), so the tooling itself is not a porting
+  target. Confirmed correctly descoped by the Phase 10 parity audit (`PROGRESS.md`, 2026-09-20) —
+  noted here explicitly so a future audit doesn't re-flag them.
