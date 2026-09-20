@@ -3472,3 +3472,40 @@ small, dedicated follow-up chunk.
 **Context:** Found while updating `PROGRESS.md` after `api.sequence` chunk 4 landed (2026-09-20) --
 re-reading `api.resource`'s own PROGRESS.md row for context surfaced the now-stale "has no TS port
 of any kind" framing.
+
+### `enumeration_type::enumeration_items()` never bound -- `util.attribute.getEnumItems` has no forward enum-item-name lookup, and `util.fm.getFmhemClasses` is unconditionally blocked by it
+
+**What:** `util/attribute.ts`'s `getEnumItems` is a pre-existing, disclosed throwing stub (landed
+with the `util.schema` chunk, well before `util.fm` existed): the C++ core's real
+`enumeration_type::enumeration_items()` accessor (a *forward* lookup -- "give me every value name
+this enumeration declares") has no N-API binding anywhere on this primitive surface. Confirmed
+again, not just trusted from that file's own comment: neither the TS `enumeration_type` class
+(only `lookup_enum_offset(value_name)` -- a *reverse*, single-value lookup -- is bound) nor the
+generated C API header exposes a forward-listing primitive. This gap previously had no dedicated
+top-level `TODOS.md` entry of its own -- it was only disclosed inline in `attribute.ts`'s/
+`attribute.test.ts`'s own comments, with no other real caller anywhere in the port until now.
+
+**New consequence found by this chunk (`util.fm`, Phase 10):** `ifcopenshell/util/fm.py`'s
+`get_fmhem_classes` calls `ifcopenshell.util.attribute.get_enum_items(attribute)` for every real
+`PredefinedType` attribute it finds while walking `fmhem_classes_ifc4`/`fmhem_classes_ifc2x3` and
+all of their real, non-abstract, non-excluded subtypes -- every one of those real classes declares
+a `PredefinedType` attribute, so `util/fm.ts`'s ported `getFmhemClasses` throws this same clear,
+disclosed error for EVERY real schema/class combination (`"IFC4"` and `"IFC2X3"` alike) -- pinned
+by dedicated regression tests in `test/util/fm.test.ts`. Ported completely and faithfully up to and
+including the exact `getEnumItems` call, not proactively guarded/stubbed around.
+
+**Fix:** Add a real N-API binding for `enumeration_type::enumeration_items()` (a C++-side native
+primitive addition, needs a `cmake`/C++ toolchain this sandbox doesn't have) returning the
+enumeration's declared value names in order; `getEnumItems` and `getFmhemClasses` both then become
+fully functional with no TS-side logic changes needed.
+
+**Context:** `getEnumItems`'s own throwing behavior and root cause were fully disclosed and tested
+when `util/schema.ts`/`util/attribute.ts` landed; this entry exists because `util.fm`'s own chunk
+(Phase 10, "Niche `util` modules") is the first real, production caller to actually reach it
+outside `attribute.ts`'s own unit tests, and no top-level `TODOS.md` entry named this specific gap
+before now.
+
+**Depends on / blocked by:** Same `cmake`/C++ toolchain constraint as every other native-primitive-
+layer entry in this file. Does not block anything else in `util/fm.ts` -- `getCobieTypes`/
+`getCobieComponents`/`getFmhemTypes` (the other 3 functions in that module) have no dependency on
+this gap at all and are fully functional today.
