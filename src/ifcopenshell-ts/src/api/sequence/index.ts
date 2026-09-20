@@ -55,12 +55,55 @@
 // the moment an IFC2X3-absent class/attribute is touched, matching real Python's own
 // unguarded behavior exactly, per each file's own header comment.
 //
-// Still pending for future chunks: the remaining ~30 real files (`assign_recurrence_
-// pattern`/`assign_sequence`/`assign_work_plan`/`calculate_task_duration`/
-// `cascade_schedule`/`copy_work_schedule`/`create_baseline`/`duplicate_task`/every
-// `edit_*`/`remove_*`/`unassign_*` file/`recalculate_schedule`), several of which depend
-// on the already-landed `util.sequence` module (see `../../util/sequence.ts`'s own
-// header comment) that this chunk's own 9 files did NOT need.
+// --- Landed in chunk 2 (12 more files, ~800 lines) ---
+//
+// `assignWorkPlan` (aggregates an `IfcWorkSchedule` under an `IfcWorkPlan`),
+// `calculateTaskDuration` (a real `Usecase` class -- computes a task's duration
+// parametrically from its resources' `ScheduleWork`/`ScheduleUsage`), `editTask`/
+// `editWorkCalendar`/`editWorkPlan`/`editWorkSchedule`/`editWorkTime` (attribute-setter
+// loops, the latter three with date/duration-string conversion via `util.date.
+// datetime2ifc`), `removeTimePeriod`/`removeWorkPlan`, `unassignProcess`/
+// `unassignProduct` (the inverses of chunk 1's own `assignProcess`/`assignProduct`), and
+// `unassignRecurrencePattern`. Every one of these 12 files' own real (non-docstring)
+// `ifcopenshell.api.sequence.X(...)` references were independently verified to be either
+// absent, or -- `calculate_task_duration`'s own real call to `add_task_time` inside
+// `set_task_duration` -- an already-landed chunk 1 dependency; no dependency of any kind
+// on any other still-unported sibling file within this module. Cross-module
+// dependencies (all already landed, verified directly against their own TS source):
+// `api.aggregate.assignObject`/`unassignObject`, `api.owner.updateOwnerHistory`,
+// `api.project.unassignDeclaration`, `util.date.datetime2ifc`/`ifc2datetime`,
+// `util.element.getPsets`/`removeDeep2`.
+//
+// Several real, disclosed Python-source quirks/bugs, ported verbatim -- see each file's
+// own header comment for the full writeup: `assignWorkPlan`/`removeWorkPlan` both have
+// NO `file.schema != "IFC2X3"` guard at all (unlike their own sibling `addWorkPlan`/
+// `addWorkSchedule`), so both throw unconditionally on IFC2X3 (`file.byType
+// ("IfcContext")` itself raises, since IFC2X3 has no `IfcContext` class); `editWorkPlan`/
+// `editWorkSchedule` both throw on IFC2X3 specifically when editing `Duration`/
+// `TotalFloat` with a truthy value (a genuine schema type mismatch -- `IfcTimeMeasure`/
+// number on IFC2X3 vs. `IfcDuration`/string on IFC4+ for those two attributes only, no
+// schema-aware branching in real Python); `editWorkTime` has no `if value:` truthy guard
+// before its `Start`/`Finish` date conversion, unlike its `editWorkPlan`/
+// `editWorkSchedule` siblings (harmless in practice, since `datetime2ifc(null, ...)`
+// safely returns `null`); `calculateTaskDuration`'s own `get_work_schedule` nested
+// helper only ever inspects the FIRST `Nests` entry (a literal, non-"corrected" reading
+// of a real Python `for ...: return ...` loop body); `calculateTaskDuration` can
+// silently divide by a `0` "seconds per workday" for a whole-day `WorkDayDuration`
+// (e.g. `"P1D"`) -- a real Python `ZeroDivisionError`, ported as silent `NaN`/`Infinity`
+// propagation instead (JS has no divide-by-zero exception) -- a disclosed, narrow
+// failure-mode divergence.
+//
+// Cumulative file count landed after this chunk: 22 of 40 (`add_date_time` + chunk 1's 9
+// + this chunk's 12).
+//
+// Still pending for future chunks: the remaining 18 real files (`add_time_period`/
+// `assign_recurrence_pattern`/`assign_sequence`/`cascade_schedule`/`copy_work_schedule`/
+// `create_baseline`/`duplicate_task`/`edit_lag_time`/`edit_recurrence_pattern`/
+// `edit_sequence`/`edit_task_time`/`recalculate_schedule`/`remove_task`/
+// `remove_work_calendar`/`remove_work_schedule`/`remove_work_time`/`unassign_lag_time`/
+// `unassign_sequence`), several of which depend on the already-landed `util.sequence`
+// module (see `../../util/sequence.ts`'s own header comment) that neither chunk 1 nor
+// chunk 2 needed.
 export { addDateTime } from "./addDateTime";
 export type { AddDateTimeSettings } from "./addDateTime";
 export { addTask } from "./addTask";
@@ -81,3 +124,27 @@ export { assignProcess } from "./assignProcess";
 export type { AssignProcessSettings } from "./assignProcess";
 export { assignProduct } from "./assignProduct";
 export type { AssignProductSettings } from "./assignProduct";
+export { assignWorkPlan } from "./assignWorkPlan";
+export type { AssignWorkPlanSettings } from "./assignWorkPlan";
+export { calculateTaskDuration } from "./calculateTaskDuration";
+export type { CalculateTaskDurationSettings } from "./calculateTaskDuration";
+export { editTask } from "./editTask";
+export type { EditTaskSettings } from "./editTask";
+export { editWorkCalendar } from "./editWorkCalendar";
+export type { EditWorkCalendarSettings } from "./editWorkCalendar";
+export { editWorkPlan } from "./editWorkPlan";
+export type { EditWorkPlanSettings } from "./editWorkPlan";
+export { editWorkSchedule } from "./editWorkSchedule";
+export type { EditWorkScheduleSettings } from "./editWorkSchedule";
+export { editWorkTime } from "./editWorkTime";
+export type { EditWorkTimeSettings } from "./editWorkTime";
+export { removeTimePeriod } from "./removeTimePeriod";
+export type { RemoveTimePeriodSettings } from "./removeTimePeriod";
+export { removeWorkPlan } from "./removeWorkPlan";
+export type { RemoveWorkPlanSettings } from "./removeWorkPlan";
+export { unassignProcess } from "./unassignProcess";
+export type { UnassignProcessSettings } from "./unassignProcess";
+export { unassignProduct } from "./unassignProduct";
+export type { UnassignProductSettings } from "./unassignProduct";
+export { unassignRecurrencePattern } from "./unassignRecurrencePattern";
+export type { UnassignRecurrencePatternSettings } from "./unassignRecurrencePattern";

@@ -3374,3 +3374,75 @@ time, by chunk 7's own new `_addSegmentToCurve`/`_addSegmentToLayout` (both disc
 header comments and in `./index.ts`'s own header comment; not given their own new dedicated entries
 here, since this is the SAME already-tracked gap, not a new category -- matching chunk 6's own
 `.Dim`-gap-occurrence precedent for not duplicating an existing entry).
+
+---
+
+### Native primitive-layer gap: `EntityInstance.set()` performs no declared-attribute-type validation at all, unlike real Python's SWIG binding
+
+**What:** Real Python's `entity_instance.__setattr__` validates a value against the attribute's
+own declared EXPRESS type before writing it -- assigning a plain string into a `number`-typed
+attribute (an `IfcTimeMeasure`/`IfcReal`/etc.), or into an entity-select-typed one (e.g. IFC2X3's
+`IfcDateAndTime`-shaped `CreationDate`), raises a real `TypeError` in real Python. This port's own
+`EntityInstance.set()` does NOT perform any equivalent check -- confirmed empirically (a disposable
+trace script against a real built native addon, not assumed by symmetry with real Python) for both
+a plain numeric-measure-typed attribute (`IfcWorkPlan.Duration` on IFC2X3, declared `IfcTimeMeasure`/
+`number`, silently accepts and stores a string like `"P1D"` with no coercion or error) and an
+entity-select-typed one (`IfcWorkPlan.CreationDate` on IFC2X3, declared a real
+`IfcDateAndTime`/`IfcCalendarDate`/`IfcLocalTime` union, silently accepts and stores a plain ISO
+string). `.get()` on the same attribute afterward returns exactly the wrongly-typed value back,
+unchanged -- no silent coercion either, just no validation at all.
+
+**Why this matters, concretely:** any `api.*` usecase (already-shipped or future) that assumed --
+without independently, empirically verifying it -- that this port's own `.set()` would reject a
+type mismatch "the same way real Python's SWIG binding does" is basing a disclosed-bug write-up on
+a false premise. Confirmed, concrete instances found so far: `api.sequence.editWorkPlan`/
+`editWorkSchedule`'s own `Duration`/`TotalFloat`-on-IFC2X3 branch (see those files' own header
+comments) -- an earlier, unverified pass of those two files assumed this port's `.set()` would
+throw here "the same as real Python", matching real Python's own genuine IFC2X3 schema-mismatch bug
+for those two attributes; verifying it directly (rather than trusting the plausible-sounding
+assumption) showed it does NOT throw at all in this port, a DIFFERENT (arguably worse -- a silently
+wrongly-typed value ends up written into the file) divergence from real Python than "the same bug
+faithfully reproduced". **Every previously-shipped or future chunk's own disclosed-bug write-up
+that claims "`.set()` throws here, matching/reproducing a real Python type-mismatch bug" should be
+treated as a suspect for this exact same false-premise error until independently re-verified**
+(empirically, against a real built addon -- not re-derived from real Python's own behavior by
+assumed symmetry) -- not confirmed wrong everywhere it appears, but not yet checked either.
+
+**Root cause:** Not investigated at the native-shim/C++ level (would need reading
+`attribute_value_shim.cpp`'s own `set_attribute_value_variant` dispatch in detail, the same file
+already implicated in this document's own "stale inverse-index entry" entry above, to determine
+whether type-checking was simply never implemented there, or is present but has its own separate
+bug) -- flagged here as an empirically-confirmed BEHAVIOR gap, with the exact root cause left for
+whoever picks up a native-layer fix (this sandbox has no `cmake`/C++ toolchain to investigate or
+fix this further, the same long-standing, repeatedly-disclosed constraint noted throughout this
+file's other entries).
+
+**Fix:** Either (a) add real declared-type validation to `set_attribute_value_variant` (or
+wherever the N-API shim currently just writes through unconditionally), matching real Python's own
+SWIG-binding behavior generally -- the more faithful, but more invasive, fix, likely to surface
+MANY previously-passing tests that unknowingly relied on the current permissive behavior and would
+need re-auditing; or (b) leave native behavior as-is (permissive) and instead audit/correct every
+existing "this throws, matching real Python" disclosure across the whole port that hasn't been
+independently, empirically re-verified against this exact finding, replacing each with an accurate
+"real Python throws here; this port's own `.set()` doesn't validate types at all, so it silently
+writes the wrongly-typed value instead" write-up (the approach taken for `editWorkPlan.ts`/
+`editWorkSchedule.ts`, the 2 confirmed instances so far). No irreversible decision needed now --
+either fix is compatible with what's already shipped, and (b) is strictly the lower-risk near-term
+action given the C++-toolchain constraint above.
+
+**Context:** Found while independently re-verifying `api.sequence` chunk 2's own disclosed-bug
+claims for `editWorkPlan`/`editWorkSchedule` (2026-09-20) -- both files' own header comments
+asserted "this port's `EntityInstance.set` does the same [type validation as real Python's SWIG
+binding]" without having actually run the assertion against a real built addon; two dedicated
+regression tests failed as a direct result (`editWorkPlan.test.ts`'s/`editWorkSchedule.test.ts`'s
+own `expect(() => ...).toThrow()` assertions for the IFC2X3 `Duration`/`TotalFloat`/`CreationDate`
+cases), which is what surfaced the false premise. Verified directly via a disposable Node/vitest
+trace script exercising `.set()` on both a plain-measure-typed and an entity-select-typed IFC2X3
+attribute, not assumed from the test failures alone.
+
+**Depends on / blocked by:** Nothing blocks other work landing -- this is a disclosure-accuracy
+fix, not a functional blocker; every affected file's own PRODUCTION logic (the actual attribute-
+conversion/writing behavior) is unaffected and already correct, only the accompanying doc comments
+and test expectations needed correcting. A native-layer fix (option (a) above) would need a real
+`cmake` build environment to implement and verify, same as this file's other native-primitive-layer
+entries.
