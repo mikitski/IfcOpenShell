@@ -71,6 +71,8 @@ for the proposed internal package layout, native-addon build wiring, and CI inte
 - `30-open-questions.md` — decisions still needed before/through `plan-eng-review`.
 - `40-testing-strategy.md` — TS test suite design mirroring `research/05`.
 - `50-repo-and-tooling.md` — package layout, build, lint, CI, versioning, publishing.
+- `60-orchestration-spec.md` — the dispatch → review → CI → merge → docs-update loop this project's
+  implementation actually runs on, and the escalation/publish-gate policies around it.
 
 ## 6. Non-goals for v1 (explicitly out of scope, revisit later)
 

@@ -292,13 +292,20 @@ yet acted on): coordinate with upstream maintainers early (an issue/discussion, 
 surprise PR) rather than after Phase 3+ is far along — user said to hold off on drafting that for
 now and keep porting.
 
-## Operational note: worktree isolation workaround
+## Operational note: worktree isolation
 
-The Agent tool's built-in `isolation: "worktree"` fails in this sandbox (`EPERM` creating `.claude/`
-inside this repo — confirmed not transient, reported as a product bug). Workaround in use for every
-chunk: the orchestrating session manually runs `git worktree add -b <branch> <scratch-path> v0.9.0`
-first, then dispatches the agent with no `isolation` param, instructed to `cd` into that pre-made
-path as its first step. Branch naming convention: `ts/phase-<n>-<slug>`.
+**Update 2026-09-20**: the Agent tool's built-in `isolation: "worktree"` now works (confirmed
+working for the `api.sequence` chunk 2 dispatch, PR #137 — it created its own
+`.claude/worktrees/agent-<id>/` off `origin/v0.9.0` with no manual intervention). The workaround
+described below (previously required due to an `EPERM` creating `.claude/` inside this repo) is no
+longer necessary for new dispatches; kept here for history. See `60-orchestration-spec.md` §5 for
+current isolation practice.
+
+~~The Agent tool's built-in `isolation: "worktree"` fails in this sandbox (`EPERM` creating
+`.claude/` inside this repo — confirmed not transient, reported as a product bug). Workaround in
+use for every chunk: the orchestrating session manually runs `git worktree add -b <branch>
+<scratch-path> v0.9.0` first, then dispatches the agent with no `isolation` param, instructed to
+`cd` into that pre-made path as its first step. Branch naming convention: `ts/phase-<n>-<slug>`.~~
 
 ## Lane map (active from Phase 3 onward — Phases 0–2 are strictly serial)
 
