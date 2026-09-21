@@ -42,16 +42,18 @@
 //    though the rows are numerically redundant.
 // 2. **`_CircularArc_*`'s own naming convention (suggesting 8 distinct
 //    Start/EndRadiusOfCurvature pairs, matching every other curve-type group's own
-//    table) does NOT hold for 6 of its 8 real case bodies** -- confirmed by reading
+//    table) does NOT hold for 7 of its 8 real case bodies** -- confirmed by reading
 //    each function's own literal `StartRadiusOfCurvature`/`EndRadiusOfCurvature`
 //    kwargs directly: `_CircularArc_100_0_300_1000_1_Meter`/
-//    `_CircularArc_100_0_300_inf_1_Meter` both literally construct
-//    `(300.0, 300.0)` (not `(300.0, 1000.0)`/`(300.0, 0.0)` as their own names
-//    suggest), and `_CircularArc_100_0__1000__300_1_Meter`/
-//    `_CircularArc_100_0_inf_300_1_Meter`/`_CircularArc_100_0__inf__300_1_Meter` all
-//    three literally construct `(-300.0, -300.0)` (not `(-1000.0, -300.0)`/
-//    `(0.0, 300.0)`/`(0.0, -300.0)`). Only `_CircularArc_100_0_1000_300_1_Meter`
-//    genuinely varies (`(1000.0, 300.0)`). Since `_map_circular_arc`/`mapCircularArc`
+//    `_CircularArc_100_0_300_inf_1_Meter`/`_CircularArc_100_0_inf_300_1_Meter` all
+//    three literally construct `(300.0, 300.0)` (not `(300.0, 1000.0)`/`(300.0, 0.0)`/
+//    `(0.0, 300.0)` as their own names suggest), and
+//    `_CircularArc_100_0__300__1000_1_Meter`/`_CircularArc_100_0__300__inf_1_Meter`/
+//    `_CircularArc_100_0__1000__300_1_Meter`/`_CircularArc_100_0__inf__300_1_Meter` all
+//    four literally construct `(-300.0, -300.0)` (not `(-300.0, -1000.0)`/
+//    `(-300.0, 0.0)`/`(-1000.0, -300.0)`/`(0.0, -300.0)`). Only
+//    `_CircularArc_100_0_1000_300_1_Meter` genuinely varies (`(1000.0, 300.0)`). Since
+//    `_map_circular_arc`/`mapCircularArc`
 //    below never reads `EndRadiusOfCurvature` at all (only `StartRadiusOfCurvature`
 //    and its own sign), this has NO effect on the correctness of any case's own
 //    assertions -- each case is still internally self-consistent with its own literal
