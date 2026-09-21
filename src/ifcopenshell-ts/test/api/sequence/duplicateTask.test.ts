@@ -4,6 +4,40 @@
 // `test/api/sequence/` in src/ifcopenshell-python). Coverage is written directly from
 // the real source, gated across all 3 schemas via `AVAILABLE_SCHEMAS` (this file itself
 // has no schema-specific branching in real Python).
+//
+// *** 3 tests below are `test.skipIf(schema === "IFC2X3")`-guarded, matching
+// `../pset/removePset.test.ts`'s/`../geometry/addShapeAspect.test.ts`'s own established
+// per-test (not whole-file) precedent for this exact situation: most of this file's
+// tests work fine on IFC2X3, only these 3 don't ***
+//
+// Confirmed against `src/generated/ifc2x3.d.ts` directly: IFC2X3's `IfcTask` has
+// neither a `Nests`/`IsNestedBy` inverse attribute NOR a `TaskTime` attribute at all --
+// task NESTING and TASK TIMES are both genuinely impossible to construct or read on
+// IFC2X3. Verified empirically against a real, locally-built multi-schema (IFC2X3/
+// IFC4/IFC4X3) native addon (not just reasoned from the `.d.ts`), which surfaces a
+// THIRD affected test beyond the 2 originally flagged in `TODOS.md`'s "Two latent test
+// bugs" entry:
+//
+// - "duplicates nested subtasks and re-nests..." -- calls `.get("Nests")` directly,
+//   throws `entity instance of type 'IFC2X3.IfcTask' has no attribute 'Nests'`.
+// - "duplicating a sequenced pair of nested subtasks..." AND "duplicating one side of
+//   a sequence whose other side is NOT part of the batch..." -- BOTH call
+//   `assignSequence`, which unconditionally calls `./cascadeSchedule.ts` at the end
+//   (see that file's own `assignSequence.ts` dependency note); `cascadeSchedule`'s own
+//   `cascadeTask` unconditionally reads `task.get("TaskTime")` as its very first line,
+//   for EVERY task, regardless of schema -- so ANY `assignSequence` call throws
+//   immediately on IFC2X3, before `duplicateTask` itself is ever reached. This is not
+//   new: `assignSequence.test.ts`/`editSequence.test.ts`/`unassignSequence.test.ts`/
+//   `editLagTime.test.ts`/`unassignLagTime.test.ts` (this exact module, chunk 3) already
+//   exclude IFC2X3 entirely for the identical reason -- this file just missed applying
+//   that same precedent to its own 2 (now confirmed 3) `assignSequence`-touching tests.
+//
+// The other 5 tests in this file neither nest tasks nor call `assignSequence`, so they
+// genuinely exercise real IFC2X3 coverage -- skipping the whole file (or whole
+// `describe` block) would needlessly lose that, hence per-test `skipIf` here rather
+// than `cascadeSchedule.test.ts`'s own whole-file `AVAILABLE_SCHEMAS.filter(...)`
+// precedent (appropriate THERE only because every one of its own tests needs
+// `TaskTime`).
 
 import { describe, expect, test } from "vitest";
 import { addPset } from "../../../src/api/pset/addPset";
@@ -33,27 +67,30 @@ describe.each(AVAILABLE_SCHEMAS)("api.sequence.duplicateTask (%s)", (schema) => 
 		expect(duplicate[0].get("GlobalId")).not.toBe(task.get("GlobalId"));
 	});
 
-	test("duplicates nested subtasks and re-nests the duplicates under their own duplicate parent", () => {
-		const file = createTestFile(schema);
-		const parent = addTask(file, { name: "Construction" });
-		const child = addTask(file, { parentTask: parent, name: "Foundations" });
+	test.skipIf(schema === "IFC2X3")(
+		"duplicates nested subtasks and re-nests the duplicates under their own duplicate parent",
+		() => {
+			const file = createTestFile(schema);
+			const parent = addTask(file, { name: "Construction" });
+			const child = addTask(file, { parentTask: parent, name: "Foundations" });
 
-		const [current, duplicate] = duplicateTask(file, { task: parent });
+			const [current, duplicate] = duplicateTask(file, { task: parent });
 
-		expect(current.map((t) => t.get("Name"))).toEqual(["Construction", "Foundations"]);
-		expect(duplicate.map((t) => t.get("Name"))).toEqual(["Construction", "Foundations"]);
-		const [duplicateParent, duplicateChild] = duplicate;
+			expect(current.map((t) => t.get("Name"))).toEqual(["Construction", "Foundations"]);
+			expect(duplicate.map((t) => t.get("Name"))).toEqual(["Construction", "Foundations"]);
+			const [duplicateParent, duplicateChild] = duplicate;
 
-		// The duplicate child is nested under the duplicate parent...
-		const duplicateNests = duplicateChild.get("Nests") as EntityInstance[];
-		expect(duplicateNests).toHaveLength(1);
-		expect((duplicateNests[0].get("RelatingObject") as EntityInstance).equals(duplicateParent)).toBe(true);
+			// The duplicate child is nested under the duplicate parent...
+			const duplicateNests = duplicateChild.get("Nests") as EntityInstance[];
+			expect(duplicateNests).toHaveLength(1);
+			expect((duplicateNests[0].get("RelatingObject") as EntityInstance).equals(duplicateParent)).toBe(true);
 
-		// ...and the ORIGINAL nest relationship still connects the originals, untouched.
-		const originalNests = child.get("Nests") as EntityInstance[];
-		expect(originalNests).toHaveLength(1);
-		expect((originalNests[0].get("RelatingObject") as EntityInstance).equals(parent)).toBe(true);
-	});
+			// ...and the ORIGINAL nest relationship still connects the originals, untouched.
+			const originalNests = child.get("Nests") as EntityInstance[];
+			expect(originalNests).toHaveLength(1);
+			expect((originalNests[0].get("RelatingObject") as EntityInstance).equals(parent)).toBe(true);
+		},
+	);
 
 	test("duplicates property sets via a fresh, independent IfcPropertySet", () => {
 		const file = createTestFile(schema);
@@ -76,41 +113,55 @@ describe.each(AVAILABLE_SCHEMAS)("api.sequence.duplicateTask (%s)", (schema) => 
 		expect(originalRel.equals(duplicateRel)).toBe(false);
 	});
 
-	test("duplicating a sequenced pair of nested subtasks re-creates the sequence between the duplicates", () => {
-		const file = createTestFile(schema);
-		const parent = addTask(file, { name: "Construction" });
-		const predecessor = addTask(file, { parentTask: parent, name: "Formwork" });
-		const successor = addTask(file, { parentTask: parent, name: "Reinforcement" });
-		assignSequence(file, { relatingProcess: predecessor, relatedProcess: successor, sequenceType: "START_START" });
+	test.skipIf(schema === "IFC2X3")(
+		"duplicating a sequenced pair of nested subtasks re-creates the sequence between the duplicates",
+		() => {
+			const file = createTestFile(schema);
+			const parent = addTask(file, { name: "Construction" });
+			const predecessor = addTask(file, { parentTask: parent, name: "Formwork" });
+			const successor = addTask(file, { parentTask: parent, name: "Reinforcement" });
+			assignSequence(file, {
+				relatingProcess: predecessor,
+				relatedProcess: successor,
+				sequenceType: "START_START",
+			});
 
-		const [current, duplicate] = duplicateTask(file, { task: parent });
-		const duplicatePredecessor = duplicate[current.findIndex((t) => t.equals(predecessor))];
-		const duplicateSuccessor = duplicate[current.findIndex((t) => t.equals(successor))];
+			const [current, duplicate] = duplicateTask(file, { task: parent });
+			const duplicatePredecessor = duplicate[current.findIndex((t) => t.equals(predecessor))];
+			const duplicateSuccessor = duplicate[current.findIndex((t) => t.equals(successor))];
 
-		const duplicateIsPredecessorTo = duplicatePredecessor.get("IsPredecessorTo") as EntityInstance[];
-		expect(duplicateIsPredecessorTo).toHaveLength(1);
-		expect((duplicateIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(duplicateSuccessor)).toBe(true);
-		expect(duplicateIsPredecessorTo[0].get("SequenceType")).toBe("START_START");
+			const duplicateIsPredecessorTo = duplicatePredecessor.get("IsPredecessorTo") as EntityInstance[];
+			expect(duplicateIsPredecessorTo).toHaveLength(1);
+			expect((duplicateIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(duplicateSuccessor)).toBe(
+				true,
+			);
+			expect(duplicateIsPredecessorTo[0].get("SequenceType")).toBe("START_START");
 
-		// The original sequence relationship still connects the originals, untouched.
-		const originalIsPredecessorTo = predecessor.get("IsPredecessorTo") as EntityInstance[];
-		expect(originalIsPredecessorTo).toHaveLength(1);
-		expect((originalIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(successor)).toBe(true);
-	});
+			// The original sequence relationship still connects the originals, untouched.
+			const originalIsPredecessorTo = predecessor.get("IsPredecessorTo") as EntityInstance[];
+			expect(originalIsPredecessorTo).toHaveLength(1);
+			expect((originalIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(successor)).toBe(true);
+		},
+	);
 
-	test("duplicating one side of a sequence whose other side is NOT part of the batch keeps the untouched side as-is", () => {
-		const file = createTestFile(schema);
-		const task = addTask(file, { name: "Formwork" });
-		const externalSuccessor = addTask(file, { name: "Reinforcement" });
-		assignSequence(file, { relatingProcess: task, relatedProcess: externalSuccessor });
+	test.skipIf(schema === "IFC2X3")(
+		"duplicating one side of a sequence whose other side is NOT part of the batch keeps the untouched side as-is",
+		() => {
+			const file = createTestFile(schema);
+			const task = addTask(file, { name: "Formwork" });
+			const externalSuccessor = addTask(file, { name: "Reinforcement" });
+			assignSequence(file, { relatingProcess: task, relatedProcess: externalSuccessor });
 
-		const [, duplicate] = duplicateTask(file, { task });
-		const duplicateIsPredecessorTo = duplicate[0].get("IsPredecessorTo") as EntityInstance[];
-		expect(duplicateIsPredecessorTo).toHaveLength(1);
-		// "thus the related process is not part of the duplicated tasks" -- the ORIGINAL
-		// external task is reused directly, not a duplicate of it.
-		expect((duplicateIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(externalSuccessor)).toBe(true);
-	});
+			const [, duplicate] = duplicateTask(file, { task });
+			const duplicateIsPredecessorTo = duplicate[0].get("IsPredecessorTo") as EntityInstance[];
+			expect(duplicateIsPredecessorTo).toHaveLength(1);
+			// "thus the related process is not part of the duplicated tasks" -- the ORIGINAL
+			// external task is reused directly, not a duplicate of it.
+			expect((duplicateIsPredecessorTo[0].get("RelatedProcess") as EntityInstance).equals(externalSuccessor)).toBe(
+				true,
+			);
+		},
+	);
 
 	test("does NOT connect a duplicated root task to its own work schedule (docstring over-claims this -- see header comment)", () => {
 		const file = createTestFile(schema);
