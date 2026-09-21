@@ -3510,7 +3510,53 @@ layer entry in this file. Does not block anything else in `util/fm.ts` -- `getCo
 `getCobieComponents`/`getFmhemTypes` (the other 3 functions in that module) have no dependency on
 this gap at all and are fully functional today.
 
-### Two latent test bugs in already-merged PRs, found while independently reviewing an unrelated PR against a real multi-schema build
+### Two latent test bugs in already-merged PRs, found while independently reviewing an unrelated PR against a real multi-schema build — RESOLVED 2026-09-20
+
+**Resolved by a dedicated follow-up chunk** that fixed both test files against a real, locally-built
+multi-schema (IFC2X3/IFC4/IFC4X3) native addon (reusing the same leftover install at
+`/private/tmp/ifcopenshell-ts-install-multi` this entry's own "Context" section names):
+
+1. **`test/api/sequence/duplicateTask.test.ts`**: re-running the full file against the multi-schema
+   addon surfaced a THIRD affected IFC2X3 test beyond the 2 this entry originally named --
+   "duplicating one side of a sequence whose other side is NOT part of the batch..." also throws (via
+   `assignSequence`'s own unconditional `cascadeSchedule` call, same root cause as "duplicating a
+   sequenced pair..."). All 3 are now `test.skipIf(schema === "IFC2X3")`-guarded (matching
+   `test/api/pset/removePset.test.ts`'s/`test/api/geometry/addShapeAspect.test.ts`'s own established
+   per-test precedent), not the whole `describe` block -- the other 5 tests in the file neither nest
+   tasks nor call `assignSequence`, so they still genuinely exercise real IFC2X3 coverage. See the
+   test file's own updated header comment for the full trace.
+
+2. **`test/util/fm.test.ts`**: the "throws for IFC2X3 too" test's assertion is corrected to
+   `toThrow(/Entity with name 'IfcShadingDeviceType' not found in schema 'IFC2X3'/)`, matching the
+   ACTUAL throw. The previously-unresolved trace question (why `IfcDoorStyle`/`IfcWindowStyle` don't
+   throw first via the already-tracked `getEnumItems` gap) is now answered: both have NO
+   `PredefinedType` attribute at all on IFC2X3 (confirmed against `ifc2x3.d.ts` -- they only declare
+   `OperationType`/`ConstructionType` there), so `getFmhemClass` never reaches `getEnumItems` for
+   either of them; the loop then reaches `IfcShadingDeviceType` (the list's 3rd entry), which doesn't
+   exist on IFC2X3 at all, throwing first via the entity-lookup path instead. Verified empirically
+   against BOTH this port's own multi-schema addon AND a real installed `ifcopenshell` (0.8.4) Python
+   package: `ifcopenshell.util.fm.get_fmhem_classes("IFC2X3")` raises the identical `RuntimeError:
+   Entity with name 'IfcShadingDeviceType' not found in schema 'IFC2X3'` -- confirming real Python's
+   own `fmhem_classes_ifc2x3` list has the exact same upstream bug (`IfcShadingDeviceType` genuinely
+   doesn't exist on IFC2X3), and this port's behavior matches it exactly. `util/fm.ts`'s own header
+   comment and `getFmhemClasses`'s own doc comment are updated to disclose this precisely (previously
+   they implied ALL schema/class combinations hit the SAME `getEnumItems` error, which is inaccurate
+   for IFC2X3).
+
+   A THIRD, previously-undetected bug in this same file was also found and fixed while re-verifying
+   against the multi-schema addon: "excludes elements whose OWN concrete class is in
+   fmhemExcludedClasses..." (`describe.each(AVAILABLE_SCHEMAS)`, not schema-filtered) unconditionally
+   created an `IfcBurnerType` entity, which doesn't exist on IFC2X3 at all (a genuine IFC4+ addition,
+   confirmed against `ifc2x3.d.ts`). Fixed by substituting `IfcCoilType` (another
+   `fmhemExcludedClasses` entry, confirmed empirically to be a real IFC2X3
+   `IfcEnergyConversionDeviceType` subtype too) for IFC2X3 specifically.
+
+Both test files pass in full (verified via `npx vitest run` against the real multi-schema addon, not
+just `tsc`/`biome`); `tsc --noEmit`/`biome check` both clean; the pre-existing, unrelated ~60ish
+failures elsewhere in the full suite (`appendAsset`/`regenerateWallRepresentation`/`editLayer`/
+`addMonetaryUnit`/`brick`, all already-tracked native-primitive-layer gaps) are untouched by this fix.
+
+<details><summary>Original TODO text</summary>
 
 **What:** While reviewing PR #145 (`util.unit.convertFileLengthUnits`, unrelated), the orchestrating
 session built a genuine multi-schema (IFC2X3/IFC4/IFC4X3) native addon to verify it -- something
@@ -3554,3 +3600,5 @@ chunk so the full-suite multi-schema pass count stays meaningful going forward.
 multi-schema native addon (reusing a leftover install at
 `/private/tmp/ifcopenshell-ts-install-multi` from an earlier chunk in this same session) --
 neither bug is caused by or related to PR #145's own changes.
+
+</details>

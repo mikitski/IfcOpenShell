@@ -37,10 +37,34 @@
 // (the first real caller of `getEnumItems` reaching it outside `attribute.ts`'s own
 // unit tests) -- ported completely and faithfully up to and including the exact
 // `getEnumItems` call (not proactively guarded/stubbed around), so `getFmhemClasses`
-// throws the same clear, disclosed "no forward enum-item-name lookup exists" error for
-// every real schema/class combination. `TODOS.md` updated with a new entry (no
-// existing top-level entry named this specific gap -- it was previously only disclosed
-// inline in `attribute.ts`'s/`attribute.test.ts`'s own comments).
+// throws for every real schema/class combination -- but NOT always via the SAME error:
+// see the correction below (`getFmhemClasses("IFC2X3")` never actually reaches
+// `getEnumItems` at all). `TODOS.md` updated with a new entry (no existing top-level
+// entry named this specific gap -- it was previously only disclosed inline in
+// `attribute.ts`'s/`attribute.test.ts`'s own comments).
+//
+// *** CORRECTION -- `getFmhemClasses("IFC2X3")` throws a DIFFERENT, EARLIER error than
+// the `getEnumItems` gap above, and this is itself a real, pre-existing Python bug ***:
+// `fmhemClassesIfc2x3`'s first 2 entries, `IfcDoorStyle`/`IfcWindowStyle`, have NO
+// `PredefinedType` attribute at all on IFC2X3 (confirmed against `ifc2x3.d.ts` -- they
+// only declare `OperationType`/`ConstructionType` there), so `getFmhemClass` never
+// reaches the `getEnumItems` call for either of them (or their subtypes, since neither
+// has any). The loop then reaches the list's 3rd entry, `IfcShadingDeviceType`, which
+// doesn't exist ANYWHERE on IFC2X3 (confirmed absent from `ifc2x3.d.ts` entirely) --
+// yet real Python's own `fmhem_classes_ifc2x3` list (`ifcopenshell/util/fm.py`)
+// includes it verbatim regardless, meaning this is a genuine upstream Python bug, not
+// something this port introduced. `schema_.declaration_by_name(ifc_class)` (this
+// port's `declaration_by_name_with_name`) throws first, before `getEnumItems` is ever
+// reached: verified empirically against BOTH this port's own locally-built
+// multi-schema native addon AND a real installed `ifcopenshell` Python package
+// (`ifcopenshell.util.fm.get_fmhem_classes("IFC2X3")` raises `RuntimeError: Entity
+// with name 'IfcShadingDeviceType' not found in schema 'IFC2X3'`) -- this port's own
+// throw message matches real Python's exactly, including which class name is named in
+// it. `getFmhemClasses("IFC2X3")` is therefore blocked by the SAME upstream Python
+// bug real Python itself would hit, not by this port's own `getEnumItems` gap --
+// `getFmhemClasses("IFC4")`/`getFmhemClasses()` (default) remain blocked by the
+// `getEnumItems` gap specifically, since `fmhemClassesIfc4`'s own first entry,
+// `IfcDoorType`, DOES have a real `PredefinedType` attribute on IFC4.
 //
 // `entity::subtypes()` (real Python's `declaration.subtypes()`) is ALSO a separate,
 // already-disclosed pre-existing gap (`util/schema.ts`'s own header comment, backing
@@ -239,9 +263,13 @@ export function getFmhemTypes(ifcFile: IfcFile): EntityInstance[] {
  * OUTSIDE the `if`/`elif`/`else` that decides whether to record the CURRENT class,
  * ported with the identical structure below, not accidentally nested inside it).
  *
- * **Unconditionally throws for every real schema/class combination** -- see this
- * file's own header comment for the full, disclosed `getEnumItems` primitive-layer
- * gap this hits on its very first `PredefinedType` attribute.
+ * **Unconditionally throws for every real schema/class combination** -- but NOT
+ * always via the same error. `"IFC4"`/the default hit this file's own disclosed
+ * `getEnumItems` primitive-layer gap on their very first `PredefinedType` attribute;
+ * `"IFC2X3"` throws EARLIER, via a different, real upstream-Python bug
+ * (`fmhemClassesIfc2x3` names a class, `IfcShadingDeviceType`, that doesn't exist on
+ * IFC2X3 at all) -- see this file's own header comment's "CORRECTION" section for the
+ * full trace and empirical (real Python) verification.
  */
 export function getFmhemClasses(schema: "IFC4" | "IFC2X3" = "IFC4"): Record<string, string[]> {
 	const results: Record<string, string[]> = {};

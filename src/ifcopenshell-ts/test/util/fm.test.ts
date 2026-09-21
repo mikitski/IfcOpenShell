@@ -71,11 +71,19 @@ describe.each(AVAILABLE_SCHEMAS)("util.fm getFmhemTypes (%s)", (schemaName) => {
 		// `fmhemClassesIfc4`/`fmhemClassesIfc2x3`, so `by_type` (which includes
 		// subtypes) would return BOTH, but `IfcBurnerType` is one of the 4 names in
 		// `fmhemExcludedClasses` and `IfcBoilerType` isn't.
-		const burner = file.createEntity("IfcBurnerType");
+		//
+		// `IfcBurnerType` itself doesn't exist on IFC2X3 at all (confirmed against
+		// `ifc2x3.d.ts` -- absent entirely, a genuine IFC4+ addition), so IFC2X3 uses
+		// `IfcCoilType` instead -- another `fmhemExcludedClasses` entry, confirmed
+		// empirically (against this same locally-built multi-schema addon) to be a
+		// real IFC2X3 `IfcEnergyConversionDeviceType` subtype too, exercising the
+		// identical exclusion behavior this test targets.
+		const excludedClass = schemaName === "IFC2X3" ? "IfcCoilType" : "IfcBurnerType";
+		const excluded = file.createEntity(excludedClass);
 		const boiler = file.createEntity("IfcBoilerType");
 
 		const types = subject.getFmhemTypes(file);
-		expect(types.some((e) => e.equals(burner))).toBe(false);
+		expect(types.some((e) => e.equals(excluded))).toBe(false);
 		expect(types.some((e) => e.equals(boiler))).toBe(true);
 	});
 });
@@ -87,9 +95,27 @@ describe("util.fm getFmhemClasses", () => {
 	});
 
 	test.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))(
-		"throws for IFC2X3 too -- the same pre-existing gap, not schema-specific",
+		"throws for IFC2X3 too -- but via a DIFFERENT, earlier error than IFC4's getEnumItems gap",
 		() => {
-			expect(() => subject.getFmhemClasses("IFC2X3")).toThrow(/enumeration_items/);
+			// See `fm.ts`'s own header comment for the full trace: `fmhemClassesIfc2x3`'s
+			// first 2 entries, `IfcDoorStyle`/`IfcWindowStyle`, have NO `PredefinedType`
+			// attribute at all on IFC2X3 (confirmed against `ifc2x3.d.ts` -- they only have
+			// `OperationType`/`ConstructionType` there), so `getFmhemClass` never reaches
+			// the `getEnumItems` call for them; the loop moves on to the list's 3rd entry,
+			// `IfcShadingDeviceType`, which doesn't exist on IFC2X3 AT ALL (confirmed absent
+			// from `ifc2x3.d.ts` entirely -- a real, pre-existing Python bug too:
+			// `fmhem_classes_ifc2x3` includes it verbatim even though it doesn't exist on
+			// IFC2X3). `declaration_by_name_with_name("IfcShadingDeviceType")` throws first,
+			// before `getEnumItems` is ever reached -- verified empirically against BOTH
+			// this port's own locally-built multi-schema native addon AND a real installed
+			// `ifcopenshell` Python package (`ifcopenshell.util.fm.get_fmhem_classes
+			// ("IFC2X3")` raises the identical `RuntimeError: Entity with name
+			// 'IfcShadingDeviceType' not found in schema 'IFC2X3'`), confirming this port's
+			// behavior matches real Python's own exactly, including WHICH error fires
+			// first.
+			expect(() => subject.getFmhemClasses("IFC2X3")).toThrow(
+				/Entity with name 'IfcShadingDeviceType' not found in schema 'IFC2X3'/,
+			);
 		},
 	);
 });
