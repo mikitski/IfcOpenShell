@@ -39,12 +39,21 @@
 // own established precedent for functions Python itself doesn't directly test.
 
 import { describe, expect, test } from "vitest";
+import { addContext } from "../../src/api/context/addContext";
+import { addGeoreferencing } from "../../src/api/georeference/addGeoreferencing";
+import { editGeoreferencing } from "../../src/api/georeference/editGeoreferencing";
+import { addPset } from "../../src/api/pset/addPset";
+import { editPset } from "../../src/api/pset/editPset";
+import { createEntity } from "../../src/api/root/createEntity";
+import { addSiUnit } from "../../src/api/unit/addSiUnit";
+import { assignUnit } from "../../src/api/unit/assignUnit";
 import { EntityInstance } from "../../src/entityInstance";
 import type { IfcFile } from "../../src/file";
 import { entity_instance as NativeEntityInstance } from "../../src/native/ifcopenshell_native";
 import { native } from "../../src/native/native_loader";
 import * as subject from "../../src/util/unit";
-import { AVAILABLE_SCHEMAS, createTestFile } from "../bootstrap";
+import type { Schema } from "../bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile, stripProjectBootstrap } from "../bootstrap";
 
 // --- local fixture helpers (no Python/api counterpart -- see this file's header comment) ---
 
@@ -706,5 +715,176 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit iterElementAndAttributesPerType (%s)
 		// LengthValue left unset (null).
 		const results = [...subject.iterElementAndAttributesPerType(file, "IfcLengthMeasure")];
 		expect(results.some(([element]) => element.equals(qty))).toBe(false);
+	});
+});
+
+// --- TestConvertFileLengthUnits / TestConvertFileLengthUnitsIFC4 / TestConvertFileLengthUnitsIFC4X3 ---
+//
+// See `src/util/unit.ts`'s own doc comment on `convertFileLengthUnits` (and this
+// module's own header comment, findings 4-6) for the three real, disclosed
+// primitive-layer blockers this function faithfully preserves rather than guards
+// around. Ported below: every real Python test scenario NOT itself blocked by one of
+// those findings, plus a dedicated regression test pinning each finding, matching
+// `test/api/unit/addConversionBasedUnit.test.ts`'s own established precedent for this
+// kind of disclosed, currently-blocked behavior.
+//
+// All fixtures below start from a genuinely blank project (`blankProjectFile`, this
+// file's own local convention, matching `test/api/georeference/editGeoreferencing
+// .test.ts`'s identical helper) rather than `createTestFile`'s own pre-baked template
+// project/unit-assignment/context chain -- real Python's own bootstrap starts every
+// one of these tests from a project-and-unit-free file too
+// (`ifcopenshell.api.root.create_entity(self.file, ifc_class="IfcProject")` against a
+// blank `test.bootstrap` fixture), and reusing the template's own baseline units/
+// contexts here would make several of these tests' assertions ambiguous (e.g. a
+// second, competing `IfcGeometricRepresentationContext`/`IfcSIUnit` already present
+// before the test's own fixture-building code runs).
+
+function blankProjectFile(schema: Schema): IfcFile {
+	const file = createTestFile(schema);
+	stripProjectBootstrap(file);
+	createEntity(file, { ifcClass: "IfcProject" });
+	return file;
+}
+
+describe.each(AVAILABLE_SCHEMAS)("util.unit convertFileLengthUnits (%s)", (schema) => {
+	test("test_run: converts the project length unit to METRE", () => {
+		const file = blankProjectFile(schema);
+		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+		assignUnit(file, { units: [unit] });
+
+		const output = subject.convertFileLengthUnits(file, "METER");
+		expect(subject.getFullUnitName(subject.getProjectUnit(output, "LENGTHUNIT") as EntityInstance)).toBe("METRE");
+		// Real Python's own `test_run` additionally asserts
+		// `max(i.id() for i in output) == len(output.entity_names()) + 1` (a leftover
+		// rocksdb-renumbering regression check) -- not ported: this port's
+		// `blankProjectFile` fixture-building sequence (`stripProjectBootstrap` +
+		// `createEntity`) doesn't produce the same clean, contiguous 1..N id sequence
+		// real Python's genuinely-fresh bootstrap file does (removed/orphaned ids from
+		// the strip step leave gaps beforehand), so the exact numeric invariant doesn't
+		// transfer -- the behavioral outcome that assertion is really checking for (the
+		// old length unit is cleanly removed, nothing else is corrupted) is what the
+		// `getFullUnitName`/`getProjectUnit` assertion above and this describe block's
+		// other tests already exercise.
+	});
+
+	test("test_precision_conversion: IfcGeometricRepresentationContext.Precision is scaled; subcontexts are left alone (regression for #6127)", () => {
+		const file = blankProjectFile(schema);
+		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+		assignUnit(file, { units: [unit] });
+		const context = addContext(file, { contextType: "Model" });
+		context.set("Precision", 0.01);
+		// Subcontexts derive Precision from the parent and must be left alone.
+		addContext(file, {
+			contextType: "Model",
+			contextIdentifier: "Body",
+			targetView: "MODEL_VIEW",
+			parent: context,
+		});
+
+		const output = subject.convertFileLengthUnits(file, "METER");
+		const newContext = output.byType("IfcGeometricRepresentationContext", false)[0];
+		expect(newContext.get("Precision") as number).toBeCloseTo(0.00001, 9);
+	});
+});
+
+describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
+	"util.unit convertFileLengthUnits map-unit handling (%s)",
+	(schema) => {
+		// IFC2X3 excluded: real Python's own fixture setup for these scenarios
+		// (`api.georeference.addGeoreferencing`/`editGeoreferencing` with a non-empty
+		// `coordinateOperation`) cannot even be constructed for IFC2X3 in this port
+		// today -- `addGeoreferencing.ts`/`editGeoreferencing.ts`'s own already-
+		// disclosed IFC2X3-branch primitive-layer gap (this module's own header
+		// comment, finding 6), entirely independent of `convertFileLengthUnits` itself.
+
+		test("test_converting_map_conversion_if_there_is_no_map_unit: plain attribute conversion still applies to IfcMapConversion when no MapUnit is set", () => {
+			const file = blankProjectFile(schema);
+			const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+			addContext(file, { contextType: "Model" });
+			addGeoreferencing(file, {});
+			editGeoreferencing(file, { coordinateOperation: { Eastings: 10000 } });
+			assignUnit(file, { units: [unit] });
+
+			const output = subject.convertFileLengthUnits(file, "METER");
+			expect(subject.getFullUnitName(subject.getProjectUnit(output, "LENGTHUNIT") as EntityInstance)).toBe("METRE");
+			expect(output.byType("IfcMapConversion")[0].get("Eastings")).toBe(10);
+		});
+
+		test("test_preserving_enh_if_there_is_a_map_unit: a map unit distinct from the project default is preserved via the Helmert-transformation round-trip", () => {
+			const file = blankProjectFile(schema);
+			const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+			const meter = addSiUnit(file, { unitType: "LENGTHUNIT" });
+			addContext(file, { contextType: "Model" });
+			addGeoreferencing(file, {});
+			editGeoreferencing(file, {
+				projectedCrs: { MapUnit: meter },
+				coordinateOperation: { Eastings: 10, Scale: 0.001 },
+			});
+			assignUnit(file, { units: [unit] });
+
+			const output = subject.convertFileLengthUnits(file, "METER");
+			expect(subject.getFullUnitName(subject.getProjectUnit(output, "LENGTHUNIT") as EntityInstance)).toBe("METRE");
+			const mapConversion = output.byType("IfcMapConversion")[0];
+			expect(mapConversion.get("Eastings")).toBe(10);
+			expect(mapConversion.get("Northings")).toBe(0);
+			expect(mapConversion.get("Scale")).toBe(1);
+			expect(subject.getFullUnitName(output.byType("IfcProjectedCRS")[0].get("MapUnit") as EntityInstance)).toBe(
+				"METRE",
+			);
+		});
+
+		test("test_preserving_enh_if_there_is_a_map_unit_which_is_also_the_project_default", () => {
+			const file = blankProjectFile(schema);
+			const meter = addSiUnit(file, { unitType: "LENGTHUNIT" });
+			addContext(file, { contextType: "Model" });
+			addGeoreferencing(file, {});
+			editGeoreferencing(file, {
+				projectedCrs: { MapUnit: meter },
+				coordinateOperation: { Eastings: 10, Scale: 1 },
+			});
+			assignUnit(file, { units: [meter] });
+
+			const output = subject.convertFileLengthUnits(file, "MILLIMETER");
+			expect(subject.getFullUnitName(subject.getProjectUnit(output, "LENGTHUNIT") as EntityInstance)).toBe(
+				"MILLIMETRE",
+			);
+			const mapConversion = output.byType("IfcMapConversion")[0];
+			expect(mapConversion.get("Eastings")).toBe(10);
+			expect(mapConversion.get("Northings")).toBe(0);
+			expect(mapConversion.get("Scale")).toBe(0.001);
+			expect(subject.getFullUnitName(output.byType("IfcProjectedCRS")[0].get("MapUnit") as EntityInstance)).toBe(
+				"METRE",
+			);
+
+			const unitAssignment = subject.getUnitAssignment(output);
+			expect(unitAssignment).toBeTruthy();
+			expect((unitAssignment?.get("Units") as EntityInstance[]).length).toBe(1);
+		});
+	},
+);
+
+describe.each(AVAILABLE_SCHEMAS)("util.unit convertFileLengthUnits (%s) -- disclosed, currently blocked", (schema) => {
+	test("throws for a non-SI (imperial) target unit -- addConversionBasedUnit's own already-disclosed primitive-layer gap (see unit.ts's header comment, finding 5)", () => {
+		const file = blankProjectFile(schema);
+		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+		assignUnit(file, { units: [unit] });
+
+		expect(() => subject.convertFileLengthUnits(file, "FOOT")).toThrow(
+			/Attribute access is only supported on entity instances/,
+		);
+	});
+
+	test("throws when the file contains an entity-wrapped IfcLengthMeasure value (e.g. a typed pset property) -- a genuinely NEW consequence of the same gap (see unit.ts's header comment, finding 4)", () => {
+		const file = blankProjectFile(schema);
+		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
+		const product = createEntity(file, { ifcClass: "IfcWall" });
+		const pset = addPset(file, { product, name: "TestPset" });
+		const lengthMeasure = createTypedValue(file, "IfcLengthMeasure", 50.0);
+		editPset(file, { pset, properties: { Length: lengthMeasure } });
+		assignUnit(file, { units: [unit] });
+
+		expect(() => subject.convertFileLengthUnits(file, "METER")).toThrow(
+			/Attribute access is only supported on entity instances/,
+		);
 	});
 });

@@ -6,14 +6,13 @@
 // next in Phase 3's `util` Tier A sequencing after `util.element`/`util.schema`
 // (query/reflection chunk)/`util.attribute`.
 //
-// **Explicitly NOT in this chunk's scope**: `convert_file_length_units`. This is a
-// genuine, disclosed hard blocker, not a "split into a follow-up chunk" situation --
-// it transitively imports `ifcopenshell.api.unit`, `ifcopenshell.api.georeference`,
-// and `ifcopenshell.util.geolocation`, none of which are ported yet (the `api.*`
-// layer is a separate, much-later phase in this project's roadmap,
-// `planning/ifcopenshell-ts/20-roadmap.md` Phase 6+). No part of it is ported, stubbed,
-// or partially implemented here -- see `TODOS.md`'s own entry for this. Every other
-// function/constant in `unit.py` is ported below.
+// **UPDATE (Phase 10 chunk, `convertFileLengthUnits`):** `convert_file_length_units`
+// -- the one function this chunk's own original header comment left out, since its
+// `ifcopenshell.api.unit`/`ifcopenshell.api.georeference`/`ifcopenshell.util
+// .geolocation` dependencies didn't exist yet (`TODOS.md`'s own dedicated entry) -- is
+// now ported below too, now that all three have landed. See `convertFileLengthUnits`'s
+// own doc comment for the full writeup of what's ported faithfully vs. what's newly
+// (and, in one case, previously) disclosed as blocked.
 //
 // Ported: the module-level lookup tables (`prefixes`, `unitNames`, `siDimensions`,
 // `siTypeNames`, `namedDimensions`, `siConversions`, `siOffsets`, `imperialTypes`,
@@ -24,9 +23,11 @@
 // `getProjectUnit`, `getPropertyUnit`, `getPropertyTableUnit`, `getUnitMeasureClass`,
 // `getMeasureUnitType`, `getSymbolMeasureClass`, `getSymbolQuantityClass`,
 // `getUnitSymbol`, `convertUnit`, `mmToM`, `convert`, `calculateUnitScale`,
-// `formatLength`, `isAttrType`, `iterElementAndAttributesPerType`.
+// `formatLength`, `isAttrType`, `iterElementAndAttributesPerType`, and (this Phase 10
+// chunk) `convertFileLengthUnits`.
 //
-// *** Three real, disclosed findings surfaced while building this chunk: ***
+// *** Three real, disclosed findings surfaced while building the original chunk (below),
+// plus three more (4-6) surfaced while building `convertFileLengthUnits`: ***
 //
 // 1. A *correction* to `util/element.ts` chunk 1's own disclosed finding #2 (that
 //    file's header comment, "the N-API attribute-value shim auto-unwraps `IfcValue`-
@@ -83,6 +84,79 @@
 //    without requiring the full item list -- not a new gap, the same established
 //    workaround applied a third time.
 //
+// 4. **A genuinely NEW, previously-undocumented consequence of the already-tracked
+//    `attribute_kind_of`/"Attribute access is only supported on entity instances"
+//    primitive-layer gap (`TODOS.md`'s "`EntityInstance.setByIndex`/`IfcFile
+//    .createEntity` cannot write an initial value into a freshly created simple/
+//    defined-type instance" entry) -- found by actually reading the real C++ shim
+//    source (`src/wrappergen/shim/attribute_value_shim.cpp`), not assumed:**
+//    `attribute_kind_of(instance, index)` -> `attribute_declaration_at` ->
+//    `entity_declaration_of` gates on `instance.declaration().as_entity()` -- i.e. on
+//    the TARGET instance's OWN runtime declaration kind, never on whether that
+//    instance is freshly constructed or already populated/file-parsed. A bare/simple
+//    defined-type instance (e.g. `IfcLengthMeasure`) is NEVER an EXPRESS entity,
+//    whether newly created or read straight out of a real, already-parsed file -- so
+//    `EntityInstance.setByIndex`/`.set()` throws the identical "Attribute access is
+//    only supported on entity instances" error for ANY write to such an instance's
+//    own wrapped value, not just at construction time. Every previously-documented
+//    consequence of this gap (`addConversionBasedUnit`, `editPset`'s scalar-value-
+//    creation paths, `editSurfaceStyle`, etc.) only ever exercised the CONSTRUCTION-
+//    time half of this; `convert_file_length_units`'s own core per-attribute
+//    conversion loop is the first ported function to need to WRITE a value back into
+//    an EXISTING, already-populated, real, file-parsed simple-type instance (Python:
+//    `val.wrappedValue = convert_value(val.wrappedValue)`, for every
+//    `IfcLengthMeasure`-typed value reached via a SELECT-typed attribute -- e.g. a
+//    real `IfcPropertySingleValue.NominalValue`/`IfcPropertyEnumeratedValue
+//    .EnumerationValues` member/`IfcMeasureWithUnit.ValueComponent`) -- and that
+//    branch hits the identical gate, confirmed by reading the shim source rather than
+//    by a build (no working native build available in this sandbox either, matching
+//    every prior chunk's own disclosure). The read side is unaffected (confirmed
+//    separately, finding #1 above, and again by reading `get_attribute_value_variant`
+//    in the same shim file: it never calls `entity_declaration_of` at all). The lower-
+//    level `set_attribute_value` primitive itself has NO such gate (confirmed by
+//    reading `set_attribute_value_variant` in the same file: it calls
+//    `instance.set_attribute_value(...)` directly for every scalar kind except
+//    ENUMERATION) -- exactly the same asymmetry this test file's own `createTypedValue`
+//    test-only helper already exploits for CONSTRUCTION. Per this project's
+//    established, repeated precedent (`addConversionBasedUnit.ts`'s own header
+//    comment: "disclosed here ... rather than worked around with a lower-level escape
+//    hatch"), this is NOT worked around in `convertFileLengthUnits` below either --
+//    `val.setByIndex(0, ...)` is ported faithfully, so it throws this same, real,
+//    pre-existing error the moment it's reached, for ANY file containing at least one
+//    `IfcLengthMeasure`-typed value stored behind a SELECT-typed attribute (extremely
+//    common in real-world IFC files -- e.g. any typed pset property). Flagged as a new
+//    `TODOS.md` consequence (this file's own function is now that entry's newest,
+//    independent confirmation) and pinned by a dedicated regression test in
+//    `test/util/unit.test.ts`, matching every other confirmed-consequence file's own
+//    "let the native call fail naturally" precedent. The plain-scalar/tuple branch
+//    (Python: `setattr(element, attr.name(), new_value)`, TS: `element.set(...)`) is
+//    UNAFFECTED -- `element` there is always a real, rooted entity (e.g. `IfcWall`,
+//    `IfcExtrudedAreaSolid`), never a bare simple-type value, so `attribute_kind_of`
+//    succeeds -- this is the majority case for real geometry (`Depth`,
+//    `Coordinates`, `IfcCartesianPointList3D.CoordList`, etc.), fully functional.
+//
+// 5. The already-disclosed imperial-unit blocker (`api/unit/addConversionBasedUnit.ts`'s
+//    own header comment / `api/unit/index.ts`'s own header comment: "every branch
+//    needs a valued `IfcReal`") applies unchanged here: `convertFileLengthUnits` called
+//    with a non-SI `targetUnits` (e.g. `"FOOT"`) resolves `siUnit` to `null`, so this
+//    function's own `else` branch calls `addConversionBasedUnit`, which always throws.
+//    Ported faithfully (not guarded around), pinned by a dedicated regression test.
+//
+// 6. `has_map_unit`'s IFC4+ path (a real `IfcProjectedCRS.MapUnit` check) calls
+//    `editGeoreferencing` with a non-empty `coordinateOperation`, which is fully
+//    functional there (`editGeoreferencing.ts`'s own header comment: "IFC4+ branch:
+//    fully functional, plain `setattr`"). But for IFC2X3, the SAME call is ALSO
+//    blocked -- independently of findings 4/5 above -- by that file's own already-
+//    disclosed gap (its IFC2X3 branch's dead-code wrapped-value computation hits the
+//    identical `attribute_kind_of` gate on its very first loop iteration for any
+//    non-empty dict, per that file's own header comment). Confirmed by reading
+//    `editGeoreferencing.ts`'s current source directly, not assumed from this file's
+//    brief. `test/util/unit.test.ts`'s map-unit-related tests are therefore gated to
+//    IFC4/IFC4X3 only (real Python's own `TestConvertFileLengthUnits` fixture setup
+//    for these scenarios -- `api.georeference.addGeoreferencing`/`editGeoreferencing`
+//    with a non-empty `coordinate_operation` -- cannot even be constructed for IFC2X3
+//    in this port today, entirely independent of `convertFileLengthUnits` itself).
+//
 // See `EntityInstance.declaration()`/`util/schema.ts`/`util/attribute.ts` for prior
 // Phase 3 chunks' own conventions this file reuses directly (the `attrOrNull`/
 // `attrList` "Python `getattr(..., default)`" translation idiom from `util/element.ts`,
@@ -90,14 +164,19 @@
 // `util/schema.ts`'s own precedent of small per-module private helpers rather than a
 // shared cross-module utility file).
 
+import { editGeoreferencing } from "../api/georeference/editGeoreferencing";
+import { addConversionBasedUnit } from "../api/unit/addConversionBasedUnit";
+import { addSiUnit } from "../api/unit/addSiUnit";
 import { AttributeCategory, EntityInstance } from "../entityInstance";
-import type { IfcFile } from "../file";
+import { IfcFile } from "../file";
 import type {
 	aggregation_type as NativeAggregationType,
 	attribute as NativeAttribute,
 	declaration as NativeDeclaration,
 	parameter_type as NativeParameterType,
 } from "../native/ifcopenshell_native";
+import { getPset, removeDeep2 } from "./element";
+import { getHelmertTransformationParameters } from "./geolocation";
 
 // --- internal helpers (not exported -- pure translation aids, matching
 // `util/element.ts`'s own "getattr(..., default)" idiom; duplicated here rather than
@@ -1256,4 +1335,175 @@ export function* iterElementAndAttributesPerType(
 			yield [element, attr, val as FloatOrSequenceOfFloats];
 		}
 	}
+}
+
+// --- convertFileLengthUnits ---
+
+/**
+ * Python: `convert_file_length_units(ifc_file, target_units="METER") ->
+ * ifcopenshell.file`. Converts all units in an IFC file to the specified target
+ * units. Returns a NEW file -- the original `ifcFile` is left untouched.
+ *
+ * *** Real, disclosed divergence: the file-clone step ***
+ *
+ * Real Python clones the input file via `ifcopenshell.file.from_string(ifc_file
+ * .to_string())`. This port's native primitive layer has no in-memory,
+ * buffer/string-returning `to_string()` (only a path-based `write()`, `TODOS.md`'s own
+ * `ifcopenshell.open()`/core-top-level-surface entry covers the broader gap this is
+ * one symptom of -- not fixed here). This function clones via `IfcFile
+ * .toSpfTextViaTempFile`/`fromSpfText` (`file.ts`): the former writes `ifcFile` out to
+ * a throwaway temp file, reads the SPF text back as a string, and best-effort deletes
+ * the temp file; the latter builds a brand new, fully independent `IfcFile` from that
+ * string via the same in-memory-buffer primitive `template.ts`'s `create()` already
+ * uses. These two helpers already existed in spirit -- `util/element.ts`'s
+ * `unbatchRemoveDeep2` needed the identical Python pair and had independently
+ * hand-rolled an equivalent temp-file dance -- and were factored out into `file.ts`
+ * for both call sites to share, per `/code-review`'s finding on this chunk's own PR.
+ * This is a real, disclosed behavioral divergence from Python, not a hidden
+ * implementation detail: it is slower than a pure in-memory round-trip (a real disk
+ * write + read in the middle) and requires filesystem write permission (`os.tmpdir()`)
+ * that Python's fully in-memory version never needs. Functionally equivalent
+ * otherwise -- both produce a fully independent, deep-cloned `IfcFile`/`file` object;
+ * the original is never mutated either way.
+ *
+ * *** Real, disclosed blockers (ported faithfully, not guarded around) ***
+ *
+ * - **Imperial units always throw.** When `targetUnits` isn't a recognized SI unit
+ *   name (e.g. `"FOOT"`, `"INCH"`), this calls `addConversionBasedUnit`, which is
+ *   entirely blocked by the primitive-layer gap that file's own header comment
+ *   discloses ("every branch needs a valued `IfcReal`"). See this module's own header
+ *   comment, finding 5.
+ * - **Any entity-wrapped `IfcLengthMeasure` value throws.** This function's own core
+ *   per-attribute conversion loop needs to WRITE a converted value back into an
+ *   already-populated, real, file-parsed simple-type instance whenever a length
+ *   measure is reached via a SELECT-typed attribute (e.g. a real
+ *   `IfcPropertySingleValue.NominalValue`) -- a genuinely NEW consequence of the
+ *   already-tracked `attribute_kind_of` primitive-layer gap, found and confirmed by
+ *   reading the real C++ shim source while building this function. See this module's
+ *   own header comment, finding 4, for the full writeup. The plain-scalar/tuple branch
+ *   (the majority case for real geometry: `Depth`, `Coordinates`,
+ *   `IfcCartesianPointList3D.CoordList`, `IfcGeometricRepresentationContext
+ *   .Precision`, etc.) is fully functional and unaffected.
+ * - **IFC2X3 files with a map unit throw**, independently of the above, via
+ *   `editGeoreferencing`'s own already-disclosed IFC2X3-branch gap. See this module's
+ *   own header comment, finding 6. IFC4+ files with a map unit are fully functional.
+ *
+ * `test/util/unit.test.ts` pins all three as dedicated regression tests, per this
+ * project's established "disclose, don't silently guard" precedent, alongside real,
+ * passing coverage for every unaffected path (plain SI-unit conversion, `Precision`
+ * scaling, plain-scalar/tuple attribute conversion, and the map-unit branch on
+ * IFC4/IFC4X3).
+ */
+export function convertFileLengthUnits(ifcFile: IfcFile, targetUnits = "METER"): IfcFile {
+	const prefix = getPrefix(targetUnits);
+	const siUnit = getUnitName(targetUnits);
+
+	// Copy all elements from the original file to the patched file. See this
+	// function's own doc comment for the disclosed temp-file-round-trip divergence
+	// from real Python's in-memory `ifcopenshell.file.from_string(ifc_file.to_string())`
+	// -- `IfcFile.toSpfTextViaTempFile`/`fromSpfText` (`file.ts`) are the shared
+	// helpers implementing that divergence, factored out from `util/element.ts`'s
+	// `unbatchRemoveDeep2` (which already needed the identical Python pair) per
+	// `/code-review`'s finding on this chunk's own PR.
+	const filePatched = IfcFile.fromSpfText(IfcFile.toSpfTextViaTempFile(ifcFile));
+
+	// Python doesn't guard `old_length`/the later `unit_assignment` against `None`
+	// either -- a project with no length unit assigned yet would crash there too
+	// (an `AttributeError` in Python, a `TypeError`-equivalent here) -- not defensively
+	// guarded, matching this project's verbatim-translation mandate.
+	const oldLength = getProjectUnit(filePatched, "LENGTHUNIT") as EntityInstance;
+
+	let newLength: EntityInstance;
+	if (siUnit) {
+		newLength = addSiUnit(filePatched, { unitType: "LENGTHUNIT", prefix });
+	} else {
+		const lowerTargetUnits = targetUnits.toLowerCase();
+		if (imperialTypes[lowerTargetUnits] !== "LENGTHUNIT") {
+			throw new Error(
+				`Couldn't identify target units "${lowerTargetUnits}". The method supports singular unit names like "CENTIMETER", "METER", "FOOT", etc.`,
+			);
+		}
+		// *** Throws here for every non-SI target -- see this function's own doc
+		// comment / this module's header comment, finding 5. ***
+		newLength = addConversionBasedUnit(filePatched, { name: lowerTargetUnits });
+	}
+
+	// Support tuple (array) of tuples, as in `IfcCartesianPointList3D.CoordList`.
+	function convertValue(value: FloatOrSequenceOfFloats): FloatOrSequenceOfFloats {
+		if (!Array.isArray(value)) {
+			return convertUnit(value as number, oldLength, newLength);
+		}
+		return value.map((v) => convertValue(v));
+	}
+
+	// Traverse all elements and their nested attributes in the file and convert them.
+	for (const [element, attr, val] of iterElementAndAttributesPerType(filePatched, "IfcLengthMeasure")) {
+		// NOTE: There is no risk of editing the same entities twice, as they're all
+		// recreated after the file is reloaded as `filePatched`.
+		if (val instanceof EntityInstance) {
+			// *** Throws here for the FIRST entity-wrapped length measure any real
+			// file has -- see this function's own doc comment / this module's header
+			// comment, finding 4. ***
+			val.setByIndex(0, convertValue(val.getByIndex(0) as FloatOrSequenceOfFloats));
+		} else {
+			const newValue = convertValue(val as FloatOrSequenceOfFloats);
+			element.set(attr.name(), newValue);
+		}
+	}
+
+	// `IfcGeometricRepresentationContext.Precision` is typed as a plain `IfcReal`
+	// but is interpreted in the project length unit, so it must be scaled too.
+	// Subcontexts derive `Precision` from their parent and cannot be set directly.
+	for (const context of filePatched.byType("IfcGeometricRepresentationContext", false)) {
+		const precision = attrOrNull(context, "Precision") as number | null;
+		if (precision !== null) {
+			context.set("Precision", convertUnit(precision, oldLength, newLength));
+		}
+	}
+
+	// Note: this reads `ifcFile` (the ORIGINAL, unpatched file), not `filePatched`,
+	// matching Python exactly.
+	let hasMapUnit = false;
+	if (ifcFile.schema === "IFC2X3") {
+		const crs = getPset(ifcFile.byType("IfcProject")[0], "ePSet_ProjectedCRS") as Record<string, unknown> | null;
+		if (crs?.MapUnit) hasMapUnit = true;
+	} else {
+		const crsList = ifcFile.byType("IfcProjectedCRS");
+		if (crsList.length > 0 && crsList[0].get("MapUnit")) hasMapUnit = true;
+	}
+
+	if (hasMapUnit) {
+		// Python doesn't guard `parameters` against `None` either (a `None` result
+		// would crash with an `AttributeError` there too) -- ported as an unguarded
+		// access via a non-null assertion, matching this project's verbatim-
+		// translation mandate (see this function's own doc comment's "Python doesn't
+		// guard" note above).
+		// biome-ignore lint/style/noNonNullAssertion: Python doesn't guard this either.
+		const parameters = getHelmertTransformationParameters(ifcFile)!;
+		// *** Throws here for IFC2X3 -- see this function's own doc comment / this
+		// module's header comment, finding 6. Fully functional for IFC4+. ***
+		editGeoreferencing(filePatched, {
+			coordinateOperation: {
+				Eastings: parameters.e,
+				Northings: parameters.n,
+				OrthogonalHeight: parameters.h,
+				Scale: parameters.scale / (convertValue(1) as number),
+			},
+		});
+	}
+
+	const unitAssignment = getUnitAssignment(filePatched) as EntityInstance;
+	const newLengthUnitType = newLength.get("UnitType") as string;
+	// "UnitType not available on IfcMonetaryUnit" -- `attrOrNull` is the tolerant,
+	// `getattr(u, "UnitType", None)`-equivalent access this needs.
+	const keptUnits = attrList(unitAssignment, "Units").filter(
+		(u) => (attrOrNull(u, "UnitType") as string | null) !== newLengthUnitType,
+	);
+	unitAssignment.set("Units", [newLength, ...keptUnits]);
+
+	if (!filePatched.getTotalInverses(oldLength)) {
+		removeDeep2(filePatched, oldLength);
+	}
+
+	return filePatched;
 }
