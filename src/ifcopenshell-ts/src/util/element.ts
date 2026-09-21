@@ -107,13 +107,9 @@
 //    Python's own `get_quantity`/`get_quantities`, which read `quantity[3]` with no
 //    `.wrappedValue` call either.
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { AttributeCategory, EntityInstance } from "../entityInstance";
 import { IfcFile } from "../file";
 import * as guid from "../guid";
-import { native } from "../native/native_loader";
 import { getRepresentation } from "./representation";
 
 /** Python: `MATERIAL_TYPE = Literal[...]` (module-level constant in element.py). */
@@ -1729,6 +1725,15 @@ export function getReferencedElements(reference: EntityInstance): Set<EntityInst
 //    would return, not an approximation. See `unbatchRemoveDeep2`'s own doc comment.
 //    Node-only (uses `node:fs`/`node:os`/`node:path`), consistent with `file.ts`'s
 //    `write`/`writeAsync` already being Node-only per that file's own header comment.
+//
+//    UPDATE (Phase 10, `util.unit.convertFileLengthUnits` chunk): this exact
+//    temp-file-round-trip workaround was needed a second time (`convertFileLengthUnits`
+//    needs the identical Python `to_string()`/`from_string()` pair for its own,
+//    unrelated file-clone step) -- factored out of this function into
+//    `IfcFile.toSpfTextViaTempFile`/`fromSpfText` (`file.ts`) for both call sites to
+//    share, per `/code-review`'s finding on that chunk's own PR (this function's own
+//    `fs`/`os`/`path`/`native` imports moved there with it; this function's own
+//    observable behavior is unchanged, confirmed against its own existing tests).
 
 /**
  * Python: `copy(ifc_file, element) -> entity_instance`.
@@ -2015,7 +2020,12 @@ export function batchRemoveDeep2(ifcFile: IfcFile): void {
  * Finish removing elements batched from `removeDeep2` using string replacement. See
  * `batchRemoveDeep2`'s own doc comment for the full story, and this section's header
  * comment (finding 2) for how this ports Python's `file.to_string()`/
- * `ifcopenshell.file.from_string()` pair without a new native primitive.
+ * `ifcopenshell.file.from_string()` pair without a new native primitive --
+ * `IfcFile.toSpfTextViaTempFile`/`fromSpfText` (`file.ts`) now implement that pair
+ * directly (factored out from this function into a shared helper when `util/unit.ts`'s
+ * `convertFileLengthUnits` chunk needed the identical pair, per `/code-review`'s
+ * finding on that chunk's own PR -- purely an extraction, this function's own
+ * behavior is unchanged).
  *
  * **Returns a newly loaded file with the batched elements removed. The caller must
  * discard the old `ifcFile` (and any `EntityInstance`s minted from it) and use the
@@ -2028,22 +2038,7 @@ export function unbatchRemoveDeep2(ifcFile: IfcFile): IfcFile {
 		throw new Error("unbatchRemoveDeep2: ifcFile.toDelete is null -- call batchRemoveDeep2 first");
 	}
 
-	const tempPath = path.join(
-		os.tmpdir(),
-		`ifcopenshell-ts-unbatch-remove-deep2-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.ifc`,
-	);
-	let ifcString: string;
-	try {
-		ifcFile.write(tempPath);
-		ifcString = fs.readFileSync(tempPath, "utf-8");
-	} finally {
-		try {
-			fs.unlinkSync(tempPath);
-		} catch {
-			// Best-effort cleanup -- the temp file living in `os.tmpdir()` a little
-			// longer isn't a correctness problem.
-		}
-	}
+	const ifcString = IfcFile.toSpfTextViaTempFile(ifcFile);
 
 	const lines = ifcString.split("\n");
 	const idsToDelete = [...toDelete].map((e) => e.id()).sort((a, b) => a - b);
@@ -2062,9 +2057,7 @@ export function unbatchRemoveDeep2(ifcFile: IfcFile): IfcFile {
 	}
 
 	ifcFile.toDelete = null;
-	const buffer = Buffer.from(result.join("\n"), "utf-8");
-	const handle = native.file_new_with_data_data_size(buffer, buffer.length);
-	return new IfcFile(handle);
+	return IfcFile.fromSpfText(result.join("\n"));
 }
 
 /**

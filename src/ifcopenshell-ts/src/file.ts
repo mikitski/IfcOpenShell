@@ -19,12 +19,16 @@
 // not a pure-TS attribute walk) now that `traverse`/`traverse_breadth_first`
 // themselves *are* real primitives (added by this chunk, see the final report).
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { EntityInstance, referencesTarget } from "./entityInstance";
 import {
 	type declaration as NativeDeclaration,
 	entity_instance as NativeEntityInstance,
 	file as NativeFile,
 } from "./native/ifcopenshell_native";
+import { native } from "./native/native_loader";
 
 export type InverseReference = [number, unknown];
 export type ElementInverses = Record<number, InverseReference[]>;
@@ -707,6 +711,54 @@ export class IfcFile {
 	 */
 	write(path: string): void {
 		this.nativeFile.write(path);
+	}
+
+	/**
+	 * @internal Serializes `file` to IFC-SPF text (Python: `file.to_string()`) via a
+	 * temp-file round trip -- the native primitive layer has no in-memory
+	 * buffer/string-returning `write`, only the path-based one `write()` above already
+	 * uses (this method's own doc comment). Best-effort deletes the temp file
+	 * afterward (a cleanup failure there isn't a correctness problem -- matches
+	 * `write`'s own atomic-write-via-temp-file precedent, `research/01` SS5 point 3).
+	 *
+	 * Shared by `util/element.ts`'s `unbatchRemoveDeep2` and `util/unit.ts`'s
+	 * `convertFileLengthUnits`, both of which need Python's `file.to_string()`/
+	 * `ifcopenshell.file.from_string()` pair and, until this method was factored out
+	 * here, each hand-rolled an equivalent temp-file dance independently (one of them
+	 * swallowing cleanup failures, the other not) -- unified into this one
+	 * implementation per `/code-review`'s finding on `convertFileLengthUnits`'s own
+	 * PR (real duplication + a real robustness inconsistency between the two, not
+	 * merely stylistic). Paired with `fromSpfText` below. Node-only (uses
+	 * `node:fs`/`node:os`/`node:path`), matching `write`/`writeAsync`'s own scope.
+	 */
+	static toSpfTextViaTempFile(file: IfcFile): string {
+		const tempPath = path.join(
+			os.tmpdir(),
+			`ifcopenshell-ts-spf-text-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.ifc`,
+		);
+		try {
+			file.write(tempPath);
+			return fs.readFileSync(tempPath, "utf-8");
+		} finally {
+			try {
+				fs.unlinkSync(tempPath);
+			} catch {
+				// Best-effort cleanup -- the temp file living in `os.tmpdir()` a little
+				// longer isn't a correctness problem.
+			}
+		}
+	}
+
+	/**
+	 * @internal Constructs a fresh, independent `IfcFile` from IFC-SPF text (Python:
+	 * `ifcopenshell.file.from_string(text)`) -- delegates to the same in-memory-buffer
+	 * primitive `template.ts`'s `create()` already builds a fresh file from (no gap,
+	 * no workaround needed for this half of the pair). Paired with
+	 * `toSpfTextViaTempFile` above.
+	 */
+	static fromSpfText(text: string): IfcFile {
+		const buffer = Buffer.from(text, "utf-8");
+		return new IfcFile(native.file_new_with_data_data_size(buffer, buffer.length));
 	}
 
 	writeAsync(path: string): Promise<void> {
