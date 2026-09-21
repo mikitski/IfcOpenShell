@@ -3707,3 +3707,63 @@ native addon (this port's standing "never trust a self-report" discipline) and f
 a way that would have made `open()` unusable for every valid file, not merely imprecise -- caught by
 the chunk's own test suite before landing, then fixed via the `file.nativeFile.schema()`-throws
 substitute described above.
+
+### `src/wrappergen/`'s own generator (`clang_frontend.py`) crashes on this dev machine, blocking any NEW native-primitive addition -- found 2026-09-21, dispatching `EntityInstance.toString()`
+
+Attempting to add a genuinely new native primitive (`EntityInstance.toString()`/`entity_instance.to_string`
+-- see `PROGRESS.md`'s own tracking row) via the established `_inject_entity_instance_primitives`
+free-function-injection mechanism (already used 8+ times for other SWIG-only/discovery-gap methods,
+e.g. `is_a`, `attribute_kind_of`) required regenerating `src/wrappergen/generated_napi/` for the first
+time since this project's Phase 1/2 bootstrap (confirmed via `git log` -- only 4 commits have ever
+touched that directory, all from that initial phase). The regenerator crashes:
+
+```
+ValueError: Unknown template argument kind 437
+  (raised from clang.cindex.CursorKind.from_id, called via cursor.kind)
+```
+
+**Root cause, fully diagnosed, not just observed:** the PyPI `libclang` Python-bindings package (tried
+both 18.1.1 and 16.0.6 -- the highest version PyPI offers, and one older -- same gap in both) has a
+real, visible hole in its `CursorKind` ID table: `DLLIMPORT_ATTR = CursorKind(419)` is immediately
+followed by `CONVERGENT_ATTR = CursorKind(438)` -- IDs 420-437 are simply never registered, including
+437 (`CXCursor_FlagEnum`, a real Clang cursor kind used for the `__attribute__((flag_enum))` attribute
+Apple's macOS SDK headers apply). The crash happens on the very FIRST header parsed
+(`alignment_helper.h`), at a cursor inside
+`/Applications/Xcode.app/.../MacOSX.sdk/usr/include/mach/vm_types.h` -- pulled in transitively by
+ordinary `#include <cstdint>`/`<string>` chains, nothing `ifcparse`-specific. This strongly suggests
+the Phase 1/2 bootstrap ran on Linux (or with a fuller-fidelity libclang install) where Apple's
+`flag_enum`-attributed system headers never appear at all.
+
+**Why this can't be routed around by a header-set or clang-arg change:** `clang_frontend.py`'s
+`_collect_enum_cursors`/`_collect_class_cursors` walk every descendant cursor of the WHOLE translation
+unit via `_iter_children` (not scoped to the target headers) and call `.kind` on each one BEFORE ever
+checking `_is_in_allowed_headers` -- so this breaks on step one of parsing the very first header, for
+any header list, on any machine using this same third-party `libclang` package. A real fix means
+reordering those two functions (and possibly other `_iter_children` consumers, not fully audited) to
+filter by file location before touching `.kind` -- a small, self-contained, cross-cutting fix to
+shared generator infrastructure, not something to bundle into a single-primitive addition.
+
+**Independently re-verified by the orchestrating session**: reproduced the identical crash myself
+against a completely clean `v0.9.0` checkout (zero involvement of the dispatched agent's own diff),
+confirmed the exact `CursorKind` table gap by reading the installed `clang/cindex.py` directly, and
+confirmed the dispatched agent's own stash-based control test (same crash with their 3-file diff
+stashed out) was legitimate, not a convenient excuse. Also independently compiled the agent's own
+C++ shim addition (`clang++ -std=c++17 -fsyntax-only`) and byte-compiled its Python registration
+change -- both clean.
+
+**Fix options (not yet decided, needs project-owner input):** (a) fix `_collect_enum_cursors`/
+`_collect_class_cursors` to filter by allowed-header location before accessing `.kind`, as its own
+small, separately-reviewable chunk, benefiting every future native-primitive addition, not just this
+one; (b) try a Linux (or otherwise fuller-fidelity libclang) environment where this Apple-SDK-specific
+gap doesn't occur, if one becomes available to this session.
+
+**Depends on / blocked by:** nothing blocks other work landing in the meantime -- this only affects
+adding brand-new native primitives, not anything already exposed. `EntityInstance.toString()`'s own
+3-file diff (the shim function + its `napi_binding.py` registration, both independently verified
+compile-clean above) is committed locally in a worktree, NOT pushed/opened as a PR, pending this
+generator fix.
+
+**Context:** Found while dispatching `EntityInstance.toString()`, the first genuinely new native
+primitive attempted since this project's Phase 1/2 bootstrap -- see `PROGRESS.md`'s own tracking row
+for the full history of why this needed a new primitive (not a TS-side workaround) in the first
+place.
