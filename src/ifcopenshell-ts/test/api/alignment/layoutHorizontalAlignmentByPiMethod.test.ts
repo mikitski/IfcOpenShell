@@ -1,8 +1,37 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// No real Python test file exists for `layout_horizontal_alignment_by_pi_method.py`
-// (confirmed by reading the whole real test directory). Original test coverage written
-// here.
+// A real Python test file, `test/api/alignment/test_horizontal_layout_by_pi_method.py`
+// (63 lines), DOES exist for `layout_horizontal_alignment_by_pi_method.py` -- this
+// file's own previous header comment claimed otherwise; that claim was FALSE,
+// corrected here after a dedicated re-verification pass (see `PROGRESS.md`'s
+// "`api.alignment` test-fidelity backfill" entry, chunk 4/final of that item). Its own
+// docstring explains its intent precisely: "this test will focus on the edge cases of
+// no initial tangent run, no final tangent run, and compound curve (no tangent between
+// curves)" -- exercised via `create_by_pi_method(file, "TestAlignment", coordinates,
+// radii)` (4 PI points, 2 radii) and a final `len(segment_nest.RelatedObjects) == 3`
+// assertion (no numeric/coordinate assertions at all). `create_by_pi_method` wraps the
+// unconditionally-blocked `create()` (see `../../../src/api/alignment/create.ts`'s own
+// header comment), so this fixture isn't reusable as-is.
+//
+// Of the real test's own 3 named edge cases, "no initial tangent run" and "no final
+// tangent run" are both STRUCTURALLY OBSERVABLE on this port today: `createLayoutSegment`
+// (this file's own file 2) unconditionally throws at its very first call (see this
+// file's own header comment below), so this port can only ever observe the FIRST real
+// `createLayoutSegment` call of any PI-method layout -- but with a single-radius input,
+// that first call can be EITHER the back-tangent-run LINE, the CIRCULARARC, or (if both
+// are skipped, e.g. a degenerate zero-length/zero-radius PI) the post-loop "final
+// tangent run" segment itself (see the 3rd test below, which exercises exactly this).
+// "Compound curve, no tangent between curves" is the one edge case genuinely
+// unreachable here -- it only manifests at the SECOND PI or later (a non-degenerate
+// curve-to-curve transition), which this port can never reach since the very first
+// `createLayoutSegment` call of ANY radius already throws. The "no initial tangent run"
+// (zero back-tangent-run, CIRCULARARC-first) and "no final tangent run" (both prior
+// segments skipped, so the loop's own post-loop tangent segment is observed first)
+// cases are both covered below with real, hand-computed intermediate math -- genuinely
+// equivalent coverage to what the real test's own edge cases would exercise, even
+// though the real test itself provides no golden numeric values to port (its own
+// assertion is a segment count, on a fixture this port can't build). Original test
+// coverage written here.
 //
 // This function's own substantial real, portable PI-method geometric math
 // (`angleBT`/`angleFT`/`delta`/`tangent`/`lc`/`xPC`/`yPC`/`xPT`/`yPT`/`tangentRun`) is

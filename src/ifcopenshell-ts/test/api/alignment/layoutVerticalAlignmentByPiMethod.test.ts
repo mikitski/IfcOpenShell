@@ -1,8 +1,27 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// No real Python test file exists for `layout_vertical_alignment_by_pi_method.py`
-// (confirmed by reading the whole real test directory). Original test coverage written
-// here, same shape and treatment as
+// A real Python test file, `test/api/alignment/test_vertical_layout_by_pi_method.py`
+// (80 lines), DOES exist for `layout_vertical_alignment_by_pi_method.py` -- this
+// file's own previous header comment claimed otherwise; that claim was FALSE,
+// corrected here after a dedicated re-verification pass (see `PROGRESS.md`'s
+// "`api.alignment` test-fidelity backfill" entry, chunk 4/final of that item). Its own
+// docstring states the identical edge-case intent as
+// `./layoutHorizontalAlignmentByPiMethod.test.ts`'s own real Python counterpart ("no
+// initial gradient, no final gradient, and compound vertical curve"), built via a full
+// `create(file, "TestAlignment", include_vertical=True)` + manual horizontal segment +
+// `layout_vertical_alignment_by_pi_method(...)` call chain -- unreachable here for the
+// same reason (`create()` is unconditionally blocked, see
+// `../../../src/api/alignment/create.ts`'s own header comment), and for the same
+// structural reason both the "no initial gradient" AND "no final gradient" edge cases
+// are observable on this port (`createLayoutSegment` unconditionally throws at its very
+// first call, so only the FIRST real segment of any PI-method layout is ever reachable
+// -- but with a single-length input, that first segment can be the back-gradient
+// CONSTANTGRADIENT, the PARABOLICARC, or, if both are skipped, the post-loop "final
+// gradient run" segment itself, see the 3rd test below) -- see
+// `./layoutHorizontalAlignmentByPiMethod.test.ts`'s own header comment for the full
+// writeup, which applies here verbatim (only "compound vertical curve, no tangent
+// between curves" is genuinely unreachable, for the identical second-PI-or-later
+// reason). Original test coverage written here, same shape and treatment as
 // `./layoutHorizontalAlignmentByPiMethod.test.ts` (see that file's own header comment
 // for the full writeup of why real, hand-computed intermediate math is verifiable via
 // the one real segment created and nested before each test's throw).
