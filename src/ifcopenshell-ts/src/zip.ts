@@ -28,10 +28,29 @@
 // for this project's actual `.ifcZIP` use case (IFC sample/test files are far smaller),
 // and both would need real, disclosed follow-up work if ever hit; this deliberately
 // doesn't attempt to guess at that unbounded generality up front.
+//
+// *** Security note, added on review: decompression-bomb guard ***
+// This project's own Phase 1 exit criterion explicitly flags "a Node-only (server-side)
+// library plausibly parsing user-uploaded .ifc files" as an untrusted-input attack
+// surface (see `planning/ifcopenshell-ts/20-roadmap.md`'s Phase 1 exit criterion and
+// `40-testing-strategy.md` §7) -- the identical concern applies to `.ifcZIP` archives,
+// which are just as plausibly user-supplied. `zlib.inflateRawSync` has no output-size
+// cap by default, so a maliciously crafted, highly-compressed small ZIP entry ("zip
+// bomb") could decompress into an arbitrarily large buffer and exhaust process memory
+// -- a real DoS vector this reader would otherwise introduce for the first time (unlike
+// the native IFC-SPF parser, this JS-side code has no ASAN/fuzz coverage of its own).
+// Guarded via Node's own `maxOutputLength` option (confirmed to throw a catchable
+// `ERR_BUFFER_TOO_LARGE`, not exhaust memory, when exceeded): capped at 2GiB, matching
+// this same file's own already-disclosed ZIP64 (>4GB) scope boundary -- generous enough
+// for any realistic IFC file, while still bounding the worst case.
 
 import * as fs from "node:fs";
 import * as nodePath from "node:path";
 import * as zlib from "node:zlib";
+
+/** Bounds `inflateRawSync`'s own output size against a decompression-bomb attack --
+ * see this file's own "Security note" above. */
+const MAX_DECOMPRESSED_ENTRY_SIZE = 2 * 1024 * 1024 * 1024;
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
@@ -53,6 +72,12 @@ export interface ZipEntry {
  * reading a ZIP's directory without a streaming parser.
  */
 function findEndOfCentralDirectory(buffer: Buffer): number {
+	// A buffer smaller than the fixed EOCD record can never contain one -- guarded
+	// explicitly so a tiny/empty file throws this function's own clean error message
+	// instead of a `RangeError` from `readUInt32LE`'s own bounds check.
+	if (buffer.length < EOCD_FIXED_SIZE) {
+		throw new Error("Not a valid ZIP archive (no End Of Central Directory record found).");
+	}
 	const minOffset = Math.max(0, buffer.length - EOCD_FIXED_SIZE - MAX_ZIP_COMMENT_SIZE);
 	for (let offset = buffer.length - EOCD_FIXED_SIZE; offset >= minOffset; offset--) {
 		if (buffer.readUInt32LE(offset) === EOCD_SIGNATURE) {
@@ -82,7 +107,7 @@ function readLocalEntryData(
 	}
 	if (compressionMethod === 8) {
 		// DEFLATE -- ZIP entries use the raw deflate stream (no zlib/gzip header/trailer).
-		return zlib.inflateRawSync(compressed);
+		return zlib.inflateRawSync(compressed, { maxOutputLength: MAX_DECOMPRESSED_ENTRY_SIZE });
 	}
 	throw new Error(
 		`Unsupported ZIP compression method (${compressionMethod}) -- this hand-rolled reader only supports STORED (0) and DEFLATE (8), matching what real-world .ifcZIP exports use.`,
