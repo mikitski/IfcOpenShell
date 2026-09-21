@@ -22,8 +22,13 @@
 // `ifcopenshell.geom` (native geometry-kernel) hard blocker, documented as a single named
 // gap rather than 39 near-identical throwing stubs, see `shape.ts`'s own header comment
 // and `TODOS.md`.
+// `brick`/`fm`/`profiler` are Phase 10's "Niche `util` modules" chunk -- the last 3 real
+// Python `util` files with no TS port of any kind. `getFmhemClasses` (`fm`) is
+// unconditionally blocked at runtime by the pre-existing `attribute.getEnumItems`
+// primitive-layer gap -- see `fm.ts`'s own header comment.
 export * as alignment from "./alignment";
 export * as attribute from "./attribute";
+export * as brick from "./brick";
 export * as classification from "./classification";
 export * as constraint from "./constraint";
 export * as cost from "./cost";
@@ -32,10 +37,12 @@ export * as date from "./date";
 export * as doc from "./doc";
 export * as element from "./element";
 export * as file from "./file";
+export * as fm from "./fm";
 export * as geolocation from "./geolocation";
 export * as migrator from "./migrator";
 export * as mvdInfo from "./mvdInfo";
 export * as placement from "./placement";
+export * as profiler from "./profiler";
 export * as pset from "./pset";
 export * as representation from "./representation";
 export * as resource from "./resource";

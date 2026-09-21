@@ -192,15 +192,24 @@ export function getSubtypes(declaration: NativeEntity): NativeEntity[] {
 	return getClasses(declaration);
 }
 
-/** @internal Grouping helper backing `getSubtypes`'s workaround -- see this file's
- * header comment. Not memoized (unlike Python's implicit reliance on the native
- * `subtypes()` vector being pre-computed once at schema-load time): this chunk
- * recomputes it on every `getSubtypes` call, since a `schema_definition` handle isn't
- * itself a stable cache key across the `template.create()`-based schema access this
- * module also needs (see `getSchemaDefinition` below) -- an accepted, small,
- * per-call cost (one linear scan of the schema's entities), not a correctness issue.
+/** Grouping helper backing `getSubtypes`'s workaround -- see this file's header
+ * comment. Not memoized (unlike Python's implicit reliance on the native `subtypes()`
+ * vector being pre-computed once at schema-load time): this chunk recomputes it on
+ * every `getSubtypes` call, since a `schema_definition` handle isn't itself a stable
+ * cache key across the `template.create()`-based schema access this module also needs
+ * (see `getSchemaDefinition` below) -- an accepted, small, per-call cost (one linear
+ * scan of the schema's entities), not a correctness issue.
+ *
+ * Exported (Phase 10, `util.fm` chunk) for reuse by `util/fm.ts`'s `getFmhemClasses` --
+ * it needs the exact same "direct-subtype grouping, worked around via a schema-wide
+ * `.supertype()` scan since `entity::subtypes()` itself has no N-API binding" capability
+ * this file's own `getSubtypes` already established, but with its OWN per-node
+ * include/exclude logic (`fmhemExcludedClasses`/`is_abstract()`) computed once up
+ * front rather than per node, so it needs the raw grouping map, not `getSubtypes`'s own
+ * filtered flat list. Second real consumer, same "export narrowly once one exists"
+ * precedent as `getSchemaDefinition`/`entityName` above.
  */
-function directSubtypesOf(schema: NativeSchemaDefinition): Map<string, NativeEntity[]> {
+export function directSubtypesOf(schema: NativeSchemaDefinition): Map<string, NativeEntity[]> {
 	const children = new Map<string, NativeEntity[]>();
 	for (const declaration of schema.declarations()) {
 		const entity = declaration.as_entity();
