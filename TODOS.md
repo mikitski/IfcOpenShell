@@ -3602,3 +3602,24 @@ multi-schema native addon (reusing a leftover install at
 neither bug is caused by or related to PR #145's own changes.
 
 </details>
+
+### A third latent IFC2X3 test bug in already-merged `test/util/brick.test.ts` (PR #143)
+
+**What:** 6 of `util.brick getElementFeeds`'s own IFC2X3 tests throw `Entity with name 'IfcPump'
+not found in schema 'IFC2X3'`. Confirmed against `src/generated/ifc2x3.d.ts`: `IfcPump` doesn't
+exist on IFC2X3 at all (a genuine IFC4+ addition -- IFC2X3 has no `IfcPump`/`IfcFan`/`IfcCompressor`
+subtypes of `IfcFlowMovingDevice` whatsoever, only the generic `IfcFlowMovingDevice` base class
+itself). Found 2026-09-21 while independently verifying an unrelated PR (#147, which fixed 2 other
+already-tracked latent test bugs) against the same locally-built multi-schema native addon -- not
+caused by or related to #147's own changes (it doesn't touch `brick.ts`/`brick.test.ts` at all).
+
+**Fix:** Substitute `IfcFlowMovingDevice` directly for `IfcPump` on IFC2X3 (schema-branch the same
+way PR #147's own fix did for `fm.test.ts`'s analogous `IfcBurnerType`/`IfcCoilType` situation) --
+`getElementFeeds` itself has no dependency on which concrete `IfcFlowMovingDevice` subtype is used,
+only on the connectivity graph, so this should be a mechanical, low-risk fix.
+
+**Depends on / blocked by:** Nothing -- self-contained test-only fix, no production code changes
+needed, matching the sibling entry above's own shape.
+
+**Context:** Found 2026-09-21 while independently re-verifying PR #147 with the same locally-built
+multi-schema native addon used for PR #145's own review.
