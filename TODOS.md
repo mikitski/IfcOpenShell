@@ -3603,23 +3603,35 @@ neither bug is caused by or related to PR #145's own changes.
 
 </details>
 
-### A third latent IFC2X3 test bug in already-merged `test/util/brick.test.ts` (PR #143)
+### A third (and fourth) latent IFC2X3 test bug in already-merged `test/util/brick.test.ts` (PR #143) — RESOLVED 2026-09-21
 
-**What:** 6 of `util.brick getElementFeeds`'s own IFC2X3 tests throw `Entity with name 'IfcPump'
-not found in schema 'IFC2X3'`. Confirmed against `src/generated/ifc2x3.d.ts`: `IfcPump` doesn't
-exist on IFC2X3 at all (a genuine IFC4+ addition -- IFC2X3 has no `IfcPump`/`IfcFan`/`IfcCompressor`
-subtypes of `IfcFlowMovingDevice` whatsoever, only the generic `IfcFlowMovingDevice` base class
-itself). Found 2026-09-21 while independently verifying an unrelated PR (#147, which fixed 2 other
-already-tracked latent test bugs) against the same locally-built multi-schema native addon -- not
-caused by or related to #147's own changes (it doesn't touch `brick.ts`/`brick.test.ts` at all).
+**What:** 6 of `util.brick getElementFeeds`'s own IFC2X3 tests threw `Entity with name 'IfcPump'
+not found in schema 'IFC2X3'` -- `IfcPump` doesn't exist on IFC2X3 at all (a genuine IFC4+ addition
+-- IFC2X3 has no `IfcPump`/`IfcFan`/`IfcCompressor` subtypes of `IfcFlowMovingDevice` whatsoever,
+only the generic base class itself). Fixed by substituting `IfcFlowMovingDevice` directly for
+`IfcPump` on IFC2X3 (a new local `flowMovingDeviceClass(schemaName)` helper) -- `getElementFeeds`
+has no dependency on which concrete subtype is used, only on the connectivity graph.
 
-**Fix:** Substitute `IfcFlowMovingDevice` directly for `IfcPump` on IFC2X3 (schema-branch the same
-way PR #147's own fix did for `fm.test.ts`'s analogous `IfcBurnerType`/`IfcCoilType` situation) --
-`getElementFeeds` itself has no dependency on which concrete `IfcFlowMovingDevice` subtype is used,
-only on the connectivity graph, so this should be a mechanical, low-risk fix.
+**A second, related bug found while fixing the first**: 2 of `util.brick getBrickType -- Brick
+classification reference`'s own tests also threw, using `IfcAirTerminalBox` -- also absent from
+IFC2X3 entirely. Investigating further: NONE of `ifc4_to_brick.json`'s 20 bare-class mapping keys
+(`IfcBoiler`/`IfcChiller`/`IfcAirTerminalBox`/etc., checked one by one against `ifc2x3.d.ts`) exist
+on IFC2X3 at all -- IFC2X3 predates the fine-grained flow-equipment taxonomy this whole mapping
+table is built against. Fixed differently per test: the "returns Location verbatim" test doesn't
+actually depend on the JSON table resolving anything (the classification-reference branch wins
+outright before the table is ever consulted) -- substituted `IfcFlowController` for IFC2X3 there
+(already proven instantiable there by this same file's own `getBrickType (IFC2X3)` block). The
+"falls through to JSON-table lookup" test DOES depend on a real table match for the element's own
+bare class -- since no such match exists on IFC2X3 at all, this exact scenario is genuinely
+untestable there, not just inconvenient to fixture -- excluded via `test.skipIf(schemaName ===
+"IFC2X3")` rather than forced into a misleading substitute.
 
-**Depends on / blocked by:** Nothing -- self-contained test-only fix, no production code changes
-needed, matching the sibling entry above's own shape.
+**Verification:** all 20 tests in `brick.test.ts` pass (1 correctly skipped) against a real,
+locally-built multi-schema (IFC2X3/IFC4/IFC4X3) native addon; full suite shows only the same 9
+pre-existing, already-documented unrelated failures. `tsc`/`biome` both clean.
 
-**Context:** Found 2026-09-21 while independently re-verifying PR #147 with the same locally-built
-multi-schema native addon used for PR #145's own review.
+**Context:** Found 2026-09-21 while independently re-verifying PR #147 (which fixed 2 *other*
+already-tracked latent test bugs) against the same locally-built multi-schema native addon used for
+PR #145's own review -- not caused by or related to #147's own changes (it doesn't touch
+`brick.ts`/`brick.test.ts` at all). Fixed directly by the orchestrating session (small, well-
+understood, test-only scope) rather than via a full dispatch cycle.
