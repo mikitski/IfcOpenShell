@@ -53,7 +53,9 @@ changes.
   CI is green and it's mergeable (this repo's branch protection requires every change, including
   docs, to go through a PR — direct pushes to `v0.9.0` are rejected).
 - Docs PR open → I monitor for CI completion (via `Monitor`, keyed by check-run `id`) and merge
-  once green. **While that CI runs, I generate the next chunk's prompt** rather than idling.
+  once green. **I do not wait for that docs PR's CI or merge before dispatching the next
+  implementation chunk** — the docs update and the next chunk's implementation are independent
+  work streams; dispatching immediately avoids idling the loop on a slow, unrelated CI run.
 
 ## 4. Publish gate
 
@@ -110,3 +112,11 @@ practice before being locked in here. Two points were surfaced and resolved by t
   `@anthropic-ai/sandbox-runtime`." That package isn't present in this repo and couldn't be
   confirmed. Decided: drop the claim rather than assert an unverifiable guarantee; record actual
   current behavior (Agent tool's built-in `isolation: "worktree"`) instead.
+
+## Clarifications after initial lock-in
+
+- **2026-09-21, docs-PR/next-chunk sequencing.** The original §3 wording ("I generate the next
+  chunk's prompt" while docs-PR CI runs) was ambiguous about whether that meant drafting only, or
+  actually dispatching. The owner clarified directly: dispatch the next implementation chunk
+  immediately, without waiting for the preceding docs-only PR's CI to pass or for it to be merged
+  — the two are independent work streams and there is no reason to serialize them.
