@@ -81,6 +81,16 @@ function sourcePort(file: IfcFile, schemaName: Schema, element: EntityInstance):
 	return port;
 }
 
+/** `IfcPump` doesn't exist on IFC2X3 at all (confirmed against `ifc2x3.d.ts` -- IFC2X3
+ * has no `IfcPump`/`IfcFan`/`IfcCompressor` subtypes of `IfcFlowMovingDevice`
+ * whatsoever, only the generic base class itself, a genuine IFC4+ schema addition).
+ * `getElementFeeds` has no dependency on which concrete `IfcFlowMovingDevice` subtype
+ * these fixtures use -- only on port connectivity -- so the generic base class on
+ * IFC2X3 exercises identical behavior. See `TODOS.md`'s matching entry. */
+function flowMovingDeviceClass(schemaName: Schema): string {
+	return schemaName === "IFC2X3" ? "IfcFlowMovingDevice" : "IfcPump";
+}
+
 // --- TestGetBrickTypeIFC4 ---
 
 describe("util.brick getBrickType (IFC4)", () => {
@@ -121,26 +131,46 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getBrickType -- Brick classificatio
 		const reference = file.createEntity("IfcClassificationReference");
 		reference.set("ReferencedSource", classification);
 		reference.set("Location", "https://brickschema.org/schema/Brick#SomeVeryCustomThing");
-		const element = file.createEntity("IfcAirTerminalBox");
+		// `IfcAirTerminalBox` doesn't exist on IFC2X3 at all (confirmed against
+		// `ifc2x3.d.ts` -- none of `ifc4_to_brick.json`'s 20 bare-class keys exist on
+		// IFC2X3, a genuine IFC4+ schema-granularity addition) -- substituted with
+		// `IfcFlowController` there (already confirmed instantiable on IFC2X3 by this
+		// same file's own `getBrickType (IFC2X3)` describe block above). This test's own
+		// assertion never actually depends on the JSON table resolving a specific value
+		// for the substitute class -- only that the classification-reference branch's
+		// own return value wins outright -- so the substitution doesn't weaken it.
+		const element = file.createEntity(schemaName === "IFC2X3" ? "IfcFlowController" : "IfcAirTerminalBox");
 		assignClassification(file, element, reference);
 
 		// Confirms this branch is checked, and wins, BEFORE the JSON-table lookup
-		// that would otherwise return "...#TerminalUnit" for a bare IfcAirTerminalBox.
+		// that would otherwise return "...#TerminalUnit" for a bare IfcAirTerminalBox
+		// (IFC4+ only -- see this test's own header comment for the IFC2X3 substitution).
 		expect(subject.getBrickType(element)).toBe("https://brickschema.org/schema/Brick#SomeVeryCustomThing");
 	});
 
-	test("a non-'Brick' classification system is ignored, falling through to the JSON-table lookup", () => {
-		const file = createTestFile(schemaName);
-		const classification = file.createEntity("IfcClassification");
-		classification.set("Name", "Uniclass");
-		const reference = file.createEntity("IfcClassificationReference");
-		reference.set("ReferencedSource", classification);
-		reference.set("Location", "Pr_70_70_66");
-		const element = file.createEntity("IfcAirTerminalBox");
-		assignClassification(file, element, reference);
+	// Excludes IFC2X3: unlike the sibling test above, this one's own assertion
+	// specifically depends on the JSON-table lookup resolving a real match for the
+	// element's OWN bare class -- but NONE of `ifc4_to_brick.json`'s 20 bare-class
+	// keys (`IfcBoiler`/`IfcChiller`/`IfcAirTerminalBox`/etc.) exist on IFC2X3 at all
+	// (confirmed against `ifc2x3.d.ts`, one by one) -- IFC2X3 predates the fine-grained
+	// flow-equipment taxonomy this whole mapping table is built against, so this
+	// exact "falls through to a real JSON-table match" scenario is genuinely
+	// untestable there, not just inconvenient to fixture.
+	test.skipIf(schemaName === "IFC2X3")(
+		"a non-'Brick' classification system is ignored, falling through to the JSON-table lookup",
+		() => {
+			const file = createTestFile(schemaName);
+			const classification = file.createEntity("IfcClassification");
+			classification.set("Name", "Uniclass");
+			const reference = file.createEntity("IfcClassificationReference");
+			reference.set("ReferencedSource", classification);
+			reference.set("Location", "Pr_70_70_66");
+			const element = file.createEntity("IfcAirTerminalBox");
+			assignClassification(file, element, reference);
 
-		expect(subject.getBrickType(element)).toBe("https://brickschema.org/schema/Brick#TerminalUnit");
-	});
+			expect(subject.getBrickType(element)).toBe("https://brickschema.org/schema/Brick#TerminalUnit");
+		},
+	);
 });
 
 // --- Original coverage: getElementFeeds (no real Python test class at all -- see
@@ -149,7 +179,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getBrickType -- Brick classificatio
 describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName) => {
 	test("walks through an IfcFlowFitting, collecting downstream non-fitting/non-segment equipment", () => {
 		const file = createTestFile(schemaName);
-		const pumpA = file.createEntity("IfcPump");
+		const pumpA = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portA = sourcePort(file, schemaName, pumpA);
 
 		const fittingB = file.createEntity("IfcFlowFitting");
@@ -157,7 +187,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 		const portB2 = sourcePort(file, schemaName, fittingB);
 		connectPorts(file, portA, portB1);
 
-		const pumpC = file.createEntity("IfcPump");
+		const pumpC = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portC = sourcePort(file, schemaName, pumpC);
 		connectPorts(file, portB2, portC);
 
@@ -168,7 +198,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 
 	test("an IfcFlowSegment is also walked through, not just IfcFlowFitting", () => {
 		const file = createTestFile(schemaName);
-		const pumpA = file.createEntity("IfcPump");
+		const pumpA = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portA = sourcePort(file, schemaName, pumpA);
 
 		const segmentB = file.createEntity("IfcFlowSegment");
@@ -176,7 +206,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 		const portB2 = sourcePort(file, schemaName, segmentB);
 		connectPorts(file, portA, portB1);
 
-		const pumpC = file.createEntity("IfcPump");
+		const pumpC = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portC = sourcePort(file, schemaName, pumpC);
 		connectPorts(file, portB2, portC);
 
@@ -187,7 +217,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 
 	test("an element with no SOURCE-direction connections returns an empty set", () => {
 		const file = createTestFile(schemaName);
-		const pump = file.createEntity("IfcPump");
+		const pump = file.createEntity(flowMovingDeviceClass(schemaName));
 		sourcePort(file, schemaName, pump);
 
 		expect(subject.getElementFeeds(pump).size).toBe(0);
@@ -195,7 +225,7 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 
 	test("branches: a fitting feeding two separate downstream equipment", () => {
 		const file = createTestFile(schemaName);
-		const pumpA = file.createEntity("IfcPump");
+		const pumpA = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portA = sourcePort(file, schemaName, pumpA);
 
 		const fittingB = file.createEntity("IfcFlowFitting");
@@ -204,11 +234,11 @@ describe.each(AVAILABLE_SCHEMAS)("util.brick getElementFeeds (%s)", (schemaName)
 		const portB3 = sourcePort(file, schemaName, fittingB);
 		connectPorts(file, portA, portB1);
 
-		const pumpC = file.createEntity("IfcPump");
+		const pumpC = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portC = sourcePort(file, schemaName, pumpC);
 		connectPorts(file, portB2, portC);
 
-		const pumpD = file.createEntity("IfcPump");
+		const pumpD = file.createEntity(flowMovingDeviceClass(schemaName));
 		const portD = sourcePort(file, schemaName, pumpD);
 		connectPorts(file, portB3, portD);
 
