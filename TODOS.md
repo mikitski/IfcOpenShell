@@ -3509,3 +3509,48 @@ before now.
 layer entry in this file. Does not block anything else in `util/fm.ts` -- `getCobieTypes`/
 `getCobieComponents`/`getFmhemTypes` (the other 3 functions in that module) have no dependency on
 this gap at all and are fully functional today.
+
+### Two latent test bugs in already-merged PRs, found while independently reviewing an unrelated PR against a real multi-schema build
+
+**What:** While reviewing PR #145 (`util.unit.convertFileLengthUnits`, unrelated), the orchestrating
+session built a genuine multi-schema (IFC2X3/IFC4/IFC4X3) native addon to verify it -- something
+neither PR #141's nor PR #143's own dispatched agent had done (both built IFC4-only addons, matching
+CI's own core build). Running the FULL suite against that multi-schema build surfaced 2 real,
+pre-existing test failures in already-merged code, unrelated to PR #145's own changes (confirmed:
+neither failing file nor any of its dependencies appears in PR #145's diff):
+
+1. **`test/api/sequence/duplicateTask.test.ts` (PR #141, `api.sequence` chunk 4)**: 2 of its own
+   IFC2X3 tests ("duplicates nested subtasks and re-nests..." / "duplicating a sequenced pair...")
+   throw `entity instance of type 'IFC2X3.IfcTask' has no attribute 'Nests'`/`'TaskTime'`. This
+   module's own chunk 1 finding already established that IFC2X3's `IfcTask` has neither `Nests`/
+   `IsNestedBy` NOR `TaskTime` at all (confirmed again here against `ifc2x3.d.ts` directly) -- task
+   NESTING and TASK TIMES are both impossible to construct on IFC2X3 in the first place, so these 2
+   tests' own IFC2X3 fixtures were never meaningfully testable to begin with. **Fix:** exclude IFC2X3
+   from these 2 specific tests (or scope the whole nesting-related `describe` block to
+   `AVAILABLE_SCHEMAS.filter(s => s !== "IFC2X3")`), matching this module's own established
+   precedent elsewhere for genuinely IFC2X3-incompatible functionality.
+
+2. **`test/util/fm.test.ts` (PR #143, `util.fm` chunk)**: its own "throws for IFC2X3 too -- the same
+   pre-existing gap, not schema-specific" test asserts `toThrow(/enumeration_items/)`, but the ACTUAL
+   throw is `Entity with name 'IfcShadingDeviceType' not found in schema 'IFC2X3'`. Confirmed:
+   `IfcShadingDeviceType` genuinely does not exist on IFC2X3 (absent from `ifc2x3.d.ts` entirely),
+   yet real Python's own `fmhem_classes_ifc2x3` list (`ifcopenshell/util/fm.py`) includes it verbatim
+   -- meaning real Python's OWN `get_fmhem_classes("IFC2X3")` likely also crashes, just via a
+   different, earlier code path (`schema_.declaration_by_name` failing on a nonexistent class,
+   before ever reaching `get_enum_items`) than this test assumed. Not yet traced far enough to
+   confirm exactly why `IfcDoorStyle`/`IfcWindowStyle` (the 2 list entries before
+   `IfcShadingDeviceType`) don't throw first via the already-tracked `getEnumItems` gap -- needs a
+   dedicated investigation, not fixed here. **Fix:** re-verify the exact real Python throw shape for
+   this exact call (ideally against a real Python install, matching this project's own "verify
+   empirically, don't assume" discipline), then correct this test's own expectation to match --
+   likely a `toThrow(/IfcShadingDeviceType|not found/)` or similar, not `/enumeration_items/`.
+
+**Depends on / blocked by:** Nothing -- both are self-contained test-only fixes, no production code
+or native primitive changes needed. Low priority (neither affects any real caller's behavior, only
+these 2 test files' own coverage accuracy) but should be picked up as a small, dedicated follow-up
+chunk so the full-suite multi-schema pass count stays meaningful going forward.
+
+**Context:** Found 2026-09-20 while independently verifying PR #145 with a locally-built
+multi-schema native addon (reusing a leftover install at
+`/private/tmp/ifcopenshell-ts-install-multi` from an earlier chunk in this same session) --
+neither bug is caused by or related to PR #145's own changes.
