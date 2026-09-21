@@ -37,6 +37,23 @@ export { getClassAttributeMeta } from "./attributeCache";
 // `ifcopenshell.util.element.get_pset(...)` (see `util/index.ts`).
 export * as util from "./util";
 
+// Phase 10 (parity-audit-found `ifcopenshell.open()` chunk): the module-level surface
+// of real `ifcopenshell/__init__.py` -- `open`/`guessFormat`/`schemaByName`, plus
+// `Error`/`SchemaError` re-exported under their real Python names (see `open.ts`'s own
+// header comment for why they're defined there as `IfcOpenShellError`/`IfcSchemaError`
+// and only aliased to the JS-global-shadowing names here, as opt-in named exports).
+export {
+	open,
+	guessFormat,
+	schemaByName,
+	IfcOpenShellError,
+	IfcSchemaError,
+	FileNotFoundError,
+	LookupError,
+} from "./open";
+export { IfcOpenShellError as Error, IfcSchemaError as SchemaError } from "./open";
+export type { OpenOptions, SupportedFormat } from "./open";
+
 // Phase 6, first chunk: the `ifcopenshell.api` pre/post-listener hook system
 // (planning/ifcopenshell-ts/20-roadmap.md Phase 6's "cross-cutting, do early" item) --
 // see `api/hooks.ts`'s own header comment for the exact ported scope and the two

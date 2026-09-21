@@ -3635,3 +3635,75 @@ already-tracked latent test bugs) against the same locally-built multi-schema na
 PR #145's own review -- not caused by or related to #147's own changes (it doesn't touch
 `brick.ts`/`brick.test.ts` at all). Fixed directly by the orchestrating session (small, well-
 understood, test-only scope) rather than via a full dispatch cycle.
+
+---
+
+### Native primitive-layer gap: `file_open_status` (`good()`'s return type) has no bound value/enum accessor -- and `good()`'s own nullness is NOT a usable success/failure signal either
+
+**What:** Real Python's `ifcopenshell.open()` distinguishes 5 outcomes via
+`f.good().value()`: `READ_ERROR` -> `IOError`, `NO_HEADER` -> `Error`, `UNSUPPORTED_SCHEMA` ->
+`SchemaError` (with the actual unsupported schema identifier in the message), `INVALID_SYNTAX` ->
+`Error`, and `UNKNOWN` -> a silent no-op (the file is still returned). This port's native primitive
+layer has NO accessor for that enum value at all: the generated `file_open_status` TS class
+(`src/native/ifcopenshell_native.ts`) is a bare handle wrapper with zero methods, and the generated
+C API header (`src/wrappergen/generated_napi/ifcopenshell_native_c_api.h`) only exposes
+`ifcopenshell_file_good`/`ifcopenshell_file_open_status_free` -- no value/enum accessor exists to
+bind even if a TS method were added to wrap it.
+
+**A real correction to how this was first understood (disclosed here so it isn't re-discovered the
+hard way):** it's tempting to assume `good()` returning a non-null handle means "some problem
+occurred" and a null return means "no problem" (a plausible-looking coarse substitute for the
+missing `.value()` accessor). This is **wrong**, confirmed empirically against a real, locally-built
+native addon, not assumed: `good()` returns an enum VALUE by value in the real C++ core
+(`src/ifcparse/file_open_status.h`: `file_open_status good() const { return good_; }`, default-
+initialized to `SUCCESS`), and `ifcopenshell_file_good`'s own C++ implementation
+(`src/wrappergen/generated_napi/ifcopenshell_native_c_api.cpp`) unconditionally heap-allocates a
+status object wrapping whatever that value is -- `SUCCESS` included. `nullptr` is returned from the
+C API ONLY on a genuine C++ exception (e.g. a disposed/null handle), which the generated N-API
+wrapper (`napi_file_good`) converts into a THROWN JS exception rather than a JS `null` return
+anyway. Net effect: calling `.good()` on this port's binding for any live file handle -- a
+perfectly well-formed file included -- always returns a non-null wrapped object. Verified directly:
+opening a known-good fixture file and a deliberately garbage one both returned non-null `good()`
+handles. A "non-null means a problem" check throws for literally every file, including well-formed
+ones -- this was caught during `ifcopenshell.open()`'s own port (PR introducing `src/open.ts`)
+before it shipped, via the standard test suite immediately catching it (every `open()`-of-a-valid-
+file test failed), not left as a shipped bug.
+
+**The actual, verified-working substitute now in use (`src/open.ts`'s `open()`):** forcing schema
+resolution on the freshly-opened file (`file.nativeFile.schema()`, i.e. `native.file_schema(handle)`)
+reliably THROWS a native `"No schema loaded"` exception for a file that failed to parse, and does
+NOT throw for one that parsed successfully. Confirmed empirically for 3 of the 4 real error cases: a
+syntactically garbage file, a completely empty file, and a well-formed SPF header naming an
+unregistered schema identifier (simulating `UNSUPPORTED_SCHEMA`) all throw this exact message; the
+4th (`READ_ERROR` -- file exists but is unreadable, e.g. a permissions problem) wasn't specifically
+exercised, but would most plausibly throw synchronously from the file-open native call itself before
+this check is even reached (not specially caught either way -- it's left to propagate as a plain
+thrown error, just not wrapped in `IfcOpenShellError`). This gives a reliable success/failure signal
+this port didn't have before, but it's still coarser than real Python's own 5-way switch: it can't
+distinguish which of the 4 problem cases occurred, and can't single out the harmless `UNKNOWN` no-op
+case either, so `src/open.ts`'s `open()` throws one generic `IfcOpenShellError` for any of them
+(a disclosed, conservative choice -- see that file's own header comment on the `good()`/`schema()`
+section for the full writeup).
+
+**Fix:** Bind a real value accessor for `file_open_status` (e.g. `ifcopenshell_file_open_status_value`
+returning the underlying `int`/enum in the C API, wired through to a TS `.value()` method) to reach
+real Python's full 5-way fidelity -- `IOError` for `READ_ERROR`, a precise `SchemaError` message
+(needs `spf_header`'s own separate, already-tracked "no `file_schema()` sub-entity accessor" gap
+fixed too, to read the actual unsupported schema identifiers back out) for `UNSUPPORTED_SCHEMA`, and
+correctly no-op-ing (not throwing) for the genuinely-harmless `UNKNOWN` case instead of this port's
+current conservative over-throw.
+
+**Depends on / blocked by:** A real C++/N-API primitive addition -- needs a `cmake`/C++ toolchain to
+implement and verify, same long-standing constraint as this file's other native-primitive-layer
+entries. Nothing blocks other work landing in the meantime: `open()`'s own `schema()`-based
+substitute is a reliable enough success/failure signal for ordinary use, just not as diagnostically
+precise as real Python.
+
+**Context:** Found and corrected during the `ifcopenshell.open()` module-level-surface port
+(`src/open.ts`/`src/zip.ts`, 2026-09-21) -- the pre-dispatch investigation that scoped this chunk
+had already correctly identified the missing value accessor, but its own description of `good()`'s
+nullness as a usable coarse signal was independently re-verified against a real, locally-built
+native addon (this port's standing "never trust a self-report" discipline) and found to be wrong in
+a way that would have made `open()` unusable for every valid file, not merely imprecise -- caught by
+the chunk's own test suite before landing, then fixed via the `file.nativeFile.schema()`-throws
+substitute described above.
