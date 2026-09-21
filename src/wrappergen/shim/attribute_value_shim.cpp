@@ -11,6 +11,7 @@
 #include <boost/dynamic_bitset.hpp>
 #include <boost/logic/tribool.hpp>
 
+#include <sstream>
 #include <stdexcept>
 
 namespace ifcopenshell {
@@ -475,6 +476,12 @@ std::vector<std::string> get_inverse_attribute_names(const express::base& instan
 
 bool is_a(const express::base& instance, const std::string& name) {
     return instance.declaration().is(name);
+}
+
+std::string to_string(const express::base& instance, bool uppercase) {
+    std::ostringstream oss;
+    instance.to_string(oss, uppercase);
+    return oss.str();
 }
 
 std::vector<attribute_value_variant> get_all_attribute_values(const express::base& instance) {

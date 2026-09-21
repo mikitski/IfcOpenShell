@@ -361,6 +361,17 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
     skips static methods (`if child.is_static_method(): continue`), so the same
     free-function injection technique picks them up here.
 
+    `to_string` (PROGRESS.md's `EntityInstance.toString()` row) was added afterwards,
+    the first genuinely new primitive since this project's Phase 1/2 bootstrap: unlike
+    the rest of this list, the real underlying C++ method (`express::base::to_string`,
+    parse.cpp) is neither missing nor static -- clang's generator skips it only because
+    its `std::ostream&` output parameter has no adapter, matching the existing
+    "return-type collision"/ordinary-discovery-gap category this whole mechanism exists
+    for. Also the first entry here needing a `bool`-adapter *parameter* (every prior
+    entry only used `bool` as a return type, on `is_a`) -- confirmed working end-to-end
+    (C ABI `_parameter_c_type`, N-API `napi_get_value_bool`, TS `boolean`) by reading
+    `emit.py` before relying on it, not assumed.
+
     Deliberately NOT injected here (disclosed scope cut, not an oversight):
     `get_attribute_names`/`get_inverse_attribute_names` (`std::vector<std::string>`
     returns) -- doing so would need a third new adapter kind ("sequence of scalar",
@@ -457,6 +468,16 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
         return_cpp_type="bool",
         return_adapter="bool",
     )
+    uppercase_parameter = ParameterModel(name="uppercase", cpp_name="uppercase", cpp_type="bool", adapter="bool")
+    to_string = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::to_string",
+        "to_string",
+        "to_string",
+        [uppercase_parameter],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
     get_all_attribute_values = _free_function(
         entity_instance,
         "ifcopenshell::wrappergen::get_all_attribute_values",
@@ -497,6 +518,7 @@ def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterMod
             attribute_type,
             get_attribute_category,
             is_a,
+            to_string,
             get_all_attribute_values,
             traverse,
             traverse_breadth_first,
