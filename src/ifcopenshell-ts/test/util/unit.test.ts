@@ -739,9 +739,39 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit iterElementAndAttributesPerType (%s)
 // second, competing `IfcGeometricRepresentationContext`/`IfcSIUnit` already present
 // before the test's own fixture-building code runs).
 
+// Reviewer fix (found empirically, against this exact worktree's own built native
+// addon -- not caught by the dispatch's own non-functional local test run, which had
+// no buildable native addon in its sandbox): `stripProjectBootstrap`'s own doc comment
+// already discloses that removing `IfcProject` cascades (via `removeDeep2`) and takes
+// down the ENTIRE owner-history chain (`IfcPersonAndOrganization`/`IfcApplication`/
+// `IfcPerson`/`IfcOrganization`) with it, since those become orphaned once the project
+// (their only remaining referencer) is removed. On IFC2X3, `api.owner.createOwnerHistory`
+// -- which `api.root.createEntity` calls for EVERY entity it creates, including the
+// `IfcProject` this helper creates next -- deliberately throws if no
+// `IfcPersonAndOrganization` exists yet (`api/owner/settings.ts`'s own documented,
+// intentional "mandatory owner tracking" behavior, matching real Python). This chunk's
+// own cited precedent (`test/api/georeference/editGeoreferencing.test.ts`'s identical
+// `blankProjectFile` helper) never hits this because that describe block excludes
+// IFC2X3 entirely -- this file's own `describe.each(AVAILABLE_SCHEMAS)` does not, since
+// `convertFileLengthUnits` (unlike `editGeoreferencing`) has real, distinct IFC2X3
+// logic worth covering (the `ePSet_ProjectedCRS`/`MapUnit`-based map-unit detection
+// branch). Fixed by manually constructing a minimal, valid bootstrap chain via RAW
+// `file.createEntity` calls -- NOT `api.owner.addPerson`/`addOrganisation`/
+// `addPersonAndOrganisation`, which would recursively hit this exact same "no user yet"
+// check via their own `api.root.createEntity` calls, a genuine bootstrap circularity.
 function blankProjectFile(schema: Schema): IfcFile {
 	const file = createTestFile(schema);
 	stripProjectBootstrap(file);
+	if (file.schema === "IFC2X3") {
+		const person = file.createEntity("IfcPerson", null, null, null, null, null, null, null, null);
+		const organization = file.createEntity("IfcOrganization", null, "Bootstrap", null, null, null);
+		file.createEntity("IfcPersonAndOrganization", person, organization, null);
+		// `api.owner.createOwnerHistory`'s own "mandatory owner tracking" check on
+		// IFC2X3 (`api/owner/settings.ts`) requires BOTH a user AND an application to
+		// pre-exist -- same bootstrap-circularity reasoning as the person/organization
+		// above.
+		file.createEntity("IfcApplication", organization, "1.0", "Bootstrap", "Bootstrap");
+	}
 	createEntity(file, { ifcClass: "IfcProject" });
 	return file;
 }
