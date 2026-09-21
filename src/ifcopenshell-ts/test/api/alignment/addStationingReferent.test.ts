@@ -13,6 +13,21 @@
 // runs correctly despite the blocker -- observable because the two curve choices hit
 // DIFFERENT gaps (the basis curve is a real composite curve; the non-basis curve, in
 // this fixture, deliberately is not).
+//
+// A SECOND, separate real Python test file also exists and touches this function --
+// `test_add_stationing_to_alignment.py` (82 lines) -- but only indirectly, via
+// `ifcopenshell.api.alignment.create(file, "TestAlignment", start_station=2000.0)`
+// (`create()`'s own referent, plus a second, direct `add_stationing_referent(...)`
+// call for a station equation). `create()`'s own freshly-created `IfcCompositeCurve`
+// always starts with ZERO segments (the mandatory zero-length segment is only added by
+// `create()`'s own trailing `_add_zero_length_segment` loop, which runs AFTER
+// `add_stationing_referent`) -- so `add_stationing_referent`'s composite-curve/
+// non-empty-segments check is never satisfied at this point, regardless of
+// `include_geometry`, and it always takes the SAME fallback-placement branch this
+// file's own "no-representation" test above already exercises (confirmed directly
+// against `create.test.ts`'s own test asserting the identical error class/message for
+// both `includeGeometry` values). Not independently reusable/distinctly testable here
+// either, for the same already-disclosed reason -- no new `TODOS.md` entry needed.
 
 import { describe, expect, test } from "vitest";
 import { addStationingReferent } from "../../../src/api/alignment/addStationingReferent";

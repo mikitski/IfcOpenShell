@@ -1,10 +1,33 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// No real Python test file exists for `add_vertical_layout.py` (confirmed by reading the
-// whole real test directory) -- its own real callers (`create`, `create_by_pi_method`)
-// are both out of this chunk's own reachable scope (both unconditionally blocked, see
-// `../../../src/api/alignment/create.ts`'s own header comment). Original test coverage
-// written here.
+// A real Python test file, `test/api/alignment/test_add_vertical_alignment.py` (83
+// lines), DOES exist for `add_vertical_layout.py` -- this file's own previous header
+// comment claimed otherwise; that claim was FALSE, corrected here after a dedicated
+// re-verification pass (see `PROGRESS.md`'s "`api.alignment` test-fidelity backfill"
+// entry, chunk 4/final of that item). Its own filename doesn't match the function name
+// it tests (`add_vertical_layout`, not `add_vertical_alignment`), which is presumably
+// why earlier chunks' own "read the whole real test directory" pass missed it. Its own
+// fixture builds via `ifcopenshell.api.alignment.create(file, "A1",
+// include_vertical=False)`, unconditionally blocked in this port (see
+// `../../../src/api/alignment/create.ts`'s own header comment) -- not reusable as-is.
+//
+// Traced precisely (not just "out of scope"): catching `create()`'s own throw and
+// recovering `file.byType("IfcAlignment")[0]` does NOT reproduce the real, fully-
+// successful test's own starting shape either. `create()`'s `_createGeometricRepresentation`
+// call (run BEFORE the throw, since `includeGeometry` defaults `true`) creates a real
+// but EMPTY `IfcCompositeCurve` (the mandatory zero-length segment is only added by
+// `create()`'s own trailing `_add_zero_length_segment` loop, which runs AFTER the
+// throw) -- so `addStationingReferent`'s own composite-curve/non-empty-segments check
+// is never satisfied, and it always takes its fallback-placement branch, creating a
+// real `IfcReferent`+`Pset_Stationing` before throwing at the `editPset` gap, but
+// NEVER reaching its own trailing nest-creation code -- so a recovered alignment's own
+// `IsNestedBy` stays at 1 (just the layout nest), never the real test's own asserted 2
+// (`# nests for layout and referents`). A literal port of the real test's own fixture
+// and assertions therefore isn't a clean drop-in either way. Original test coverage
+// written here instead, using a hand-built `IfcAlignment` with a real, empty
+// "Axis"/"Curve2D" `IfcCompositeCurve` representation -- the exact shape `create()`'s
+// own real, portable prefix produces, and the ONLY state this port's own currently-
+// portable API surface can ever build a horizontal geometric representation into.
 //
 // THIS IS THE MOST IMPORTANT TEST FILE OF THIS CHUNK: `addVerticalLayout` is CONFIRMED
 // genuinely fully functional end to end -- see
