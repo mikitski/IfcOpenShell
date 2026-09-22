@@ -905,3 +905,220 @@ registerSchemaCalcFunctions("IFC2X3", {
 	"IfcShellBasedSurfaceModel.Dim": calc_IfcShellBasedSurfaceModel_Dim,
 	"IfcSweptSurface.Dim": calc_IfcSweptSurface_Dim,
 });
+
+// =============================================================================
+// Phase EX-2, third chunk (planning/ifcopenshell-ts/70-express-rules-plan.md §4): the
+// NEXT 10 of IFC2X3's 55 `calc_*` functions, in real file order (verified directly
+// against `IFC2X3.py` before porting -- line numbers re-checked against the dispatched
+// task brief's own citations, not just trusted from it):
+//
+//   calc_IfcCompositeCurve_ClosedCurve (line 4505), calc_IfcEdgeLoop_Ne (line 5020),
+//   calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem (line 5259),
+//   calc_IfcGeometricRepresentationSubContext_CoordinateSpaceDimension (line 5263),
+//   calc_IfcGeometricRepresentationSubContext_TrueNorth (line 5267),
+//   calc_IfcGeometricRepresentationSubContext_Precision (line 5271),
+//   calc_IfcMaterialLayerSet_TotalThickness (line 5451),
+//   calc_IfcTable_NumberOfCellsInRow (line 7004), calc_IfcTable_NumberOfHeadings
+//   (line 7008), calc_IfcTable_NumberOfDataRows (line 7012)
+//
+// Exported under their exact real-Python names, matching this file's own established
+// convention (see the chunk-1 header comment above for the full rationale).
+//
+// **One necessary, minimal, disclosed extension, NOT one of the assigned 10**:
+// `calc_IfcCompositeCurve_ClosedCurve` itself reads `express_getattr(self, 'NSegments',
+// INDETERMINATE)` -- `NSegments` is `IfcCompositeCurve`'s own sibling DERIVE attribute
+// (`calc_IfcCompositeCurve_NSegments`, real source line 4501, immediately above
+// `ClosedCurve` in the real file and NOT itself one of this chunk's assigned 10).
+// Without it, `NSegments` would resolve via this port's own dispatch-miss path (a
+// thrown "has no attribute" error), which `expressGetAttr`'s own `try/catch` (see
+// `runtimeShim.ts`) silently swallows into `INDETERMINATE` -- and the very next line
+// then does `nsegments - EXPRESS_ONE_BASED_INDEXING` as a bare arithmetic expression
+// (this file's own established "direct structural port, plain JS operators" idiom, see
+// this file's own header comment on the pre-existing INDETERMINATE-poisoning gap),
+// which throws a native `TypeError` on a JS `Symbol` operand. Net effect: without
+// porting `NSegments` too, `ClosedCurve` would be completely non-functional for every
+// real `IfcCompositeCurve`, not merely degraded -- the exact same "necessary, minimal,
+// disclosed extension" shape chunk 1's own header comment already established for
+// `calc_IfcDirection_Dim`/`calc_IfcVector_Dim`. Ported here as `calc_
+// IfcCompositeCurve_NSegments` (trivial one-liner: `sizeof(Segments)`), registered
+// alongside the assigned 10 below. This means the "an unported DERIVE-shaped attribute
+// still throws" test in this file's own test suite (previously using
+// `IfcCompositeCurve.NSegments` as its example, per chunk 2's own header comment) is
+// updated again in this chunk -- swapped for `IfcOrientedEdge.EdgeStart` (real source
+// line 5611, `calc_IfcOrientedEdge_EdgeStart`), confirmed still genuinely unported by
+// the same `grep -n "^def calc_"` sweep of `IFC2X3.py` this chunk used to verify its
+// own 10 assigned functions' line numbers.
+//
+// **`calc_IfcMaterialLayerSet_TotalThickness` delegates to a helper, `IfcMlsTotalThickness`
+// (real source line 7848, re-verified directly)** -- same "shared EXPRESS library
+// function" bucket as chunk 1's `IfcNormalise`/etc. (not itself a `calc_*` function).
+// Ported below as `ifcMlsTotalThickness`, a plain running-sum loop over
+// `MaterialLayers[].LayerThickness` -- real Python's own local variable is confusingly
+// named `max` (it shadows the Python builtin, and does NOT compute a maximum -- it is a
+// running total, matching this chunk's own task brief's own advance note), renamed
+// here to the descriptive `total`; purely a local-variable-naming choice, not a
+// behavioral divergence.
+//
+// **`calc_IfcCompositeCurve_ClosedCurve`'s enum comparison**: real Python compares
+// against the module-level constant `discontinuous = IfcTransitionCode.DISCONTINUOUS`
+// (an `enum_namespace` proxy value, real source line 1473). This port's generated
+// types declare `IfcTransitionCode` as a plain `string` (`generated/ifc2x3.d.ts`:
+// `export type IfcTransitionCode = string`) -- confirmed no runtime `IfcTransitionCode`
+// enum object exists anywhere in this port's `src/` (`enum_namespace` itself is one of
+// the deliberately-not-ported boilerplate pieces `70-express-rules-plan.md` §3
+// already flags) -- so `discontinuous` is ported as the plain string literal
+// `"DISCONTINUOUS"`, exactly the wire-format value this port's own attribute-read path
+// already produces for an `IfcTransitionCode`-typed attribute.
+//
+// **No new real Python bugs found in this chunk's own 10 assigned functions, their one
+// necessary extra dependency (`NSegments`), or their one helper
+// (`IfcMlsTotalThickness`).** Every one of the 10 assigned functions is a one- or
+// two-line direct attribute delegation or a bare `sizeof`/array-filter -- re-read each
+// body directly against `IFC2X3.py` before porting (line numbers re-verified, all
+// matched exactly, per this project's absolute rule). `IfcMlsTotalThickness` is a plain
+// running-sum loop with no defined-type construction or tuple-mutation involved (the
+// two patterns chunk 1's own three disclosed bugs hinge on) -- confirmed by direct
+// reading, not merely by the task brief's own risk assessment. This chunk introduces
+// no new disclosed divergences beyond the pre-existing, already-flagged
+// `INDETERMINATE`-poisoning-through-plain-JS-operators gap this file's own header
+// comment already covers once (reachable here only via the `NSegments`-not-yet-set
+// path already discussed above, not via any of the 10 assigned functions' own bodies,
+// none of which perform arithmetic/comparison on a possibly-indeterminate value except
+// `ClosedCurve`'s own `!==` against the `discontinuous` string, which -- like this
+// file's own chunk-1-disclosed `IfcFirstProjAxis` tuple/list bug -- is a reference/
+// type comparison, not arithmetic, so it does not hit the poisoning gap at all: an
+// `INDETERMINATE` `Transition` would compare not-equal to `"DISCONTINUOUS"` and
+// silently read as "closed", a real, disclosed divergence from Python's own dunder-
+// based poisoning there too, but reachable only if a real file leaves the schema-
+// mandatory `Transition` attribute unset, which this port's own attribute-write path
+// does not enforce today -- same disclosed class of gap as `ifcCurveDim`'s own
+// `!exists(curve)` guard rationale above, not a new one).
+//
+// **On `IfcDimensionalExponents`/defined-type construction (disclosed per this
+// chunk's own task brief, not attempted here)**: `calc_IfcDerivedUnit_Dimensions`/
+// `calc_IfcSIUnit_Dimensions` remain deliberately out of scope for this chunk. A
+// search of this port's own `src/` for any existing support for constructing/
+// mutating a defined-type value (e.g. `IfcDimensionalExponents`, a `SELECT`-free
+// plain aggregate-of-INTEGER defined type) analogous to the already-known
+// `IfcLineIndex`/`IfcArcIndex` gap found nothing resembling a working primitive for
+// it -- this chunk did not need one for any of its own 10 assigned functions (none of
+// them construct or mutate a defined-type value), so this is a secondhand
+// observation from working in this area, not a verified finding backed by an actual
+// attempted construction; left for whoever scopes the dedicated future chunk that
+// picks up `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` to verify
+// directly.
+// =============================================================================
+
+/** Python: `IfcMlsTotalThickness` (`IFC2X3.py` line 7848) -- not itself a `calc_*`
+ * function (see this section's own header comment); real Python's own local variable
+ * is named `max` but computes a running SUM, not a maximum (renamed here to `total`,
+ * a naming choice only, not a behavioral change -- see header comment). */
+function ifcMlsTotalThickness(layerset: unknown): unknown {
+	const materialLayers = expressGetAttr(layerset, "MaterialLayers", INDETERMINATE);
+	let total = expressGetAttr(
+		expressGetItem(materialLayers, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+		"LayerThickness",
+		INDETERMINATE,
+	);
+	if ((sizeof(materialLayers) as number) > 1) {
+		for (const i of expressRange(2, (hiIndex(materialLayers) as number) + 1)) {
+			total =
+				(total as number) +
+				(expressGetAttr(
+					expressGetItem(materialLayers, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+					"LayerThickness",
+					INDETERMINATE,
+				) as number);
+		}
+	}
+	return total;
+}
+
+// --- the 10 assigned `calc_*` functions (exact real-Python names, file order) ---
+
+export function calc_IfcCompositeCurve_ClosedCurve(self: EntityInstance): unknown {
+	const segments = expressGetAttr(self, "Segments", INDETERMINATE);
+	const nsegments = expressGetAttr(self, "NSegments", INDETERMINATE) as number;
+	return (
+		expressGetAttr(
+			expressGetItem(segments, nsegments - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Transition",
+			INDETERMINATE,
+		) !== "DISCONTINUOUS"
+	);
+}
+
+export function calc_IfcEdgeLoop_Ne(self: EntityInstance): unknown {
+	const edgelist = expressGetAttr(self, "EdgeList", INDETERMINATE);
+	return sizeof(edgelist);
+}
+
+export function calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem(self: EntityInstance): unknown {
+	const parentcontext = expressGetAttr(self, "ParentContext", INDETERMINATE);
+	return expressGetAttr(parentcontext, "WorldCoordinateSystem", INDETERMINATE);
+}
+
+export function calc_IfcGeometricRepresentationSubContext_CoordinateSpaceDimension(self: EntityInstance): unknown {
+	const parentcontext = expressGetAttr(self, "ParentContext", INDETERMINATE);
+	return expressGetAttr(parentcontext, "CoordinateSpaceDimension", INDETERMINATE);
+}
+
+export function calc_IfcGeometricRepresentationSubContext_TrueNorth(self: EntityInstance): unknown {
+	const parentcontext = expressGetAttr(self, "ParentContext", INDETERMINATE);
+	return nvl(
+		expressGetAttr(parentcontext, "TrueNorth", INDETERMINATE),
+		expressGetItem(
+			expressGetAttr(expressGetAttr(self, "WorldCoordinateSystem", INDETERMINATE), "P", INDETERMINATE),
+			2 - EXPRESS_ONE_BASED_INDEXING,
+			INDETERMINATE,
+		),
+	);
+}
+
+export function calc_IfcGeometricRepresentationSubContext_Precision(self: EntityInstance): unknown {
+	const parentcontext = expressGetAttr(self, "ParentContext", INDETERMINATE);
+	return nvl(expressGetAttr(parentcontext, "Precision", INDETERMINATE), 1);
+}
+
+export function calc_IfcMaterialLayerSet_TotalThickness(self: EntityInstance): unknown {
+	return ifcMlsTotalThickness(self);
+}
+
+export function calc_IfcTable_NumberOfCellsInRow(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE);
+	const firstRow = expressGetItem(rows, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	return hiIndex(expressGetAttr(firstRow, "RowCells", INDETERMINATE));
+}
+
+export function calc_IfcTable_NumberOfHeadings(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE) as unknown[];
+	return sizeof(rows.filter((temp) => expressGetAttr(temp, "IsHeading", INDETERMINATE)));
+}
+
+export function calc_IfcTable_NumberOfDataRows(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE) as unknown[];
+	return sizeof(rows.filter((temp) => !expressGetAttr(temp, "IsHeading", INDETERMINATE)));
+}
+
+// --- the 1 minimal, necessary, disclosed extra function (see header comment) ---
+
+export function calc_IfcCompositeCurve_NSegments(self: EntityInstance): unknown {
+	const segments = expressGetAttr(self, "Segments", INDETERMINATE);
+	return sizeof(segments);
+}
+
+registerSchemaCalcFunctions("IFC2X3", {
+	"IfcCompositeCurve.ClosedCurve": calc_IfcCompositeCurve_ClosedCurve,
+	"IfcEdgeLoop.Ne": calc_IfcEdgeLoop_Ne,
+	"IfcGeometricRepresentationSubContext.WorldCoordinateSystem":
+		calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem,
+	"IfcGeometricRepresentationSubContext.CoordinateSpaceDimension":
+		calc_IfcGeometricRepresentationSubContext_CoordinateSpaceDimension,
+	"IfcGeometricRepresentationSubContext.TrueNorth": calc_IfcGeometricRepresentationSubContext_TrueNorth,
+	"IfcGeometricRepresentationSubContext.Precision": calc_IfcGeometricRepresentationSubContext_Precision,
+	"IfcMaterialLayerSet.TotalThickness": calc_IfcMaterialLayerSet_TotalThickness,
+	"IfcTable.NumberOfCellsInRow": calc_IfcTable_NumberOfCellsInRow,
+	"IfcTable.NumberOfHeadings": calc_IfcTable_NumberOfHeadings,
+	"IfcTable.NumberOfDataRows": calc_IfcTable_NumberOfDataRows,
+	"IfcCompositeCurve.NSegments": calc_IfcCompositeCurve_NSegments,
+});

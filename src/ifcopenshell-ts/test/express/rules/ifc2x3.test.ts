@@ -1,7 +1,7 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// Original, hand-rolled coverage for Phase EX-2's first TWO chunks
-// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): the first 30 IFC2X3
+// Original, hand-rolled coverage for Phase EX-2's first THREE chunks
+// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): 44 of IFC2X3's 55
 // `calc_*` DERIVE functions (`src/express/rules/ifc2x3.ts`) and their wiring into
 // `EntityInstance`'s attribute-read path (`entityInstance.ts`'s `.get()`). Real Python
 // has no per-function unit test for individual `calc_*` formulas -- verified directly
@@ -35,6 +35,17 @@
 // `IfcCsgPrimitive3D.Dim` as its example of a not-yet-ported attribute -- chunk 2
 // ports exactly that function, so the example was swapped for
 // `IfcCompositeCurve.NSegments`, which remains genuinely unported.
+//
+// Chunk 3 (third `describe` block, "Phase EX-2, chunk 3"): the NEXT 10 assigned
+// functions plus one necessary, disclosed extra (`calc_IfcCompositeCurve_NSegments`,
+// needed for `calc_IfcCompositeCurve_ClosedCurve` to be functional at all -- see
+// `../../src/express/rules/ifc2x3.ts`'s own chunk-3 header comment for the full
+// rationale). No new real-Python bugs found in this chunk either. This chunk updates
+// the same PRE-EXISTING "an unported DERIVE-shaped attribute still throws" test AGAIN
+// -- chunk 3 ports exactly the `IfcCompositeCurve.NSegments` example chunk 2 swapped
+// in, so it is swapped once more, this time for `IfcOrientedEdge.EdgeStart`
+// (`IFC2X3.py` line 5611, `calc_IfcOrientedEdge_EdgeStart`), confirmed still
+// genuinely unported.
 
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../../src/entityInstance";
@@ -724,6 +735,271 @@ describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 2)", () =>
 	});
 });
 
+describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 3)", () => {
+	// --- calc_IfcCompositeCurve_ClosedCurve (+ its necessary calc_IfcCompositeCurve_NSegments dependency) ---
+	describe("calc_IfcCompositeCurve_ClosedCurve", () => {
+		// Python: `express_getattr(Segments[NSegments - 1], 'Transition', INDETERMINATE)
+		// != discontinuous`. NSegments = sizeof(Segments) = 2 here, so index 1 (0-based)
+		// -- the LAST segment -- decides the result, regardless of the first segment's
+		// own Transition.
+		test("last segment CONTINUOUS (first DISCONTINUOUS) -> closed (true)", () => {
+			const file = createTestFile("IFC2X3");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const seg1 = file.createEntity("IfcCompositeCurveSegment", "DISCONTINUOUS", true, polyline);
+			const seg2 = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			const compositeCurve = file.createEntity("IfcCompositeCurve", [seg1, seg2], false);
+			expect(ifc2x3.calc_IfcCompositeCurve_ClosedCurve(compositeCurve as EntityInstance)).toBe(true);
+		});
+
+		test("last segment DISCONTINUOUS (first CONTINUOUS) -> not closed (false)", () => {
+			const file = createTestFile("IFC2X3");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const seg1 = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			const seg2 = file.createEntity("IfcCompositeCurveSegment", "DISCONTINUOUS", true, polyline);
+			const compositeCurve = file.createEntity("IfcCompositeCurve", [seg1, seg2], false);
+			expect(ifc2x3.calc_IfcCompositeCurve_ClosedCurve(compositeCurve as EntityInstance)).toBe(false);
+		});
+
+		// Sanity check on the necessary extra dependency itself (see this file's own
+		// header comment): Python: `sizeof(Segments)`.
+		test("calc_IfcCompositeCurve_NSegments: sizeof(Segments)", () => {
+			const file = createTestFile("IFC2X3");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const seg1 = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			const seg2 = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			const compositeCurve = file.createEntity("IfcCompositeCurve", [seg1, seg2], false);
+			expect(ifc2x3.calc_IfcCompositeCurve_NSegments(compositeCurve as EntityInstance)).toBe(2);
+		});
+
+		// End-to-end: read `.ClosedCurve` through the normal `EntityInstance`
+		// attribute-read path -- exercises both `ClosedCurve` and its own transitive
+		// `.NSegments` dispatch together.
+		test("end-to-end: compositeCurve.ClosedCurve resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const seg1 = file.createEntity("IfcCompositeCurveSegment", "DISCONTINUOUS", true, polyline);
+			const seg2 = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			const compositeCurve = file.createEntity("IfcCompositeCurve", [seg1, seg2], false);
+			expect((compositeCurve as unknown as { ClosedCurve: boolean }).ClosedCurve).toBe(true);
+		});
+	});
+
+	// --- calc_IfcEdgeLoop_Ne ---
+	describe("calc_IfcEdgeLoop_Ne", () => {
+		// Python: `sizeof(EdgeList)`.
+		test("Ne = sizeof(EdgeList)", () => {
+			const file = createTestFile("IFC2X3");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const v0 = file.createEntity("IfcVertexPoint", p0);
+			const v1 = file.createEntity("IfcVertexPoint", p1);
+			const edge1 = file.createEntity("IfcEdge", v0, v1);
+			const edge2 = file.createEntity("IfcEdge", v1, v0);
+			const oe1 = file.createEntity("IfcOrientedEdge", edge1, true);
+			const oe2 = file.createEntity("IfcOrientedEdge", edge2, true);
+			const edgeLoop = file.createEntity("IfcEdgeLoop", [oe1, oe2]);
+			expect(ifc2x3.calc_IfcEdgeLoop_Ne(edgeLoop as EntityInstance)).toBe(2);
+		});
+	});
+
+	// --- calc_IfcGeometricRepresentationSubContext_* (4 functions, all delegate to ParentContext) ---
+	//
+	// Fixture note: `IfcGeometricRepresentationSubContext`'s real, native attribute
+	// order (`declaration().as_entity().all_attributes()`, confirmed empirically, not
+	// assumed from `generated/ifc2x3.d.ts`) is the FULL inherited list, including the
+	// 4 attributes this subtype overrides as DERIVE (`CoordinateSpaceDimension`,
+	// `Precision`, `WorldCoordinateSystem`, `TrueNorth`, inherited positionally from
+	// `IfcGeometricRepresentationContext`) -- `createEntity` needs all 10 positional
+	// slots, not just the 6 genuinely-storable ones `generated/ifc2x3.d.ts` documents
+	// (that `.d.ts` is accurate for reading -- those 4 are never read from storage,
+	// always DERIVE-dispatched -- but not for this port's own positional
+	// `createEntity` convention, which mirrors the full underlying declaration).
+	describe("calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem / _CoordinateSpaceDimension / _TrueNorth / _Precision", () => {
+		function buildSubContext(file: IfcFile, parentTrueNorth: EntityInstance | null, parentPrecision: number | null) {
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const wcs = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			const parentContext = file.createEntity(
+				"IfcGeometricRepresentationContext",
+				null,
+				"Model",
+				3,
+				parentPrecision,
+				wcs,
+				parentTrueNorth,
+			);
+			const subContext = file.createEntity(
+				"IfcGeometricRepresentationSubContext",
+				null,
+				"Model",
+				null,
+				null,
+				null,
+				null,
+				parentContext,
+				null,
+				"MODEL_VIEW",
+				null,
+			);
+			return { wcs, parentContext, subContext };
+		}
+
+		// Python: `express_getattr(ParentContext, 'WorldCoordinateSystem', INDETERMINATE)`.
+		test("WorldCoordinateSystem delegates to ParentContext.WorldCoordinateSystem", () => {
+			const file = createTestFile("IFC2X3");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { wcs, subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			const result = ifc2x3.calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem(
+				subContext as EntityInstance,
+			) as EntityInstance;
+			expect(result.id()).toBe((wcs as EntityInstance).id());
+		});
+
+		// Python: `express_getattr(ParentContext, 'CoordinateSpaceDimension', INDETERMINATE)`.
+		test("CoordinateSpaceDimension delegates to ParentContext.CoordinateSpaceDimension", () => {
+			const file = createTestFile("IFC2X3");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			expect(
+				ifc2x3.calc_IfcGeometricRepresentationSubContext_CoordinateSpaceDimension(subContext as EntityInstance),
+			).toBe(3);
+		});
+
+		// Python: `nvl(express_getattr(ParentContext, 'TrueNorth', INDETERMINATE), ...)`.
+		// ParentContext.TrueNorth is set -> returned directly, the WorldCoordinateSystem
+		// fallback path is never reached.
+		test("TrueNorth: ParentContext.TrueNorth set -> returned directly", () => {
+			const file = createTestFile("IFC2X3");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			const result = ifc2x3.calc_IfcGeometricRepresentationSubContext_TrueNorth(
+				subContext as EntityInstance,
+			) as EntityInstance;
+			expect(result.id()).toBe((trueNorth as EntityInstance).id());
+		});
+
+		// ParentContext.TrueNorth unset -> falls back to
+		// `self.WorldCoordinateSystem.P[2 - EXPRESS_ONE_BASED_INDEXING]` (0-based index
+		// 1). `self.WorldCoordinateSystem` = ParentContext.WorldCoordinateSystem = the
+		// `IfcAxis2Placement3D` built with Axis/RefDirection both unset -- whose own `P`
+		// (`calc_IfcAxis2Placement3D_P`, chunk 1) is hand-derived elsewhere in this same
+		// file (the "Axis and RefDirection both unset -> standard identity basis" test
+		// above) as `[[1,0,0], [0,1,0], [0,0,1]]` -- so `P[1]` = `[0,1,0]`.
+		test("TrueNorth: ParentContext.TrueNorth unset -> falls back to WorldCoordinateSystem.P[1]", () => {
+			const file = createTestFile("IFC2X3");
+			const { subContext } = buildSubContext(file, null, 1.0e-5);
+			const result = ifc2x3.calc_IfcGeometricRepresentationSubContext_TrueNorth(subContext as EntityInstance);
+			closeArray(ratios(result), [0, 1, 0]);
+		});
+
+		// Python: `nvl(express_getattr(ParentContext, 'Precision', INDETERMINATE), 1)`.
+		// ParentContext.Precision is set -> returned directly.
+		test("Precision: ParentContext.Precision set -> returned directly", () => {
+			const file = createTestFile("IFC2X3");
+			const { subContext } = buildSubContext(file, null, 1.0e-5);
+			expect(ifc2x3.calc_IfcGeometricRepresentationSubContext_Precision(subContext as EntityInstance)).toBe(1.0e-5);
+		});
+
+		// ParentContext.Precision unset -> falls back to the literal default `1`.
+		test("Precision: ParentContext.Precision unset -> falls back to 1", () => {
+			const file = createTestFile("IFC2X3");
+			const { subContext } = buildSubContext(file, null, null);
+			expect(ifc2x3.calc_IfcGeometricRepresentationSubContext_Precision(subContext as EntityInstance)).toBe(1);
+		});
+
+		// End-to-end: read `.CoordinateSpaceDimension` through the normal
+		// `EntityInstance` attribute-read path.
+		test("end-to-end: subContext.CoordinateSpaceDimension resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			expect((subContext as unknown as { CoordinateSpaceDimension: number }).CoordinateSpaceDimension).toBe(3);
+		});
+	});
+
+	// --- calc_IfcMaterialLayerSet_TotalThickness (+ its IfcMlsTotalThickness helper) ---
+	describe("calc_IfcMaterialLayerSet_TotalThickness", () => {
+		// Python: `IfcMlsTotalThickness` sums every `MaterialLayers[].LayerThickness`
+		// (real Python's own local variable is confusingly named `max`, but it is a
+		// running SUM, not a maximum -- see `ifc2x3.ts`'s own header comment).
+		// 10.0 + 20.0 + 5.0 = 35.0.
+		test("sums every MaterialLayers[].LayerThickness (not a maximum, despite real Python's own `max` variable name)", () => {
+			const file = createTestFile("IFC2X3");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 10.0, null);
+			const layer2 = file.createEntity("IfcMaterialLayer", null, 20.0, null);
+			const layer3 = file.createEntity("IfcMaterialLayer", null, 5.0, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1, layer2, layer3], null);
+			expect(ifc2x3.calc_IfcMaterialLayerSet_TotalThickness(layerSet as EntityInstance)).toBeCloseTo(35.0, 10);
+		});
+
+		// Single-layer set: the `sizeof(MaterialLayers) > 1` loop guard is never
+		// entered, `total` stays at its initial value (`MaterialLayers[0].LayerThickness`).
+		test("single-layer set: total is just that one layer's own thickness", () => {
+			const file = createTestFile("IFC2X3");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 42.0, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1], null);
+			expect(ifc2x3.calc_IfcMaterialLayerSet_TotalThickness(layerSet as EntityInstance)).toBeCloseTo(42.0, 10);
+		});
+
+		// End-to-end: read `.TotalThickness` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: layerSet.TotalThickness resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 10.0, null);
+			const layer2 = file.createEntity("IfcMaterialLayer", null, 20.0, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1, layer2], null);
+			expect((layerSet as unknown as { TotalThickness: number }).TotalThickness).toBeCloseTo(30.0, 10);
+		});
+	});
+
+	// --- calc_IfcTable_NumberOfCellsInRow / _NumberOfHeadings / _NumberOfDataRows ---
+	describe("calc_IfcTable_NumberOfCellsInRow / _NumberOfHeadings / _NumberOfDataRows", () => {
+		function buildTable(file: IfcFile) {
+			// row1: heading, 3 cells. row2/row3: data rows, 2 cells each.
+			const row1 = file.createEntity("IfcTableRow", ["a", "b", "c"], true);
+			const row2 = file.createEntity("IfcTableRow", ["1", "2"], false);
+			const row3 = file.createEntity("IfcTableRow", ["3", "4"], false);
+			return file.createEntity("IfcTable", "MyTable", [row1, row2, row3]);
+		}
+
+		// Python: `hiindex(Rows[0].RowCells)` -- the FIRST row's own cell count, 3.
+		test("NumberOfCellsInRow: hiindex(Rows[0].RowCells)", () => {
+			const file = createTestFile("IFC2X3");
+			const table = buildTable(file);
+			expect(ifc2x3.calc_IfcTable_NumberOfCellsInRow(table as EntityInstance)).toBe(3);
+		});
+
+		// Python: `sizeof([temp for temp in Rows if temp.IsHeading])` -- 1 heading row.
+		test("NumberOfHeadings: count of rows with IsHeading true", () => {
+			const file = createTestFile("IFC2X3");
+			const table = buildTable(file);
+			expect(ifc2x3.calc_IfcTable_NumberOfHeadings(table as EntityInstance)).toBe(1);
+		});
+
+		// Python: `sizeof([temp for temp in Rows if not temp.IsHeading])` -- 2 data rows.
+		test("NumberOfDataRows: count of rows with IsHeading false", () => {
+			const file = createTestFile("IFC2X3");
+			const table = buildTable(file);
+			expect(ifc2x3.calc_IfcTable_NumberOfDataRows(table as EntityInstance)).toBe(2);
+		});
+
+		// End-to-end: read `.NumberOfHeadings` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: table.NumberOfHeadings resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const table = buildTable(file);
+			expect((table as unknown as { NumberOfHeadings: number }).NumberOfHeadings).toBe(1);
+		});
+	});
+});
+
 describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 	test("a genuinely nonexistent attribute still throws the same error as before this chunk", () => {
 		const file: IfcFile = createTestFile("IFC2X3");
@@ -734,19 +1010,23 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 	});
 
 	test("an unported DERIVE-shaped attribute still throws (purely additive capability)", () => {
-		// `IfcCompositeCurve.NSegments` (`calc_IfcCompositeCurve_NSegments`,
-		// `IFC2X3.py` line 4501) is a real DERIVE attribute in the same broad family as
-		// the functions ported so far, but genuinely untouched by either chunk 1 or
-		// chunk 2 -- confirms dispatch stays additive, not a general claim that every
-		// DERIVE-shaped attribute now resolves. (`IfcCsgPrimitive3D.Dim` was this
-		// test's original example in chunk 1, but chunk 2 ports exactly that function
-		// -- see `../../../src/express/rules/ifc2x3.ts`'s own chunk-2 header comment
-		// for why this test was updated instead of silently starting to assert the
-		// opposite of what it's named for.)
+		// `IfcOrientedEdge.EdgeStart` (`calc_IfcOrientedEdge_EdgeStart`, `IFC2X3.py`
+		// line 5611) is a real DERIVE attribute in the same broad family as the
+		// functions ported so far, but genuinely untouched by chunks 1-3 -- confirms
+		// dispatch stays additive, not a general claim that every DERIVE-shaped
+		// attribute now resolves. (`IfcCompositeCurve.NSegments` was this test's
+		// example in chunk 2, but chunk 3 ports exactly that function as a necessary,
+		// disclosed extra dependency of `calc_IfcCompositeCurve_ClosedCurve` -- see
+		// `../../../src/express/rules/ifc2x3.ts`'s own chunk-3 header comment for why
+		// this test was updated instead of silently starting to assert the opposite
+		// of what it's named for.)
 		const file: IfcFile = createTestFile("IFC2X3");
-		const compositeCurve = file.createEntity("IfcCompositeCurve", [], false);
-		expect(() => (compositeCurve as unknown as { NSegments: unknown }).NSegments).toThrow(
-			/has no attribute 'NSegments'/,
-		);
+		const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+		const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+		const v0 = file.createEntity("IfcVertexPoint", p0);
+		const v1 = file.createEntity("IfcVertexPoint", p1);
+		const edge = file.createEntity("IfcEdge", v0, v1);
+		const orientedEdge = file.createEntity("IfcOrientedEdge", edge, true);
+		expect(() => (orientedEdge as unknown as { EdgeStart: unknown }).EdgeStart).toThrow(/has no attribute 'EdgeStart'/);
 	});
 });
