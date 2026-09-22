@@ -536,7 +536,31 @@ radius and the double-free risk of an incomplete fix) rather than folded into an
 
 ---
 
-### CI: `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3-parameterized tests are silently skipped, not run
+### CI: `SCHEMA_VERSIONS=4`-only means IFC2X3/IFC4X3-parameterized tests are silently skipped, not run -- RESOLVED 2026-09-22
+
+**Resolved:** `ci-ifcopenshell-ts.yml` was widened to `-DSCHEMA_VERSIONS="2x3;4;4x3_add2"` (Phase EX-2
+chunk 1's own PR, #170), matching this entry's own proposed fix exactly. This immediately surfaced
+9 pre-existing test files' worth of real IFC2X3/IFC4X3 failures that had been silently skipped by CI
+for this project's entire history (never previously run there, only ever run against a manually-
+built multi-schema addon) -- exactly the risk this entry's own "Why this matters" section predicted.
+A dedicated reconciliation chunk (same PR) fixed all of them: `test/bootstrap.ts`'s
+`useOwnerSettingsFixture` (a faithful port of real Python's `test.bootstrap.IFC2X3` fixture's own
+lazy-create `ownerSettings.getUser`/`.getApplication` override, previously never replicated in this
+port at all) resolved the owner-history-fixture-gap category (`appendAsset.test.ts`/
+`removeProduct.test.ts`); a genuine, small, pre-existing port bug in `regenerateWallRepresentation
+.ts`'s `getLayers` (a raw `.get("Priority")` instead of the existing `attrOrNull` helper, unlike real
+Python's own `getattr(l, "Priority", 0)`) was fixed; several tests picking schema-incompatible fixture
+values (`IfcMaterial.Category`/`IfcCurrencyEnum` members not present on IFC2X3, `IfcMaterialLayer
+.Priority` not present on IFC2X3) were corrected to use cross-schema-valid values or excluded from
+IFC2X3 parametrization; and a couple of tests that hit a DIFFERENT, already-tracked, unrelated
+primitive-layer blocker (this file's own EXPRESS-DERIVE/standalone-typed-value gaps) for a specific
+schema were excluded from that one schema's parametrization instead, matching this file's own
+established `test.skipIf(schema === ...)` precedent. Full suite: 6357 passed / 17 skipped (3 new,
+intentional skips) / 0 unexplained failures (one unrelated, pre-existing, load-sensitive
+`test/native/event_loop.test.ts` timing flake, confirmed to pass in isolation, untouched by this
+chunk) -- see that PR's own commit for the itemized file-by-file breakdown.
+
+<details><summary>Original TODO text</summary>
 
 **What:** `ci-ifcopenshell-ts.yml` builds the C++ core with `-DSCHEMA_VERSIONS=4` (IFC4 only, a
 deliberate Phase 0-era speed choice). Every test suite in `src/ifcopenshell-ts/test/` that's
@@ -581,6 +605,8 @@ by CI's real `SCHEMA_VERSIONS=4` build failing loudly rather than silently skipp
 **Depends on / blocked by:** None block other work landing. Should be picked up whenever a future
 chunk actually needs real IFC2X3/IFC4X3 CI coverage (not just skip-safe fallback behavior) — at that
 point, silent skipping stops being an acceptable substitute for real coverage.
+
+</details>
 
 ---
 
@@ -1061,6 +1087,23 @@ it's an IFC4+-only defined type, confirmed empirically: `"Entity with name 'IfcD
 not found in schema 'IFC2X3'"`), so IFC2X3 never actually reaches this gate at all -- both
 throws are pinned separately in the same test file. See
 `src/api/sequence/assignLagTime.ts`'s own header comment for the full writeup.
+
+**UPDATE 2026-09-22 (CI `SCHEMA_VERSIONS` widening reconciliation chunk, PR #170):** two
+already-documented consequences above (`addApplication.ts`'s IFC4X3 branch, "third
+consequence" above; `addGeoreferencing.ts`'s IFC2X3 branch, "ninth/tenth consequence"
+above) turned out to have a SECOND, previously-unnoticed caller each, both in
+`test/api/project/appendAsset.test.ts`: its own "appends owner history without producing
+duplicates" test calls `addApplication(library, {})` with no explicit
+`applicationDeveloper` (hitting the IFC4X3 branch), and its own "appends a product when
+projects have different georeferencing" test calls `addGeoreferencing(file, {})` on an
+IFC2X3 file (hitting that branch) -- neither test had ever actually run in CI before
+(IFC2X3/IFC4X3 were never built there until this same PR's own CI-widening commit), so
+neither exposure was previously visible. Both are pre-existing, already-fully-diagnosed
+consequences of this same gap, not new root causes -- fixed by excluding each one
+specific schema case from that one test's own parametrization
+(`test.skipIf(schema === "IFC4X3"/"IFC2X3")`), matching this file's own established
+per-test-exclusion precedent (e.g. `assignLagTime.test.ts`'s own IFC2X3 case just above),
+with a comment citing back to this entry. No source changes needed for either.
 
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
@@ -3203,6 +3246,25 @@ foundational blocker prevents test-fixture construction).
 fixes as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry
 (gap 2) above (neither yet scheduled/started). Finding B depends on an upstream
 `ifcopenshell-python` fix, outside this port's own control.
+
+**UPDATE 2026-09-22 (CI `SCHEMA_VERSIONS` widening reconciliation chunk, PR #170):** found and
+fixed a THIRD, genuinely separate bug in this same file, independent of Findings A/B -- a real
+TS-port bug, not a primitive-layer gap or an upstream bug, only ever exercised once CI actually
+started building IFC2X3 (see this file's own "CI: `SCHEMA_VERSIONS=4`-only..." entry above).
+`getLayers` read `l.get("Priority")` directly; real Python's own `get_layers` reads
+`getattr(l, "Priority", 0) or 0` -- a real `getattr`-with-default, which silently absorbs the
+`AttributeError` real Python's SWIG binding raises for `IfcMaterialLayer.Priority` on IFC2X3
+(genuinely absent there, added only on IFC4+, confirmed against the compiled schema:
+`src/ifcparse/schemas/Ifc2x3.h`'s `IfcMaterialLayer` declares only `Material`/`LayerThickness`/
+`IsVentilated`; `Ifc4.h`'s adds `Name`/`Description`/`Category`/`Priority`). This port's plain
+`.get()` call had no equivalent default, so it threw for every IFC2X3 wall with a real
+`IfcMaterialLayerSet` BEFORE ever reaching Finding A's own disclosed `ShapeBuilder` blocker --
+fixed by routing through this same file's own pre-existing `attrOrNull` helper (already used
+elsewhere in this file for the identical `getattr(x, name, None)` shape), restoring the intended
+behavior: IFC2X3 now reaches the exact same Finding A blocker IFC4/IFC4X3 already did, rather
+than a premature, different error. `test/api/geometry/regenerateWallRepresentation.test.ts`
+needed no changes -- its "get_layers reads Priority/LayerThickness..." test already asserted
+"reaches the disclosed ShapeBuilder blocker", which is what now actually happens on IFC2X3 too.
 
 ### `api.cogo.addSurveyPoint`/`editSurveyPoint` are BOTH blocked by the pre-existing EXPRESS
 DERIVED-attribute gap -- 2 more confirmed consequences, via 2 DIFFERENT derived attributes,

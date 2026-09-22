@@ -37,7 +37,7 @@
 // (`../grid/index.ts`), `removeBoundary` (`../boundary/index.ts`), and `removeFeature`
 // (`../feature/index.ts`) respectively.
 
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { assignObject } from "../../../src/api/aggregate/assignObject";
 import { addFeature } from "../../../src/api/feature/addFeature";
 import { createGridAxis } from "../../../src/api/grid/createGridAxis";
@@ -49,7 +49,7 @@ import { assignContainer } from "../../../src/api/spatial/assignContainer";
 import { assignType } from "../../../src/api/type/assignType";
 import type { EntityInstance } from "../../../src/entityInstance";
 import type { IfcFile } from "../../../src/file";
-import { AVAILABLE_SCHEMAS, createTestFile, stripProjectBootstrap } from "../../bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile, stripProjectBootstrap, useOwnerSettingsFixture } from "../../bootstrap";
 import type { Schema } from "../../bootstrap";
 
 /** See this file's own header comment for why a bare, positionally-underfilled `createEntity` is safe here. */
@@ -91,6 +91,18 @@ function addRawProperty(file: IfcFile, pset: EntityInstance): EntityInstance {
 }
 
 describe.each(AVAILABLE_SCHEMAS)("api.root.removeProduct (%s)", (schema) => {
+	// `blankFile` (this file's own helper, not `createTestFile`) strips the whole
+	// default person/organization/application/owner-history chain along with the
+	// project -- real Python's `test.bootstrap.IFC2X3` fixture's own lazy-create
+	// `ownerSettings.getUser`/`.getApplication` override (see `useOwnerSettingsFixture`'s
+	// own header comment in `../../bootstrap.ts`) is what lets IFC2X3 fixtures that
+	// then go on to call `owner.createOwnerHistory` (e.g. "removing all openings of an
+	// element" below, via `addFeature`) succeed instead of hitting the mandatory-owner-
+	// tracking raise.
+	beforeEach(() => {
+		useOwnerSettingsFixture(schema);
+	});
+
 	test("removing an element by itself", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");

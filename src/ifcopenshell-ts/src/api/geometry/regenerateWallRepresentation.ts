@@ -461,12 +461,21 @@ interface RegenerateState {
 	endOffset: number;
 }
 
-/** Python: `Regenerator.get_layers`. */
+/**
+ * Python: `Regenerator.get_layers` -- `getattr(l, "Priority", 0) or 0`, not a plain
+ * `l.Priority` read: `IfcMaterialLayer.Priority` doesn't exist at all on IFC2X3 (only
+ * added on IFC4+, see `../material/addLayer.ts`'s own header comment), and real
+ * Python's `getattr(..., 0)` default absorbs that `AttributeError` on IFC2X3 rather
+ * than raising -- ported via this file's own established `attrOrNull` helper (already
+ * used above for the identical `getattr(x, name, None)` pattern), not a raw `.get()`
+ * call, which would otherwise throw here for every IFC2X3 wall with a material layer
+ * set.
+ */
 function getLayers(wall: EntityInstance): PrioritisedLayer[] {
 	const material = elementUtil.getMaterial(wall, true);
 	if (!material || !material.isA("IfcMaterialLayerSet")) return [];
 	return (material.get("MaterialLayers") as EntityInstance[]).map((l) =>
-		makePrioritisedLayer((l.get("Priority") as number | null) || 0, l.get("LayerThickness") as number),
+		makePrioritisedLayer((attrOrNull(l, "Priority") as number | null) || 0, l.get("LayerThickness") as number),
 	);
 }
 

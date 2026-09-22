@@ -8,6 +8,7 @@
 // effect with Vitest's `describe.each`, per the testing-strategy doc's own
 // recommendation, rather than attempting a TS equivalent of Python's mixin trick.
 
+import { ownerSettings } from "../src/api/owner/settings";
 import type { IfcFile } from "../src/file";
 import * as template from "../src/template";
 import * as elementUtil from "../src/util/element";
@@ -121,5 +122,65 @@ export function stripOwnerBootstrap(file: IfcFile): void {
 export function stripProjectBootstrap(file: IfcFile): void {
 	for (const project of file.byType("IfcProject")) {
 		elementUtil.removeDeep2(file, project);
+	}
+}
+
+/**
+ * Port of real Python's `test/bootstrap.py`'s `IFC2X3`/`IFC4`/`IFC4X3` fixture classes'
+ * own `ifcopenshell.api.owner.settings.get_user`/`get_application` override (lines
+ * ~35-76 there) -- an `autouse=True` pytest fixture that reassigns those two GLOBAL
+ * functions before every single test method, generically for whatever file is later
+ * passed to them (the real closures take `ifc` as a parameter; they are not bound to any
+ * one fixture's own `self.file`). On IFC2X3, where owner tracking is mandatory
+ * (`src/api/owner/settings.ts`'s own `defaultGetUser`/`defaultGetApplication` raise there
+ * instead of returning `null`), the real fixture swaps in a LAZY-CREATE override: return
+ * the first existing `IfcPersonAndOrganization`/`IfcApplication` if one exists in the
+ * file, otherwise silently create a bare one (real Python: `ifc.create_entity("IfcPerson")`
+ * / `ifc.create_entity("IfcOrganization")` / `ifc.create_entity("IfcPersonAndOrganization",
+ * ThePerson=person, TheOrganization=organization)` / `ifc.create_entity("IfcApplication")`
+ * -- all with every other attribute left unset, exactly as ported below; the native layer
+ * doesn't enforce attribute-cardinality validity at creation time, only real usecases'
+ * own logic does, same established precedent as `stripOwnerBootstrap`'s own callers).
+ * IFC4/IFC4X3's own fixture override is behaviorally a no-op vs. the true box default
+ * (same first-in-file-or-null lookup, since neither schema's box default ever raises) --
+ * reproduced anyway, for parity, and so a caller never needs to special-case "IFC2X3 vs.
+ * everything else" itself.
+ *
+ * Deliberately NOT folded into `createTestFile` itself, for two independent reasons: (1)
+ * `ownerSettings` is a shared, module-level mutable singleton -- `test/api/owner
+ * /settings.test.ts`'s own "getApplication/getUser throws when the file has none
+ * (IFC2X3)" cases deliberately call `createTestFile("IFC2X3")` to obtain a valid IFC2X3
+ * file WITHOUT this override installed, specifically to assert the true, un-monkeypatched
+ * raising default -- folding this override into `createTestFile` unconditionally would
+ * make that assertion impossible to write. (2) Real Python's own override is schema-
+ * generic and file-instance-agnostic (`get_user(ifc)` operates on whatever file is passed
+ * at CALL time, not the fixture's own `self.file`), so it applies equally to a separate
+ * "library" file built independently of `createTestFile` (e.g. `appendAsset.test.ts`'s own
+ * `blankFile` helper, built via the low-level `createFile` directly) -- which folding into
+ * `createTestFile` could never reach anyway, since that file is never passed through it.
+ *
+ * Call this from a `beforeEach` inside whatever `describe.each(AVAILABLE_SCHEMAS)` block
+ * needs real Python's autouse-fixture behavior -- i.e. any suite that builds its own
+ * owner-history-requiring fixtures (anything that calls, directly or transitively,
+ * `api.owner.createOwnerHistory`) from a genuinely owner-chain-less file, matching what
+ * real Python's own per-schema test class gets for free via `test.bootstrap`.
+ */
+export function useOwnerSettingsFixture(schema: Schema): void {
+	if (schema === "IFC2X3") {
+		ownerSettings.getUser = (file) => {
+			const existing = file.byType("IfcPersonAndOrganization")[0] ?? null;
+			if (existing) return existing;
+			const person = file.createEntity("IfcPerson");
+			const organization = file.createEntity("IfcOrganization");
+			return file.createEntity("IfcPersonAndOrganization", person, organization);
+		};
+		ownerSettings.getApplication = (file) => {
+			const existing = file.byType("IfcApplication")[0] ?? null;
+			if (existing) return existing;
+			return file.createEntity("IfcApplication");
+		};
+	} else {
+		ownerSettings.getUser = (file) => file.byType("IfcPersonAndOrganization")[0] ?? null;
+		ownerSettings.getApplication = (file) => file.byType("IfcApplication")[0] ?? null;
 	}
 }

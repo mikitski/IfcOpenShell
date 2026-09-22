@@ -6,7 +6,11 @@
 // behavior directly (see `../../../src/api/material/editLayerUsage.ts`'s own header
 // comment): a plain, unconditional attribute setter loop. `IfcMaterialLayerSetUsage`
 // exists on every schema (IFC2X3 included), so these tests run against every
-// `AVAILABLE_SCHEMAS` entry.
+// `AVAILABLE_SCHEMAS` entry. Fixture material below is created with no `category` --
+// `IfcMaterial.Category` doesn't exist at all on IFC2X3 (see `../../../src/api
+// /material/addMaterial.ts`'s own header comment: only `Name` is a real attribute
+// there), and this file's one assertion doesn't depend on it, so it's simply omitted
+// rather than schema-gated.
 
 import { describe, expect, test } from "vitest";
 import { addLayer } from "../../../src/api/material/addLayer";
@@ -22,7 +26,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.editLayerUsage (%s)", (schema) =>
 		const file = createTestFile(schema);
 		const wallType = file.createEntity("IfcWallType");
 		const layerSet = addMaterialSet(file, { setType: "IfcMaterialLayerSet", name: "CON200" });
-		const concrete = addMaterial(file, { name: "CON01", category: "concrete" });
+		const concrete = addMaterial(file, { name: "CON01" });
 		addLayer(file, { layerSet, material: concrete });
 		assignMaterial(file, { products: [wallType], material: layerSet });
 

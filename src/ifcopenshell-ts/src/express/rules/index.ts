@@ -1,0 +1,14 @@
+// This file was generated with the assistance of an AI coding tool.
+//
+// Side-effect-only barrel: statically imports every ported per-schema `calc_*` rules
+// module purely for its `registerSchemaCalcFunctions(...)` module-top-level call (see
+// `../dispatch.ts`'s own header comment for why static registration, not real Python's
+// dynamic `importlib.import_module`, is this port's schema-scoped substitute).
+// `entityInstance.ts` imports this module for its side effect alone, so that reading a
+// DERIVED attribute always has every ported schema's functions available, regardless of
+// which module a particular caller happened to import first.
+//
+// Additive by design: a future chunk porting IFC4/IFC4X3's own `calc_*` functions adds
+// one more `import "./ifc4";` line here -- nothing else in this barrel, `dispatch.ts`,
+// or `entityInstance.ts` needs to change.
+import "./ifc2x3";

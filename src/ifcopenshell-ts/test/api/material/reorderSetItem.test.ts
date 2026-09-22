@@ -9,7 +9,12 @@
 // `else: raise ValueError(...)` fallback for an unrecognised set type.
 // `IfcMaterialConstituentSet`/`IfcMaterialProfileSet` don't exist on IFC2X3 at all, so
 // that describe block runs IFC4/IFC4X3 only; `IfcMaterialLayerSet`/`IfcMaterialList`
-// run against every `AVAILABLE_SCHEMAS` entry.
+// run against every `AVAILABLE_SCHEMAS` entry. Fixture materials below are created
+// with no `category` -- `IfcMaterial.Category` doesn't exist at all on IFC2X3 (see
+// `../../../src/api/material/addMaterial.ts`'s own header comment: only `Name` is a
+// real attribute there), and none of this file's assertions depend on it, so it's
+// simply omitted rather than schema-gated (matching the IFC4/IFC4X3-only block below,
+// which never used `category` either).
 
 import { describe, expect, test } from "vitest";
 import { addConstituent } from "../../../src/api/material/addConstituent";
@@ -26,8 +31,8 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.reorderSetItem -- IfcMaterialList
 	test("reorders two list items", () => {
 		const file = createTestFile(schema);
 		const materialList = addMaterialSet(file, { setType: "IfcMaterialList" });
-		const aluminium = addMaterial(file, { name: "AL01", category: "aluminium" });
-		const glass = addMaterial(file, { name: "GLZ01", category: "glass" });
+		const aluminium = addMaterial(file, { name: "AL01" });
+		const glass = addMaterial(file, { name: "GLZ01" });
 		addListItem(file, { materialList, material: aluminium });
 		addListItem(file, { materialList, material: glass });
 
@@ -44,8 +49,8 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.reorderSetItem -- IfcMaterialLaye
 	test("reorders two layers, matching list.pop/list.insert semantics", () => {
 		const file = createTestFile(schema);
 		const layerSet = addMaterialSet(file, { setType: "IfcMaterialLayerSet" });
-		const gypsum = addMaterial(file, { name: "PB01", category: "gypsum" });
-		const steel = addMaterial(file, { name: "ST01", category: "steel" });
+		const gypsum = addMaterial(file, { name: "PB01" });
+		const steel = addMaterial(file, { name: "ST01" });
 		const layer1 = addLayer(file, { layerSet, material: gypsum });
 		const layer2 = addLayer(file, { layerSet, material: steel });
 		const layer3 = addLayer(file, { layerSet, material: gypsum });
