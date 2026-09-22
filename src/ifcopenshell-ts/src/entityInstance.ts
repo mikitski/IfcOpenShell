@@ -24,6 +24,13 @@
 //   `__getattr__` falls through to for non-forward/non-inverse attribute names
 //   (research/01 SS2.3: "not relevant to a base TS port"). `.get()` throws instead,
 //   and the Proxy (falling back to `.get()` on a cache miss) inherits that behavior.
+//   *** Updated by Phase EX-2's first chunk (planning/ifcopenshell-ts/
+//   70-express-rules-plan.md): `.get()` now dispatches a DERIVED-category attribute
+//   read through `express/dispatch.ts`'s `resolveDerivedAttribute`, which returns a
+//   real computed value for any of the (so far, additively growing) set of ported
+//   `calc_*` functions -- see `.get()`'s own doc comment below for the exact
+//   mechanism. Still throws the same "has no attribute" error as before for any
+//   DERIVED attribute with no ported function yet, unchanged. ***
 // - `compare()`/`__lt__`/`__le__`/`__gt__`/`__ge__` EXPRESS-style ordering and
 //   `__dir__` -- not part of this chunk's explicit method list.
 // - Attribute values on non-entity (simple/defined-type, e.g. a standalone
@@ -44,6 +51,13 @@
 
 import { AttributeCategory, EMPTY_CLASS_ATTRIBUTE_CACHE, getClassAttributeMeta } from "./attributeCache";
 import type { AttributeMeta, ClassAttributeCache } from "./attributeCache";
+import { DERIVE_NOT_FOUND, resolveDerivedAttribute } from "./express/dispatch";
+// Side-effect-only import: registers every ported schema's `calc_*` functions (see
+// `express/rules/index.ts`'s own header comment) -- imported here, not just from the
+// package's top-level barrel (`index.ts`), so DERIVE dispatch works for any caller that
+// constructs/reads an `EntityInstance` directly, not only callers who happened to go
+// through `index.ts` first.
+import "./express/rules";
 import type { IfcFile } from "./file";
 import type { IfcopenshellAttributeValueVariantT, entity as NativeEntity } from "./native/ifcopenshell_native";
 import {
@@ -319,8 +333,41 @@ export class EntityInstance {
 			}
 			return values;
 		}
-		// EXPRESS derived-attribute (calc_<Type>_<name>) rule execution is explicitly
-		// out of scope for this chunk (research/01 SS2.3) -- no fallback, just error.
+		// EXPRESS derived-attribute (calc_<Type>_<name>) DERIVE dispatch (Phase EX-2,
+		// planning/ifcopenshell-ts/70-express-rules-plan.md SS4): mirrors real Python's
+		// `entity_instance_mixin.__getattr__` DERIVE-dispatch branch -- `
+		// resolveDerivedAttribute` walks this instance's own supertype chain looking for
+		// a ported `calc_{supertype}_{name}` function, schema-scoped (see
+		// `express/dispatch.ts`'s own header comment for the full mechanism and why this
+		// is a purely additive capability: only the schemas/functions some chunk has
+		// actually ported are ever registered, so an attribute with no ported function
+		// falls through to exactly the same "has no attribute" error this method has
+		// always thrown, unchanged).
+		//
+		// **Deliberately NOT gated on `category === AttributeCategory.DERIVED`** --
+		// verified directly (both against this port's own native binding AND against a
+		// real, separately-installed `ifcopenshell-python`, not assumed) that real
+		// Python's own `get_attribute_category`/this port's own native equivalent report
+		// every one of this chunk's own 15 ported DERIVE-style attributes (`Dim`, `Z`,
+		// `P`, `U`, `Scl`/`Scl2`/`Scl3`, `ControlPoints`, `UpperIndexOnControlPoints`) as
+		// `INVALID` (0), not `DERIVED` (3) -- these pseudo-attributes are apparently not
+		// modeled as real schema attribute slots at all in the underlying C++ schema
+		// data (confirmed: `all_attributes()` on the declaring class doesn't list them
+		// either), unlike the rarer case `attributeCache.ts`'s own header comment
+		// documents (`IfcGeometricRepresentationSubContext.CoordinateSpaceDimension`,
+		// which genuinely does report `DERIVED`). Real Python's own `__getattr__` never
+		// actually branches on `attr_cat == DERIVED` either -- its `if/elif FORWARD/
+		// INVERSE .../else:` structure attempts DERIVE dispatch for ANY category that
+		// isn't FORWARD or INVERSE, `INVALID` included -- so gating this port's own
+		// dispatch on `DERIVED` specifically would silently never fire for any of this
+		// chunk's own functions. Matching real Python's actual "catch-all else" shape
+		// instead (attempt dispatch first, THEN throw "has no attribute" only if nothing
+		// matched) is what makes this a strict behavioral superset of the pre-chunk
+		// "always throw" default: a genuinely nonexistent attribute name (still
+		// `INVALID`, with no registered `calc_*` function either) throws exactly as
+		// before.
+		const value = resolveDerivedAttribute(this, name);
+		if (value !== DERIVE_NOT_FOUND) return value;
 		throw new Error(`entity instance of type '${this.isA(true)}' has no attribute '${name}'`);
 	}
 
@@ -640,6 +687,29 @@ export function referencesTarget(value: unknown, target: EntityInstance): boolea
  * value)` methods unchanged, so an unknown attribute name fails exactly as loudly and
  * with exactly the same message as the uncached primitive escape hatch already does --
  * never a silent `undefined`.
+ *
+ * **`.get(prop)` fallback is called AS `receiver`, not as `target` (Phase EX-2 fix,
+ * found and fixed while wiring DERIVE dispatch, not present before this chunk since
+ * `.get()`'s own `else` branch always just threw before now)**: `target` is the raw,
+ * un-proxied `EntityInstance` -- calling `target.get(prop)` directly would bind `.get()`'s
+ * own `this` to that raw object, and `.get()`'s new DERIVE-dispatch path
+ * (`resolveDerivedAttribute`) passes that same `this` on to a `calc_*` formula body as
+ * its own `self`, where formulas read further attributes via ordinary property access
+ * (`runtimeShim.ts`'s `expressGetAttr`, e.g. `self.Coordinates`) -- which only resolves
+ * correctly through THIS Proxy's own `get` trap, not on the raw target directly (a raw
+ * property read there is simply `undefined`, since attribute resolution is entirely a
+ * Proxy-trap behavior, never a real property on the class itself). Confirmed as a real,
+ * reproducible bug empirically (a first-draft version of this wiring silently returned
+ * `runtimeShim.INDETERMINATE` for `pt.Dim` on a real `IfcCartesianPoint` with
+ * `Coordinates` genuinely set, instead of the correct `3`) before landing this fix --
+ * `target.get.call(receiver, prop)` binds `.get()`'s own `this` to `receiver` (the
+ * Proxy itself, for the ordinary top-level access shape every real caller uses) instead,
+ * so any further property access a dispatched `calc_*` formula performs on `self`
+ * correctly round-trips back through this same trap. Harmless for the pre-existing
+ * FORWARD/INVERSE code paths above (unaffected by this change): every method `.get()`
+ * itself calls (`this.getByIndex`/`this.native`/...) is a real prototype member, so the
+ * trap's own `prop in target` fast-path returns the same result whether invoked via
+ * `receiver` or `target`.
  */
 const ENTITY_INSTANCE_PROXY_HANDLER: ProxyHandler<EntityInstance> = {
 	get(target, prop, receiver) {
@@ -648,7 +718,7 @@ const ENTITY_INSTANCE_PROXY_HANDLER: ProxyHandler<EntityInstance> = {
 		}
 		const meta = target._resolveTypeInfo().cache.byName.get(prop);
 		if (meta === undefined) {
-			return target.get(prop);
+			return target.get.call(receiver, prop);
 		}
 		if (meta.category === AttributeCategory.FORWARD) {
 			return target.getByIndex(meta.index);

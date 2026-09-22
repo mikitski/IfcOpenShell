@@ -7,8 +7,9 @@
 // Not a usecase: takes an `entity_instance` directly (no `file` parameter at all) --
 // see `./addSurveyPoint.ts`'s own header comment for the same finding, applied here.
 //
-// --- BLOCKED by the pre-existing, already-disclosed `entityInstance.ts` EXPRESS
-//     DERIVED-attribute gap: `.get("Dim")` always throws ---
+// --- UPDATE (Phase EX-2's first chunk, planning/ifcopenshell-ts/
+//     70-express-rules-plan.md): the DERIVED-attribute gap below is now closed FOR
+//     `IfcCartesianPoint.Dim` SPECIFICALLY (IFC2X3 only so far) ---
 //
 // Real Python's FIRST line reads `annotation.Representation.Representations[0]
 // .Items[0].Dim`. `IfcCartesianPoint.Dim` is a real EXPRESS DERIVED attribute
@@ -19,31 +20,31 @@
 // .__getattr__`'s DERIVED-category branch, which imports and calls into the
 // schema's own compiled `ifcopenshell.express.rules.<schema>` module.
 //
-// This TS port's `EntityInstance.get()` has NO DERIVED-category fallback at all -- a
-// pre-existing, already-disclosed, cross-cutting `entityInstance.ts` gap (see
-// `TODOS.md`'s "`.get("Dim")` unconditionally throws for any entity" family of
-// entries, first surfaced by `util.representation.guessType`'s `Curve2D`/`Curve3D`/
-// `Surface2D`/`Surface3D` branches and since hit by `util/shapeBuilder.ts`'s
-// `.profile()`/`createSweptDiskSolid()` and several `api.geometry` files). This means
-// `editSurveyPoint`'s very first statement -- reading `Items[0].Dim` -- throws on
-// EVERY invocation, on every schema, today. Ported completely and faithfully anyway
-// (both branches, `Coordinates = (x, y)` vs. `(x, y, z)`), matching this project's
-// established "port everything, throw a clear loud error only at the exact point
-// actually needed, never proactively guard around a foundational gap" discipline --
-// NOT reimplemented as a narrow `Coordinates.length` shortcut, even though that would
-// happen to produce the same numeric answer for this one entity class, since the
-// task's own required process is to surface the real gap via the real (already
-// clear) `.get()` error, not to quietly paper over it. See `TODOS.md`'s newly added
-// entry (cross-referencing the existing family) for the full writeup.
+// This TS port's `EntityInstance.get()` previously had NO DERIVED-category fallback at
+// all -- a pre-existing, disclosed, cross-cutting `entityInstance.ts` gap (`TODOS.md`'s
+// "`.get("Dim")` unconditionally throws for any entity" family of entries, first
+// surfaced by `util.representation.guessType`'s `Curve2D`/`Curve3D`/`Surface2D`/
+// `Surface3D` branches). Phase EX-2's first chunk ported `calc_IfcCartesianPoint_Dim`
+// (among 14 other `calc_*` DERIVE functions) and wired the dispatch mechanism into
+// `EntityInstance.get()` (`src/express/dispatch.ts`/`src/express/rules/ifc2x3.ts`) --
+// `Dim` now resolves correctly for any `IfcCartesianPoint` in an IFC2X3 file, so this
+// function's own first statement (reading `Items[0].Dim`) now succeeds on IFC2X3.
+// Still throws for IFC4/IFC4X3 until a future chunk ports the identical formula for
+// those schemas too (same plan doc, IFC2X3-first sequencing) -- and several OTHER
+// callers this gap's own `TODOS.md` entry lists (`util/shapeBuilder.ts`'s
+// `.profile()`/`createSweptDiskSolid()`, several `api.geometry` files) may depend on
+// `Dim`/other DERIVE attributes on entity types this chunk did NOT port (e.g. solids/
+// curves/surfaces, not `IfcCartesianPoint`) and remain blocked -- this is a narrow,
+// additive fix for this one function's own specific dependency, not a general claim
+// that the whole gap family is closed.
 //
 // Note: `addSurveyPoint` (this module's own fixture-building sibling, and real
-// Python's own test fixture builder) is ALSO blocked by this SAME foundational gap,
-// via a DIFFERENT derived attribute (`IfcGeometricRepresentationSubContext
-// .WorldCoordinateSystem`, not `Dim` -- see `addSurveyPoint.ts`'s own header
-// comment), so `editSurveyPoint.test.ts` cannot reach `editSurveyPoint` via
-// `addSurveyPoint` at all -- its own fixture is built with raw `file.createEntity(...)`
-// calls instead, specifically to exercise THIS file's own `Dim` throw (not
-// `addSurveyPoint`'s different, earlier one).
+// Python's own test fixture builder) remains blocked by the SAME general kind of gap,
+// via a DIFFERENT derived attribute this chunk does not port
+// (`IfcGeometricRepresentationSubContext.WorldCoordinateSystem`, not `Dim` -- see
+// `addSurveyPoint.ts`'s own header comment, unchanged), so `editSurveyPoint.test.ts`
+// still cannot reach `editSurveyPoint` via `addSurveyPoint` -- its own fixture is still
+// built with raw `file.createEntity(...)` calls instead.
 
 import type { EntityInstance } from "../../entityInstance";
 
@@ -51,9 +52,9 @@ import type { EntityInstance } from "../../entityInstance";
  * Edits the location of a previously defined survey point (Python:
  * `ifcopenshell.api.cogo.edit_survey_point`).
  *
- * BLOCKED today: this function's first statement reads a real EXPRESS DERIVED
- * attribute (`IfcCartesianPoint.Dim`) that this port's `EntityInstance.get()` cannot
- * resolve -- see this file's own header comment. Always throws.
+ * Works on IFC2X3 (`IfcCartesianPoint.Dim` is ported there, Phase EX-2's first chunk);
+ * still throws on IFC4/IFC4X3 until a future chunk ports the same DERIVE formula for
+ * those schemas too -- see this file's own header comment.
  *
  * @param annotation The survey point annotation (an `IfcAnnotation`, as returned by
  *   `addSurveyPoint`).
