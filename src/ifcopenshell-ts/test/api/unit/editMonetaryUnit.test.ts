@@ -20,7 +20,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editMonetaryUnit (%s)", (schema) => {
 describe.each(AVAILABLE_SCHEMAS)("api.unit.editMonetaryUnit Transaction/undo-redo (%s)", (schema) => {
 	test("undo restores the previous Currency; redo reapplies the edit", () => {
 		const file = createTestFile(schema);
-		const unit = file.createEntity("IfcMonetaryUnit", "ZWL");
+		// "GBP" (not "ZWL") as the PREVIOUS value -- this test exercises undo/redo
+		// bookkeeping, not any specific currency value, and "ZWL" isn't a valid
+		// `IfcCurrencyEnum` member on IFC2X3 (`IfcMonetaryUnit.Currency` is a closed
+		// enum there, confirmed against the real compiled schema,
+		// `src/ifcparse/schemas/Ifc2x3-schema.cpp`; IFC4/IFC4X3 loosened it to a
+		// free-form `IfcLabel`, where any string is valid). "GBP"/"USD" are both valid
+		// on all 3 schemas.
+		const unit = file.createEntity("IfcMonetaryUnit", "GBP");
 
 		file.beginTransaction();
 		editMonetaryUnit(file, { unit, attributes: { Currency: "USD" } });
@@ -29,7 +36,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editMonetaryUnit Transaction/undo-red
 		expect(unit.get("Currency")).toBe("USD");
 
 		file.undo();
-		expect(unit.get("Currency")).toBe("ZWL");
+		expect(unit.get("Currency")).toBe("GBP");
 
 		file.redo();
 		expect(unit.get("Currency")).toBe("USD");

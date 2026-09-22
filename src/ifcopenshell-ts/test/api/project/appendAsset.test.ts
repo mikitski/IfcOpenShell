@@ -41,7 +41,7 @@
 //    coverage for `appendAsset`'s own presentation-layer-assignment logic (the actual
 //    thing under test here), without depending on either blocked convenience method.
 
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { addClassification } from "../../../src/api/classification/addClassification";
 import { addReference } from "../../../src/api/classification/addReference";
 import { addContext } from "../../../src/api/context/addContext";
@@ -83,7 +83,7 @@ import * as classificationUtil from "../../../src/util/classification";
 import * as elementUtil from "../../../src/util/element";
 import type { MatrixType } from "../../../src/util/placement";
 import { getLocalPlacement } from "../../../src/util/placement";
-import { AVAILABLE_SCHEMAS } from "../../bootstrap";
+import { AVAILABLE_SCHEMAS, useOwnerSettingsFixture } from "../../bootstrap";
 import type { Schema } from "../../bootstrap";
 
 function blankFile(schema: Schema): IfcFile {
@@ -105,6 +105,19 @@ function createSimpleExtrusion(file: IfcFile): EntityInstance {
 }
 
 describe.each(AVAILABLE_SCHEMAS)("api.project.appendAsset (%s)", (schema) => {
+	// Real Python's `TestAppendAssetIFC2X3(test.bootstrap.IFC2X3)` gets IFC2X3's
+	// lazy-create `ownerSettings.getUser`/`.getApplication` override for free, via
+	// `test.bootstrap`'s own `autouse=True` fixture (see `useOwnerSettingsFixture`'s own
+	// header comment in `../../bootstrap.ts`) -- needed here because almost every test in
+	// this file builds its `library`/`file` via the genuinely owner-chain-less `blankFile`
+	// helper below (not `createTestFile`'s pre-populated template), then calls
+	// `api.root.createEntity`, which unconditionally calls `owner.createOwnerHistory` ->
+	// `ownerSettings.getUser`/`.getApplication` -- mandatory on IFC2X3, where the box
+	// default raises instead of returning `null` when no user/application exists yet.
+	beforeEach(() => {
+		useOwnerSettingsFixture(schema);
+	});
+
 	test("does not append the same asset twice", () => {
 		const file = blankFile(schema);
 		const library = blankFile(schema);
@@ -574,7 +587,21 @@ describe.each(AVAILABLE_SCHEMAS)("api.project.appendAsset (%s)", (schema) => {
 		expect(file.byType("IfcOpeningElement").length).toBe(0);
 	});
 
-	test("appends a product when projects have different georeferencing", () => {
+	// IFC2X3 excluded: `addGeoreferencing(file, {})` on IFC2X3 hits `addGeoreferencing
+	// .ts`'s own already-disclosed, pre-existing IFC2X3-only primitive-layer blocker
+	// (its own header comment: "blocked here (plain-string new-property creation),
+	// letting the native call fail naturally, no proactive guard" -- the `editPset`
+	// call building `ePSet_ProjectedCRS`'s `Name` property needs to materialize a
+	// standalone typed value, the same `TODOS.md`-tracked "entity_instance.get()
+	// /create_entity() can't build a standalone simple/defined-type instance with an
+	// initial value" gap). `test/api/georeference/addGeoreferencing.test.ts` already
+	// pins this exact, current, disclosed behavior with a dedicated IFC2X3 test --
+	// unrelated to `appendAsset` itself (real Python's own equivalent test genuinely
+	// passes on IFC2X3, since real Python has no such primitive-layer gap at all), so
+	// this one case is excluded here rather than asserted on, matching this file's own
+	// header comment precedent for excluding real Python tests that hit a different,
+	// already-disclosed blocker.
+	test.skipIf(schema === "IFC2X3")("appends a product when projects have different georeferencing", () => {
 		// Real Python clones `ifc_file` into `library` via `ifcopenshell.file
 		// .from_string(ifc_file.to_string())` before independently re-georeferencing
 		// `library` -- this port has no "load from an in-memory string" primitive of its
@@ -766,7 +793,20 @@ describe.each(AVAILABLE_SCHEMAS)("api.project.appendAsset (%s)", (schema) => {
 		expect(assignedItems.map((e) => e.id())).toEqual(representations.map((e) => e.id()));
 	});
 
-	test("appends owner history without producing duplicates", () => {
+	// IFC4X3 excluded: `addApplication(library, {})` with no explicit
+	// `applicationDeveloper` hits `addApplication.ts`'s own already-disclosed,
+	// pre-existing IFC4X3-only blocker (`createApplicationOrganisation`'s
+	// `edit_pset`-reproduction branch needs to materialize a standalone `IfcLabel`
+	// value, which throws "Attribute access is only supported on entity instances" --
+	// the same primitive-layer gap `TODOS.md`'s "entity_instance.get()/create_entity()
+	// can't build a standalone simple/defined-type instance with an initial value"
+	// entry already tracks, see its "UPDATE 2026-09-13 (Phase 6's `api.owner`..."
+	// paragraph). `test/api/owner/addApplication.test.ts` already pins this exact,
+	// disclosed, current behavior with a dedicated IFC4X3 test -- unrelated to
+	// `appendAsset` itself, so this one case is excluded here rather than asserted on,
+	// matching this file's own header comment precedent for excluding real Python
+	// tests that hit a different, already-disclosed blocker.
+	test.skipIf(schema === "IFC4X3")("appends owner history without producing duplicates", () => {
 		const ifcFile = blankFile(schema);
 		const library = blankFile(schema);
 
