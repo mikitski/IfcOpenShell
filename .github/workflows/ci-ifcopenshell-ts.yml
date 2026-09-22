@@ -129,7 +129,31 @@ jobs:
           # header-only libraries (dll, algorithm, logic, ...) pulled in
           # transitively by ifcparse/plugin. Install the full `boost`
           # metapackage instead of hand-picking components.
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost eigen3 --triplet ${{ matrix.vcpkgTriplet }}
+          #
+          # Retried up to 3 times with a short backoff: real CI history has shown this step
+          # fail with a transient network error fetching an upstream source tarball for a
+          # package not yet in the GHA binary cache (e.g. `curl operation failed with error
+          # code 35 (SSL connect error)` fetching sqlite.org's own distfile for a transitive
+          # sqlite3 dependency) - a pure network flake, not a code or config problem, that
+          # previously needed a human to notice and push an empty commit to retrigger the
+          # whole job (see TODOS.md/PROGRESS.md for prior occurrences of exactly this). No
+          # pre-existing step-retry action (e.g. nick-fields/retry) is used anywhere else in
+          # this repo's workflows, so this is a small hand-rolled loop rather than adding a
+          # new third-party action for a single call site.
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost eigen3 --triplet ${{ matrix.vcpkgTriplet }}
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq $maxAttempts) {
+              Write-Output "::error::vcpkg install failed after $maxAttempts attempts"
+              exit $LASTEXITCODE
+            }
+            $backoffSeconds = 15 * $attempt
+            Write-Output "::warning::vcpkg install failed (attempt $attempt/$maxAttempts), retrying in ${backoffSeconds}s"
+            Start-Sleep -Seconds $backoffSeconds
+          }
 
       - name: ccache
         if: matrix.os != 'windows'
