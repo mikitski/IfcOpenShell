@@ -218,6 +218,25 @@ jobs:
       # this leg's own CI run shows sccache failing to resolve/run there specifically
       # (rather than some unrelated flake), the fix is scoping this step to `matrix.arch ==
       # 'x64'` only, not reverting the whole change.
+      #
+      # KNOWN RESIDUAL LIMITATION (found verifying this PR's own first CI run, #173): moving
+      # `SCCACHE_GHA_ENABLED` here does fix the server's own backend selection - the
+      # end-of-job stats now correctly report `Cache location: ghac, name: ...` instead of
+      # `Local disk` - but `Compile requests` still shows 0. Root cause: cmake-js selects the
+      # `Visual Studio 17 2022` (MSBuild) generator for the addon build on Windows, and
+      # `CMAKE_C_COMPILER_LAUNCHER`/`CMAKE_CXX_COMPILER_LAUNCHER` are only honored by the
+      # Ninja/Makefile generators - MSBuild's own `ClCompile` build task invokes `cl.exe`
+      # directly and never consults those CMake cache variables at all, so sccache never
+      # wraps a single compiler call here regardless of backend config. Not fixed here:
+      # forcing a Ninja generator on Windows would need its own MSVC-environment setup (e.g.
+      # `ilammy/msvc-dev-cmd`) and isn't worth the added complexity - confirmed directly from
+      # this same PR's build log that the addon itself is only 5 translation units and
+      # compiles in ~8 seconds total, so this generator limitation costs effectively nothing
+      # in practice. The real Windows CI cost is the C++ core (`ifcparse`/`plugin`) build
+      # below, which has never had per-object compiler caching on Windows at all (ccache is
+      # Unix-only; sccache was only ever wired to this addon step, never the core) - that
+      # cost is what the "Restore cached IfcOpenShell C++ core" step's own whole-prefix cache
+      # (a different, unaffected caching mechanism) actually addresses.
       - name: sccache (Windows)
         if: matrix.os == 'windows'
         uses: mozilla-actions/sccache-action@v0.0.11
