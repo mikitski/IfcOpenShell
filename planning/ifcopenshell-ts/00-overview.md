@@ -73,6 +73,9 @@ for the proposed internal package layout, native-addon build wiring, and CI inte
 - `50-repo-and-tooling.md` — package layout, build, lint, CI, versioning, publishing.
 - `60-orchestration-spec.md` — the dispatch → review → CI → merge → docs-update loop this project's
   implementation actually runs on, and the escalation/publish-gate policies around it.
+- `70-express-rules-plan.md` — the phasing plan for EXPRESS derived-attribute support and the
+  `validate.py` port (Phase 10), including the decision to port real Python's already-compiled
+  rule output rather than build or port an EXPRESS→TS compiler.
 
 ## 6. Non-goals for v1 (explicitly out of scope, revisit later)
 
