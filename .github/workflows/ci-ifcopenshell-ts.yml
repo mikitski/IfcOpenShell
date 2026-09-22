@@ -129,13 +129,75 @@ jobs:
           # header-only libraries (dll, algorithm, logic, ...) pulled in
           # transitively by ifcparse/plugin. Install the full `boost`
           # metapackage instead of hand-picking components.
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost eigen3 --triplet ${{ matrix.vcpkgTriplet }}
+          #
+          # Retried up to 3 times with a short backoff: real CI history has shown this step
+          # fail with a transient network error fetching an upstream source tarball for a
+          # package not yet in the GHA binary cache (e.g. `curl operation failed with error
+          # code 35 (SSL connect error)` fetching sqlite.org's own distfile for a transitive
+          # sqlite3 dependency) - a pure network flake, not a code or config problem, that
+          # previously needed a human to notice and push an empty commit to retrigger the
+          # whole job (see TODOS.md/PROGRESS.md for prior occurrences of exactly this). No
+          # pre-existing step-retry action (e.g. nick-fields/retry) is used anywhere else in
+          # this repo's workflows, so this is a small hand-rolled loop rather than adding a
+          # new third-party action for a single call site.
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install boost eigen3 --triplet ${{ matrix.vcpkgTriplet }}
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq $maxAttempts) {
+              Write-Output "::error::vcpkg install failed after $maxAttempts attempts"
+              exit $LASTEXITCODE
+            }
+            $backoffSeconds = 15 * $attempt
+            Write-Output "::warning::vcpkg install failed (attempt $attempt/$maxAttempts), retrying in ${backoffSeconds}s"
+            Start-Sleep -Seconds $backoffSeconds
+          }
 
       - name: ccache
         if: matrix.os != 'windows'
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
           key: ifcopenshell-ts-${{ matrix.os }}-${{ matrix.arch }}
+
+      # ccache (above) doesn't support MSVC, so Windows had zero compiler-level caching for
+      # the native addon's own C++ compilation (below) - unlike Linux/macOS, every Windows
+      # run recompiled the addon's small set of translation units from scratch even when
+      # their content hadn't changed. This is NOT the same cache as "Restore cached
+      # IfcOpenShell C++ core" below (that one caches the already-built/installed
+      # IfcParse/plugin prefix and works fine on Windows today; left alone here) - this one
+      # is specifically for the addon build step further down.
+      #
+      # sccache (Mozilla's compiler cache) supports MSVC, unlike ccache. Uses its GHA cache
+      # backend (`SCCACHE_GHA_ENABLED`, set on the "Build native addon (Windows)" step
+      # below) rather than a separate actions/cache step - sccache talks to the Actions
+      # Cache service directly, the same mechanism vcpkg's own `x-gha` binary source above
+      # uses, via the `ACTIONS_CACHE_URL`/`ACTIONS_RUNTIME_TOKEN` env vars the "Export GitHub
+      # Actions cache environment variables (Windows)" step above already exports for this
+      # job - no separate cache-directory path/key bookkeeping needed, unlike the manual
+      # actions/cache/restore+save pair used for the C++ core prefix below (which caches a
+      # single directory tree by content hash, a different shape of caching problem).
+      #
+      # Applied to both Windows legs (x64 and the arm64 `windows-11-arm` runner) - sccache
+      # v0.18.0 (pinned below) ships genuine `aarch64-pc-windows-msvc` binaries, not just
+      # x64 run under emulation. Not independently verified on the arm64 runner beyond
+      # that release-asset check (no local arm64 Windows environment available here); if
+      # this leg's own CI run shows sccache failing to resolve/run there specifically
+      # (rather than some unrelated flake), the fix is scoping this step to `matrix.arch ==
+      # 'x64'` only, not reverting the whole change.
+      - name: sccache (Windows)
+        if: matrix.os == 'windows'
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          # Pin the actual sccache binary version too, not just the wrapping action -
+          # matches this workflow's existing pinning discipline for every other tool it
+          # installs (ccache-action@v1.2.23, actions/cache@v4, actions/checkout@v7, ...)
+          # rather than silently floating to whatever release the action resolves as
+          # "latest" at run time. v0.18.0 confirmed (via its GitHub release assets) to ship
+          # both `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc` binaries, covering
+          # both Windows legs in this matrix.
+          version: "v0.18.0"
 
       # Cache the *installed* C++ core prefix itself (not just object files
       # via ccache), keyed on everything that can change its contents: the
@@ -262,11 +324,18 @@ jobs:
         if: matrix.os == 'windows'
         shell: pwsh
         working-directory: src/ifcopenshell-ts
+        env:
+          # Tells sccache (set up by the "sccache (Windows)" step above) to use its GHA
+          # cache backend - see that step's own comment for why this, rather than a
+          # separate actions/cache step, is the right mechanism here.
+          SCCACHE_GHA_ENABLED: "true"
         run: |
           npm run build:native -- `
             --CDCMAKE_PREFIX_PATH="$env:INSTALL_PREFIX" `
             --CDCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            --CDVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }} 2>&1 | Tee-Object -FilePath build-native.log
+            --CDVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }} `
+            --CDCMAKE_C_COMPILER_LAUNCHER=sccache `
+            --CDCMAKE_CXX_COMPILER_LAUNCHER=sccache 2>&1 | Tee-Object -FilePath build-native.log
           if ($LASTEXITCODE -ne 0) {
             Write-Output "::group::build:native failure (last 80 lines)"
             Get-Content build-native.log -Tail 80 | ForEach-Object { Write-Output "::error::$_" }
