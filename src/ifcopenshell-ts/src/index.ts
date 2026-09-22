@@ -62,3 +62,12 @@ export type { OpenOptions, SupportedFormat } from "./open";
 // mirroring Python's `ifcopenshell.api.add_pre_listener(...)` living directly in
 // `ifcopenshell/api/__init__.py`'s own top-level namespace (see `api/index.ts`).
 export * as api from "./api";
+
+// Phase EX-1 (planning/ifcopenshell-ts/70-express-rules-plan.md SS4): the shared
+// EXPRESS runtime shim real Python inlines at the top of every generated
+// `ifcopenshell/express/rules/{IFC2X3,IFC4,IFC4X3}.py` file -- ported once here since
+// it's confirmed schema-agnostic (see `express/runtimeShim.ts`'s own header comment).
+// Namespaced as `express.nvl(...)`/`express.usedIn(...)`/etc., mirroring the real
+// Python package location (`ifcopenshell.express`) this new directory's own header
+// comment explains was chosen to house it and Phase EX-2/EX-4's later `rules/*.ts`.
+export * as express from "./express";
