@@ -3135,6 +3135,18 @@ napi_value napi_spf_header_new_with_file_logger(napi_env env, napi_callback_info
     return wrap_ifcopenshell_spf_header(env, result);
 }
 
+napi_value napi_spf_header_new_with_other(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* js_other = unwrap_ifcopenshell_spf_header(env, argv[0]);
+    auto* result = ifcopenshell_spf_header_new_with_other(js_other);
+    if (result == nullptr && ifcopenshell_last_error_message() != nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    return wrap_ifcopenshell_spf_header(env, result);
+}
+
 napi_value napi_spf_header_owner_file(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2];
@@ -4965,6 +4977,11 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value fn;
         napi_create_function(env, "spf_header_new_with_file_logger", NAPI_AUTO_LENGTH, napi_spf_header_new_with_file_logger, nullptr, &fn);
         napi_set_named_property(env, exports, "spf_header_new_with_file_logger", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "spf_header_new_with_other", NAPI_AUTO_LENGTH, napi_spf_header_new_with_other, nullptr, &fn);
+        napi_set_named_property(env, exports, "spf_header_new_with_other", fn);
     }
     {
         napi_value fn;

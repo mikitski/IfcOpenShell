@@ -858,6 +858,10 @@ export class spf_header {
         return new spf_header(native.spf_header_new_with_file_logger(file._handle, logger._handle));
     }
 
+    static with_other(other: spf_header): spf_header {
+        return new spf_header(native.spf_header_new_with_other(other._handle));
+    }
+
     owner_file(file: file): void {
         native.spf_header_owner_file(this._handle, file._handle);
     }
