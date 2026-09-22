@@ -135,6 +135,19 @@
 // which already works today and is pinned with real (non-throwing) geometry assertions
 // rather than "throws the disclosed error".
 //
+// **UPDATE (Phase EX-2 chunks 1+2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4) --
+// gap 1 ("`.get("Dim")`'s EXPRESS DERIVED-attribute gap") is now RESOLVED FOR IFC2X3, gap 2
+// (`IfcLineIndex`/`IfcArcIndex`) is UNCHANGED.** `entityInstance.ts`'s DERIVE dispatch now
+// resolves `IfcCurve.Dim`/`IfcElementarySurface.Dim`/etc. for real IFC2X3 geometry (see
+// `TODOS.md`'s "`util.representation.guessType`'s `Curve2D`/... branches..." entry). On
+// IFC2X3, every branch above that used to reach gap 1 (`guessType()`'s fallback, and
+// `extrude()`'s internal auto-`.profile()` wrap) now succeeds instead, so this function
+// completes end-to-end for every `TargetView`/`operationType` on IFC2X3 (verified against the
+// real, built native addon). IFC4/IFC4X3 are unaffected -- gap 2 still fires first there,
+// exactly as documented above. `addDoorRepresentation.test.ts` has been updated accordingly;
+// this header's own narrative above is left intact as the ORIGINAL, still-accurate-for-
+// IFC4/IFC4X3 description of how execution reaches each blocker.
+//
 // *** One more real, disclosed, verbatim-preserved Python-source quirk, independent of the
 // blockers above: `DoorPanelProperties.PanelWidth`'s default (`1.0`) is a plain DATACLASS
 // FIELD default, applied only when the key is OMITTED entirely -- unlike every other field in

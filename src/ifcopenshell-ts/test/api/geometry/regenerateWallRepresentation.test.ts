@@ -40,12 +40,56 @@ import type { IfcFile } from "../../../src/file";
 import * as guid from "../../../src/guid";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
-/** The disclosed, current `ShapeBuilder` primitive-layer blocker this file's own header comment
- * (Finding 1) documents -- reached by every real invocation with a wall that has an
- * `IfcMaterialLayerSet`, on every schema (via 2 different already-tracked gaps, depending on
- * schema). Matches `addWindowRepresentation.test.ts`'s/`addRailingRepresentation.test.ts`'s own
- * established regex for this exact blocker. */
-const SHAPE_BUILDER_BLOCKER = /has no attribute 'Dim'|Attribute access is only supported on entity instances/;
+/**
+ * **UPDATE (Phase EX-2 chunk 2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4)**:
+ * this file's own header comment originally documented Finding 1 as a blocker reached by every
+ * real invocation with a wall that has an `IfcMaterialLayerSet`, on EVERY schema. That is no
+ * longer true for IFC2X3: Phase EX-2 chunks 1+2 ported enough of the `calc_*` `Dim`-DERIVE
+ * family (`calc_IfcCartesianPoint_Dim`, `calc_IfcCurve_Dim`, `calc_IfcElementarySurface_Dim`,
+ * ...) that `IfcCurve.Dim`/`IfcSurface.Dim` now resolve for real IFC2X3 geometry, so
+ * `regenerateWallRepresentation` now genuinely completes end-to-end on IFC2X3 wherever it used
+ * to throw here. Re-verified directly against the real, built multi-schema native addon (not
+ * assumed) before updating these tests -- every previously-"blocked" IFC2X3 case below now
+ * returns a real `IfcShapeRepresentation` (`RepresentationIdentifier: "Body"`,
+ * `RepresentationType: "SweptSolid"`, one `IfcExtrudedAreaSolid` item), and the tests below
+ * assert exactly that (plus, per-test, the specific structural distinction each test's own name
+ * describes -- e.g. "does not throw for THIS connection shape specifically"). This is a
+ * deliberately MINIMAL, structural-sanity level of verification (return value's type, its
+ * `RepresentationIdentifier`/`RepresentationType`/`Items` shape) -- it does NOT verify the
+ * actual extrusion profile geometry (join/mitre point coordinates, notch/butt shapes, boolean
+ * cut placement, etc.) for each connection scenario. Full geometry-fidelity verification of
+ * `regenerateWallRepresentation`'s real join/mitre/notch output across every connection shape is
+ * real, disclosed, scoped-out follow-up work (tracked in `TODOS.md`), comparable in size to its
+ * own dedicated verification chunk -- not something this DERIVE-porting chunk attempts.
+ *
+ * IFC4/IFC4X3 are UNCHANGED and still hit the OTHER, unrelated, still-real
+ * `IfcLineIndex`/`IfcArcIndex` defined-type-creation gap (`util/shapeBuilder.ts`'s own header
+ * comment) one step later in the same code path -- Phase EX-2 has nothing to do with that gap,
+ * it's a `createEntity`-on-a-defined-type limitation, not a DERIVE-attribute one. Re-verified
+ * directly too: IFC4 still throws `DEFINED_TYPE_ERROR` for the exact same fixtures.
+ */
+const DIM_ERROR = /has no attribute 'Dim'/;
+const DEFINED_TYPE_ERROR = /Attribute access is only supported on entity instances/;
+/** Matches `addWindowRepresentation.test.ts`'s/`addRailingRepresentation.test.ts`'s own
+ * established regex for this same disclosed `IfcLineIndex`/`IfcArcIndex` blocker, still real on
+ * IFC4/IFC4X3. */
+const SHAPE_BUILDER_BLOCKER = (schema: string): RegExp => (schema === "IFC2X3" ? DIM_ERROR : DEFINED_TYPE_ERROR);
+
+/**
+ * Asserts the MINIMAL, structural-sanity shape every genuinely-unblocked IFC2X3
+ * `regenerateWallRepresentation` call in this file now produces (see the disclosure above) --
+ * deliberately not a full geometric-correctness check.
+ */
+function expectStructurallySaneBodyRepresentation(result: EntityInstance | undefined): void {
+	expect(result).toBeDefined();
+	const rep = result as EntityInstance;
+	expect(rep.isA()).toBe("IfcShapeRepresentation");
+	expect(rep.get("RepresentationIdentifier")).toBe("Body");
+	expect(rep.get("RepresentationType")).toBe("SweptSolid");
+	const items = rep.get("Items") as EntityInstance[];
+	expect(items).toHaveLength(1);
+	expect(items[0].isA()).toBe("IfcExtrudedAreaSolid");
+}
 
 /** Python: `model = add_context(...)`; `body = add_context(..., parent=model)`; `plan =
  * add_context(context_type="Plan")` -- matching `addWallRepresentation.test.ts`'s own identical
@@ -126,20 +170,24 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		expect(result).toBeUndefined();
 	});
 
-	test("a wall with a real IfcMaterialLayerSet and no connections throws the disclosed ShapeBuilder blocker (Finding 1)", () => {
+	test("a wall with a real IfcMaterialLayerSet and no connections regenerates successfully on IFC2X3, still blocked on IFC4/IFC4X3", () => {
 		const file = createTestFile(schema);
 		bodyContext(file);
 		const wall = file.createEntity("IfcWall");
 		const layerSet = makeLayerSet(file);
 		assignMaterial(file, { products: [wall], material: layerSet, type: "IfcMaterialLayerSet" });
 
-		expect(() => regenerateWallRepresentation(file, { wall })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	test("get_layers reads Priority/LayerThickness off each IfcMaterialLayer -- exercised indirectly via getAxes' own successful completion", () => {
 		// A layer with a real, non-default Priority still reaches the SAME disclosed
-		// ShapeBuilder blocker (not a premature, different error) -- proving `getLayers`
-		// itself completed without incident for a non-default Priority value.
+		// endpoint as the previous test (not a premature, different error) -- proving
+		// `getLayers` itself completed without incident for a non-default Priority value.
 		const file = createTestFile(schema);
 		bodyContext(file);
 		const wall = file.createEntity("IfcWall");
@@ -152,7 +200,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		layerSet.set("MaterialLayers", [layer]);
 		assignMaterial(file, { products: [wall], material: layerSet, type: "IfcMaterialLayerSet" });
 
-		expect(() => regenerateWallRepresentation(file, { wall })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	test("Finding 2: an IfcRelConnectsPathElements with a non-empty RelatingPriorities crashes combineLayers with a REAL, disclosed, verbatim-preserved upstream bug", () => {
@@ -183,11 +235,15 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		assignMaterial(file, { products: [wall2], material: layerSet, type: "IfcMaterialLayerSet" });
 		connectPathElements(file, wall1, wall2, "ATSTART", "ATEND");
 
-		// If `join`'s own mitre-join branch (real Python's own priority-driven walk across
-		// both walls' layer boundaries) crashed prematurely, the error here would NOT
-		// match the disclosed `ShapeBuilder` blocker -- confirming `join` itself ran to
-		// completion for this connection.
-		expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		// `join`'s own mitre-join branch (real Python's own priority-driven walk across
+		// both walls' layer boundaries) now runs to completion on IFC2X3 -- if it crashed
+		// prematurely, the error would NOT match the disclosed blocker below (still real
+		// on IFC4/IFC4X3).
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall: wall1 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	test("a connection between 2 walls with DIFFERENT (translated) object placements exercises the real inv(matrix1) @ matrix2 coordinate transform without crashing", () => {
@@ -205,10 +261,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		editObjectPlacement(file, { product: wall2, matrix: translated });
 
 		// A singular-matrix throw, or any matrix-math exception, would surface here
-		// instead of the disclosed `ShapeBuilder` blocker -- proving the real
-		// `mat4.invert`/`mat4.multiply`/coordinate-transform code in `join` ran correctly
-		// for a non-identity `wall2` placement.
-		expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		// instead of the disclosed blocker (IFC4/IFC4X3) or a real result (IFC2X3) --
+		// proving the real `mat4.invert`/`mat4.multiply`/coordinate-transform code in
+		// `join` ran correctly for a non-identity `wall2` placement.
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall: wall1 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	test("an ATPATH connection (wall2 crosses through wall1's own path) reaches join()'s own dedicated ATPATH branch without a premature error", () => {
@@ -230,10 +290,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 
 		connectPathElements(file, wall1, wall2, "ATPATH", "ATSTART");
 
-		expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall: wall1 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
-	test("a connection with connection1 === 'NOTDEFINED' is a real, documented early-return no-op in join() -- still reaches the same disclosed blocker", () => {
+	test("a connection with connection1 === 'NOTDEFINED' is a real, documented early-return no-op in join() -- still reaches the same disclosed endpoint", () => {
 		const file = createTestFile(schema);
 		bodyContext(file);
 		const wall1 = file.createEntity("IfcWall");
@@ -243,7 +307,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		assignMaterial(file, { products: [wall2], material: layerSet, type: "IfcMaterialLayerSet" });
 		connectPathElements(file, wall1, wall2, "NOTDEFINED", "ATEND");
 
-		expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall: wall1 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	test("an ATPATH+ATPATH connection pair is a real, documented early-return no-op in join()", () => {
@@ -256,7 +324,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		assignMaterial(file, { products: [wall2], material: layerSet, type: "IfcMaterialLayerSet" });
 		connectPathElements(file, wall1, wall2, "ATPATH", "ATPATH");
 
-		expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall: wall1 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall: wall1 })).toThrow(SHAPE_BUILDER_BLOCKER(schema));
+		}
 	});
 
 	// `getManualBooleans`'s own JSON-parsing/read behavior (both the valid-JSON and
@@ -287,18 +359,33 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.regenerateWallRepresentation (%s)
 		// A non-zero fallback angle (no existing body representation to derive one from)
 		// makes `getWallVectors` set `isAngled = true`, taking the OTHER top-level branch
 		// in `regenerate` (real Python's own `if self.is_angled: ... else: ...`) --
-		// exercised here to prove it too reaches the identical disclosed blocker, not a
-		// different one.
-		expect(() => regenerateWallRepresentation(file, { wall, angle: Math.PI / 8 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		// exercised here to prove it too reaches the identical disclosed endpoint, not a
+		// different one. Note: the sloped-wall branch's own real Python doc comment says
+		// it generates "additional extrusions ... for each connection" -- with zero
+		// connections here, `expectStructurallySaneBodyRepresentation`'s "exactly 1 item"
+		// check still holds (verified empirically, not assumed).
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall, angle: Math.PI / 8 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall, angle: Math.PI / 8 })).toThrow(
+				SHAPE_BUILDER_BLOCKER(schema),
+			);
+		}
 	});
 
-	test("explicit length/height parameters are accepted (SI-to-project-unit fallback conversion) without altering the disclosed blocker", () => {
+	test("explicit length/height parameters are accepted (SI-to-project-unit fallback conversion) without altering the disclosed endpoint", () => {
 		const file = createTestFile(schema);
 		bodyContext(file);
 		const wall = file.createEntity("IfcWall");
 		const layerSet = makeLayerSet(file);
 		assignMaterial(file, { products: [wall], material: layerSet, type: "IfcMaterialLayerSet" });
 
-		expect(() => regenerateWallRepresentation(file, { wall, length: 4.0, height: 2.4 })).toThrow(SHAPE_BUILDER_BLOCKER);
+		if (schema === "IFC2X3") {
+			expectStructurallySaneBodyRepresentation(regenerateWallRepresentation(file, { wall, length: 4.0, height: 2.4 }));
+		} else {
+			expect(() => regenerateWallRepresentation(file, { wall, length: 4.0, height: 2.4 })).toThrow(
+				SHAPE_BUILDER_BLOCKER(schema),
+			);
+		}
 	});
 });

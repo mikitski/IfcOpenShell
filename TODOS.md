@@ -1333,6 +1333,42 @@ rule, not the general primitive" character as `findBodyRepresentation`'s former 
 regression test in `test/util/representation.test.ts`'s `guessType` coverage (asserts the real,
 documented error for an `IfcLine` item), not just prose.
 
+**UPDATE 2026-09-22 (Phase EX-2 chunks 1+2, `planning/ifcopenshell-ts/70-express-rules-plan.md`
+§4, PRs #170 and this one) -- RESOLVED for IFC2X3, option (a) from "Fix" above, NOT yet for
+IFC4/IFC4X3:** rather than a `util.representation`-local re-implementation (option (b) above),
+Phase EX-2 took option (a): real EXPRESS DERIVED-attribute execution, ported function-by-function
+from real Python's own generated `ifcopenshell/express/rules/{IFC2X3,IFC4,IFC4X3}.py` (see the
+plan doc for why the compiled output is ported, not a new compiler) and dispatched from
+`EntityInstance.get()`'s DERIVE branch (`express/dispatch.ts`). Chunk 1 (PR #170) ported
+`calc_IfcCartesianPoint_Dim` (needed by every curve's own point coordinates) among its first 15
+IFC2X3 functions; chunk 2 (this PR) ported `calc_IfcCurve_Dim` -- the FULL real `IfcCurveDim`
+dispatch this entry's own "What" section describes above, all 8 branches
+(`IfcLine`/`IfcConic`/`IfcPolyline`/`IfcTrimmedCurve`/`IfcCompositeCurve`/`IfcBSplineCurve`/
+`IfcOffsetCurve2D`/`3D`) -- plus `calc_IfcElementarySurface_Dim`/`calc_IfcSweptSurface_Dim`/
+`calc_IfcCurveBoundedPlane_Dim`/`calc_IfcRectangularTrimmedSurface_Dim`, which together cover
+every concrete `IfcSurface` subtype IFC2X3 actually defines (`IfcPlane` via
+`IfcElementarySurface`; `IfcSurfaceOfLinearExtrusion`/`IfcSurfaceOfRevolution` via
+`IfcSweptSurface`; `IfcCurveBoundedPlane`/`IfcRectangularTrimmedSurface` directly -- IFC2X3 has no
+`IfcBSplineSurface` or other `IfcSurface` subtype outside this set, confirmed against the schema).
+**Net effect, verified directly against the real, built native addon (not assumed): `guessType`'s
+`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` branches, and therefore every downstream caller
+(`util.shapeBuilder.profile`/`createSweptDiskSolid`, `api.geometry.addWindowRepresentation`/
+`addDoorRepresentation`/`regenerateWallRepresentation`/`validateType`, all cited below), now
+complete successfully on IFC2X3** wherever they used to hit this exact `.get("Dim")` throw.
+**Still open, disclosed, NOT resolved by this update:**
+1. **IFC4/IFC4X3**: Phase EX-2 has so far only ported IFC2X3's `calc_*` functions (55 total,
+   chunked; IFC4's 62 and IFC4X3's 65 are future chunks per the plan doc's own phase order) --
+   `.get("Dim")` still throws unconditionally on IFC4/IFC4X3 today, independent of the separate
+   `IfcLineIndex`/`IfcArcIndex` gap most IFC4/IFC4X3 call sites hit even earlier.
+2. **Geometric-fidelity verification**: this update closes the `.get("Dim")` THROW -- it does not
+   itself verify that the geometry `guessType`'s callers go on to build (window/door panel
+   layouts, wall join miters, etc.) is dimensionally/geometrically CORRECT for every real-world
+   shape. The 4 downstream `api.geometry` test files below were updated to assert minimal,
+   structural sanity (return type, `RepresentationIdentifier`/`RepresentationType`, `Items`
+   count/class) for their own now-unblocked IFC2X3 cases, not exhaustive numeric geometry
+   correctness -- a real, disclosed, scoped-out follow-up (see each of those entries' own
+   updates below), comparable in size to its own dedicated verification chunk.
+
 ---
 
 ### `util.date.stringToDate` doesn't reproduce `dateutil.parser.parse(..., fuzzy=True)`'s free-text date extraction
@@ -2973,6 +3009,18 @@ confirmed empirically, not assumed).
 `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
 above (neither yet scheduled/started).
 
+**UPDATE 2026-09-22 (Phase EX-2 chunks 1+2) -- gap 1 RESOLVED for IFC2X3, gap 2 still real on
+IFC4/IFC4X3:** see `util.representation.guessType`'s own entry above for the full writeup.
+`addWindowRepresentation` now completes end-to-end on IFC2X3 for every `TargetView`/`partitionType`
+combination (verified directly against the real, built native addon) -- IFC4/IFC4X3 are unchanged
+(gap 2 still fires first, unrelated to Phase EX-2). All ~50 regression tests in
+`addWindowRepresentation.test.ts` were updated: the IFC2X3 branches now assert a genuinely-completed
+`IfcShapeRepresentation` with a minimal, structural-sanity shape (`RepresentationIdentifier`/
+`RepresentationType`/`Items` count and entity class) rather than the old disclosed throw; IFC4/IFC4X3
+branches are unchanged. Deep geometric-fidelity verification (exact panel/mullion/frame placement
+per `partitionType`) is explicitly NOT part of this update -- real, disclosed, scoped-out follow-up
+work, comparable in size to its own dedicated verification chunk.
+
 ### `api.geometry.addDoorRepresentation` hits the SAME 2 pre-existing primitive-layer gaps as
 `addWindowRepresentation` above, plus its own independently-reverified copy of the same
 upstream-Python evaluation-order bug -- NOT a new gap, but with one genuinely NEW positive
@@ -3047,6 +3095,31 @@ finding, all confirmed empirically, not assumed).
 `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByIndex`'s entry (gap 2)
 above (neither yet scheduled/started) -- same dependency as the `add_window_representation` entry
 immediately above this one.
+
+**UPDATE 2026-09-22 (Phase EX-2 chunks 1+2) -- gap 1 RESOLVED for IFC2X3, gap 2 still real on
+IFC4/IFC4X3:** see `util.representation.guessType`'s own entry above for the full writeup.
+`addDoorRepresentation` now completes end-to-end on IFC2X3 for every `TargetView`/`operationType`
+combination (verified directly against the real, built native addon), including the previously
+"real, measurable progress, not an immediate throw" `PLAN_VIEW` case, which now fully completes
+rather than merely progressing further before its old disclosed throw. IFC4/IFC4X3 are unchanged.
+All regression tests in `addDoorRepresentation.test.ts` were updated the same way as
+`addWindowRepresentation.test.ts`'s own (minimal, structural-sanity assertions on IFC2X3; IFC4/IFC4X3
+branches unchanged). Deep geometric-fidelity verification (exact lining/panel/swing-arc placement per
+`operationType`) is explicitly NOT part of this update -- same scoped-out follow-up as
+`addWindowRepresentation`'s entry.
+
+**Note, NOT independently re-verified as part of this update (flagged for whoever next touches
+`api.geometry.addRailingRepresentation`'s own entry below):** that entry's own Finding A cites the
+exact same `pathCurve.get("Dim")` call (via `ShapeBuilder.createSweptDiskSolid`) as this gap -- so it
+plausibly also closes for IFC2X3 as of this update. `addRailingRepresentation.test.ts`'s own
+regression test for this already uses a 3-way alternation regex
+(`/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not
+supported for IFC2X3\./`) that still passed, unmodified, against this chunk's own full-suite run --
+so it is not a broken/failing test, but it may now be passing because a DIFFERENT one of its 3
+alternatives matches (the `IFC2X3`-specific "Arcs are not supported" error) rather than the `Dim`
+one it originally documented. Not investigated further here -- out of this chunk's own scope (only
+the 4 files this chunk's own test run actually reported as failing were investigated/fixed:
+`addWindowRepresentation`/`addDoorRepresentation`/`regenerateWallRepresentation`/`validateType`).
 
 ---
 
@@ -3265,6 +3338,26 @@ behavior: IFC2X3 now reaches the exact same Finding A blocker IFC4/IFC4X3 alread
 than a premature, different error. `test/api/geometry/regenerateWallRepresentation.test.ts`
 needed no changes -- its "get_layers reads Priority/LayerThickness..." test already asserted
 "reaches the disclosed ShapeBuilder blocker", which is what now actually happens on IFC2X3 too.
+
+**UPDATE 2026-09-22 (Phase EX-2 chunks 1+2) -- Finding A RESOLVED for IFC2X3, still real on
+IFC4/IFC4X3:** see `util.representation.guessType`'s own entry above for the full writeup on the
+underlying `Dim`-DERIVE porting. `regenerateWallRepresentation` now completes end-to-end on IFC2X3
+for every connection shape this file's own tests exercise (no connection, empty-priority
+connection, translated-placement connection, `ATPATH`, `NOTDEFINED`, `ATPATH+ATPATH`, the angled/
+sloped-wall branch, explicit length/height) -- verified directly against the real, built native
+addon: each now returns a real `IfcShapeRepresentation` (`RepresentationIdentifier: "Body"`,
+`RepresentationType: "SweptSolid"`, one `IfcExtrudedAreaSolid` item) instead of throwing. Finding B
+(the immutable-`PrioritisedLayer`-namedtuple-mutation crash for a NON-empty `RelatingPriorities`)
+is UNCHANGED -- it throws earlier than, and independent of, the `Dim` gap this update closes, on
+every schema, confirmed still-real directly. IFC4/IFC4X3 are also unchanged (still hit the
+`IfcLineIndex`/`IfcArcIndex` gap, unrelated to Phase EX-2). All regression tests in
+`regenerateWallRepresentation.test.ts` affected by Finding A were updated to assert this minimal,
+structural-sanity shape on IFC2X3 (return type, `RepresentationIdentifier`/`RepresentationType`,
+one `IfcExtrudedAreaSolid` item) rather than the old disclosed throw; the Finding-B test and the
+IFC4/IFC4X3 branches of every other test are unchanged. Deep geometric-fidelity verification of the
+real join/mitre/notch output this function computes for each connection shape is explicitly NOT
+part of this update -- real, disclosed, scoped-out follow-up work, comparable in size to its own
+dedicated verification chunk.
 
 ### `api.cogo.addSurveyPoint`/`editSurveyPoint` are BOTH blocked by the pre-existing EXPRESS
 DERIVED-attribute gap -- 2 more confirmed consequences, via 2 DIFFERENT derived attributes,

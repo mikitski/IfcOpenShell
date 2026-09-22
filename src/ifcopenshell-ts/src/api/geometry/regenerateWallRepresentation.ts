@@ -122,6 +122,19 @@
 // unlike that file, this one was never deliberately split that way in real Python -- it just
 // happens to have the identical property once traced).
 //
+// **UPDATE (Phase EX-2 chunks 1+2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4) --
+// Finding 1 is now RESOLVED FOR IFC2X3, UNCHANGED for IFC4/IFC4X3.** `entityInstance.ts`'s
+// DERIVE dispatch now resolves `IfcCurve.Dim`/`IfcElementarySurface.Dim`/etc. for real IFC2X3
+// geometry (see `TODOS.md`'s "`util.representation.guessType`'s `Curve2D`/... branches..."
+// entry). On IFC2X3, `profile()`'s own `outerCurve.get("Dim")` check now succeeds instead of
+// throwing, so `regenerateWallRepresentation` completes end-to-end for every connection shape
+// this file's own tests exercise (verified against the real, built native addon) -- Finding 2
+// (below) remains a real, separate, still-reachable crash for the specific non-empty-
+// `RelatingPriorities` case it describes, independent of Finding 1's own resolution. IFC4/IFC4X3
+// are unaffected -- `polyline(closed=true)` still throws first there, exactly as documented
+// above. `regenerateWallRepresentation.test.ts` has been updated accordingly; this header's own
+// narrative above is left intact as the ORIGINAL, still-accurate-for-IFC4/IFC4X3 description.
+//
 // *** Finding 2 (a REAL, severe, reachable bug -- not a primitive-layer gap): `combineLayers`
 // attempts to mutate an immutable value whenever a connection actually specifies
 // `RelatingPriorities`/`RelatedPriorities` ***

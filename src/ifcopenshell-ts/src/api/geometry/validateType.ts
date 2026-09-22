@@ -40,6 +40,18 @@
 // confirmed by hand-tracing `guessType`'s exact branch order for every test fixture
 // below, not assumed.
 //
+// **UPDATE (Phase EX-2 chunks 1+2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4) --
+// RESOLVED for IFC2X3, still real on IFC4/IFC4X3.** `entityInstance.ts`'s DERIVE dispatch now
+// resolves `IfcCurve.Dim` for real IFC2X3 curves (`IfcPolyline` in particular -- see
+// `TODOS.md`'s "`util.representation.guessType`'s `Curve2D`/... branches..." entry), so
+// `guessType`'s `Curve2D` branch, and therefore `validateType` itself, now completes on IFC2X3
+// for the 2 fixtures this comment describes (returning a real `true`/`Curve2D` or
+// `false`/`null` result, verified against the real, built native addon) instead of throwing.
+// On IFC4/IFC4X3, `ShapeBuilder.rectangle()`'s own SEPARATE, unrelated `IfcLineIndex`/
+// `IfcArcIndex` gap still throws one step earlier, in fixture construction itself -- so those
+// 2 tests still throw there, just from a different, still-real cause. `validateType.test.ts`
+// has been updated accordingly.
+//
 // The one real Python-source quirk, preserved verbatim rather than "fixed" (matching
 // this project's established discipline, and already flagged by an explanatory
 // comment inside the real Python source itself, reproduced near-verbatim below):
