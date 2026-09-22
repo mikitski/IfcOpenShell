@@ -1,14 +1,33 @@
 name: ci-ifcopenshell-ts
 
 on:
-  # pull_request alone is sufficient: this project's workflow requires every
-  # branch to have an open PR before it's built (agents always open a PR), so
-  # a push-triggered run here would just duplicate the pull_request-triggered
-  # run for the same commit. Dropped push: entirely rather than scoping it to
-  # v0.9.0 - nothing in this project's process currently needs a post-merge
-  # build independent of PR review; add it back scoped to v0.9.0 if that ever
-  # changes.
+  # pull_request: every PR's own commits are built/tested here, same as always.
+  #
+  # push, scoped to v0.9.0 only (NOT a bare `push:`, which would also refire on
+  # every PR branch's push and double-run everything the pull_request trigger
+  # above already covers for that same commit): this project's own merge
+  # convention (`gh pr merge --squash --delete-branch`, see
+  # planning/ifcopenshell-ts/60-orchestration-spec.md SS3) deletes every PR's
+  # branch immediately on merge, and GitHub Actions evicts/invalidates a cache
+  # entry once the branch that created it is deleted. With pull_request as the
+  # only trigger, every cache this workflow writes (the C++ core install
+  # prefix and its asan/fuzz/benchmark variants, plus sccache's GHA backend)
+  # therefore dies the instant its PR merges, and the very next PR starts
+  # fully cold even when building byte-identical source content - confirmed
+  # via PR #171's own CI run, which logged full "Cache not found for input
+  # keys" misses on every core-cache key right after PR #170 had just built
+  # and cached that exact content moments earlier. Per GitHub's own
+  # cache-scoping rules, a cache entry saved from a run on the repository's
+  # *default* branch is visible to every other branch's runs (unlike one
+  # scoped to an arbitrary feature branch, which only PRs based on that same
+  # branch can see) - so a push-triggered run against v0.9.0 itself,
+  # executing right after each merge, seeds a default-branch-scoped cache that
+  # survives the merged PR branch's deletion and is then usable as a real
+  # cross-PR cache by every subsequent PR.
   pull_request:
+  push:
+    branches:
+      - v0.9.0
 
 concurrency:
   group: ci-ifcopenshell-ts-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -170,14 +189,27 @@ jobs:
       # is specifically for the addon build step further down.
       #
       # sccache (Mozilla's compiler cache) supports MSVC, unlike ccache. Uses its GHA cache
-      # backend (`SCCACHE_GHA_ENABLED`, set on the "Build native addon (Windows)" step
-      # below) rather than a separate actions/cache step - sccache talks to the Actions
+      # backend rather than a separate actions/cache step - sccache talks to the Actions
       # Cache service directly, the same mechanism vcpkg's own `x-gha` binary source above
       # uses, via the `ACTIONS_CACHE_URL`/`ACTIONS_RUNTIME_TOKEN` env vars the "Export GitHub
       # Actions cache environment variables (Windows)" step above already exports for this
       # job - no separate cache-directory path/key bookkeeping needed, unlike the manual
       # actions/cache/restore+save pair used for the C++ core prefix below (which caches a
       # single directory tree by content hash, a different shape of caching problem).
+      #
+      # `SCCACHE_GHA_ENABLED: "true"` is set here, on THIS step, not on the later "Build
+      # native addon (Windows)" step that actually invokes the compiler through sccache -
+      # this step is what starts sccache's background server process
+      # (mozilla-actions/sccache-action's own doing), and sccache reads its backend config
+      # (local disk vs. GHA) once, at server startup, from whatever environment is present
+      # at that moment. Setting the var later, only on the build step, has no effect on a
+      # server that's already running: confirmed via PR #171's own CI run, where the
+      # Windows legs' end-of-step sccache stats dump showed `Compile requests: 0` and
+      # `Cache location: Local disk: "C:\Users\runneradmin\AppData\Local\Mozilla\sccache\
+      # cache"` - i.e. the server had started in (and stayed in) local-disk mode for the
+      # whole job, and zero compiler invocations were ever routed through it. Left set on
+      # the later step too (redundant, but harmless) so that step's own intent stays
+      # self-documenting.
       #
       # Applied to both Windows legs (x64 and the arm64 `windows-11-arm` runner) - sccache
       # v0.18.0 (pinned below) ships genuine `aarch64-pc-windows-msvc` binaries, not just
@@ -189,6 +221,10 @@ jobs:
       - name: sccache (Windows)
         if: matrix.os == 'windows'
         uses: mozilla-actions/sccache-action@v0.0.11
+        env:
+          # See the comment block above this step for why this must be set here, before
+          # the server starts, rather than only on the later build step.
+          SCCACHE_GHA_ENABLED: "true"
         with:
           # Pin the actual sccache binary version too, not just the wrapping action -
           # matches this workflow's existing pinning discipline for every other tool it
@@ -334,9 +370,11 @@ jobs:
         shell: pwsh
         working-directory: src/ifcopenshell-ts
         env:
-          # Tells sccache (set up by the "sccache (Windows)" step above) to use its GHA
-          # cache backend - see that step's own comment for why this, rather than a
-          # separate actions/cache step, is the right mechanism here.
+          # Redundant with the same var now set on the earlier "sccache (Windows)" step
+          # (which is what actually starts the sccache server and is where this setting
+          # must take effect - see that step's own comment). Left here too, harmlessly,
+          # so this step's own use of the GHA backend stays self-documenting at the call
+          # site that actually invokes the compiler through sccache.
           SCCACHE_GHA_ENABLED: "true"
         run: |
           npm run build:native -- `
