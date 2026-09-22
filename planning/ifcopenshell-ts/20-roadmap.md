@@ -274,9 +274,10 @@ curve/clothoid-evaluation helpers stub. `cogo` rides along with alignment.
   unless explicitly descoped in `plan-eng-review`).
 - `express/`-generated **derived-attribute** support (`entity_instance.__getattr__`'s EXPRESS
   derived-attribute fallback, `research/01` §2.3) — the one core-layer piece deferred out of
-  Phase 2 because it depends on the Python-only rule-compiler codegen path; needs its own design
-  (likely: pre-compile derived-attribute logic per schema into the native addon or a generated TS
-  module, rather than porting `subprocess`-based on-demand compilation).
+  Phase 2. Design decided and phased in `70-express-rules-plan.md` (locked in 2026-09-22): port
+  real Python's already-compiled `express/rules/*.py` DERIVE-formula output directly to TS,
+  function by function, rather than the compiler that produced it — see that doc for the full
+  investigation and rationale.
 
 **Exit criterion — this is "v1 done":** every `ifcopenshell.api.*`/`ifcopenshell.util.*` function
 identified in `research/02`/`research/03` (minus the ~3 kernel-blocked call sites, minus items
