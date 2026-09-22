@@ -3708,7 +3708,7 @@ a way that would have made `open()` unusable for every valid file, not merely im
 the chunk's own test suite before landing, then fixed via the `file.nativeFile.schema()`-throws
 substitute described above.
 
-### `src/wrappergen/`'s own generator (`clang_frontend.py`) crashes on this dev machine, blocking any NEW native-primitive addition -- found 2026-09-21, dispatching `EntityInstance.toString()`
+### `src/wrappergen/`'s own generator (`clang_frontend.py`) crashes on this dev machine, blocking any NEW native-primitive addition -- found 2026-09-21, dispatching `EntityInstance.toString()` -- **RESOLVED 2026-09-21/22, see UPDATE below**
 
 Attempting to add a genuinely new native primitive (`EntityInstance.toString()`/`entity_instance.to_string`
 -- see `PROGRESS.md`'s own tracking row) via the established `_inject_entity_instance_primitives`
@@ -3767,3 +3767,45 @@ generator fix.
 primitive attempted since this project's Phase 1/2 bootstrap -- see `PROGRESS.md`'s own tracking row
 for the full history of why this needed a new primitive (not a TS-side workaround) in the first
 place.
+
+**UPDATE, RESOLVED (PR #162, 2026-09-22)**: project owner chose fix option (a) above (no Docker/Linux
+environment was available to try option (b)). `_collect_enum_cursors`/`_collect_class_cursors` both
+fixed by reordering the filter chain so `_is_in_allowed_headers` (which only touches `cursor.location.file`,
+never `.kind`) runs FIRST, before `cursor.kind` is ever accessed -- confirmed via audit that `_iter_children`
+(the exhaustive whole-translation-unit walk) is consumed ONLY by these two functions, so the fix is
+complete, not partial. Also fixed a second, related pre-existing gap found along the way: `napi_binding.py`
+had no Boost include directory configured at all (this repo has no `compile_commands.json` anywhere), so
+the parser failed outright on `'boost/lexical_cast.hpp' file not found` even with the crash fixed -- added
+`_discover_boost_include_dir()`, portable rather than hardcoded (tries `BOOST_INCLUDEDIR`/`BOOST_ROOT` env
+vars matching CMake's own `FindBoost` convention, then `brew --prefix boost`, then common system paths;
+every candidate verified against a real `boost/version.hpp` before use, so a bad guess can never inject a
+wrong path -- a genuine miss silently adds nothing, so the underlying "file not found" still fails loudly).
+
+**A second, real, incidental finding surfaced by successfully regenerating for the first time in a long
+while**: the clean-regeneration diff (this fix's own primary verification) was NOT empty -- one new
+binding, `spf_header.with_other(other)`, wrapping a real, already-existing C++ copy constructor
+(`spf_header(const spf_header& other)`, `spf_header.h`). Investigated fully rather than assumed:
+`git log -L` on that exact line shows it was added in commit `9d0dda897` ("Phase 1: ASan/UBSan CI +
+libFuzzer harness + event-loop-liveness test (#13)", 2026-09-07 13:28), the SAME DAY as (a few hours
+BEFORE) the last time `generated_napi/` was actually regenerated (commit `6b996395`, "Phase 2: IfcFile +
+EntityInstance foundation (#15)", 17:56) -- meaning this real constructor should plausibly have been
+picked up back then but wasn't, for an unrelated historical sequencing reason, and has been silently
+missing from the checked-in bindings ever since. The diff was purely additive (zero removed lines across
+all 4 files) -- landed as a disclosed, incidental byproduct of this fix, not scope creep: hand-suppressing
+a correctly-generated, real binding would have been the wrong call.
+
+**Independently re-verified by the orchestrating session, twice** (once mid-flight on an intermediate,
+uncommitted version of the fix; once again on the final PR): reproduced the crash and confirmed the fix
+resolves it; regenerated independently using the checked-in, fixed `napi_binding.py` (no manual monkeypatch
+needed this time, confirming `_discover_boost_include_dir()` works for real) and confirmed the output is
+byte-identical across all 4 files to what's checked into the PR; rebuilt the native addon from scratch and
+ran the full suite (6189 passing, 55 failing -- the same 9 known pre-existing unrelated failure files, 0
+new regressions); wrote an ad-hoc smoke test confirming `spf_header.with_other()` produces a distinct,
+usable handle and throws a clean error on a null argument; caught and fixed a real but unrelated CI flake
+(a timing-threshold assertion in `test/native/event_loop.test.ts`, not touched by this PR's diff) via a
+retrigger, distinguishing it from a genuine regression before merging.
+
+`EntityInstance.toString()` itself remains a separate, not-yet-landed follow-up chunk -- its own 3-file
+diff (the shim function + registration, already written and verified compile-clean before this fix even
+started) is preserved, uncommitted-to-`v0.9.0`, in a dedicated local worktree, ready to be regenerated and
+shipped for real now that this blocker is cleared.
