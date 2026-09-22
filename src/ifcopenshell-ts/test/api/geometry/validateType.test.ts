@@ -3,22 +3,29 @@
 // TS counterpart to `test/api/geometry/test_validate_type.py` (src/ifcopenshell-
 // python, `TestValidateType`/`TestValidateTypeIFC2X3`).
 //
-// **Real, disclosed, PRE-EXISTING blocker (see `../../../src/api/geometry/
-// validateType.ts`'s own header comment for the full story), affecting 2 of the 5
-// real Python tests, on EVERY schema**: `test_validating_a_non_csg_representation`/
-// `test_failing_a_non_csg_representation` build a pure-curve (non-boolean) fixture
-// via `ShapeBuilder.rectangle()`, which `validateType` feeds straight into
-// `guessType` -- and `guessType`'s `Curve2D` branch unconditionally reads the
-// EXPRESS DERIVED `.Dim` attribute, which this port's `EntityInstance.get()` cannot
-// resolve (`util/representation.ts`'s own disclosed, schema-agnostic gap). On
-// IFC4/IFC4X3 the fixture construction itself already throws one step earlier
-// (`ShapeBuilder.rectangle()`'s own disclosed `IfcLineIndex`/`IfcArcIndex`
-// defined-type-creation gap, `util/shapeBuilder.ts`'s own header comment) -- either
-// way, the whole flow throws on every schema today. Ported as 2 dedicated regression
-// tests pinning that CURRENT, disclosed, thrown behavior (matching
-// `util/representation.test.ts`'s own "Curve2D/Curve3D branches throw..." precedent
-// and `util/shapeBuilder.test.ts`'s `DEFINED_TYPE_ERROR` precedent for this exact
-// class of gap), not silently skipped.
+// **Formerly a disclosed, PRE-EXISTING blocker on IFC2X3, now CLOSED by Phase EX-2's
+// DERIVE (`calc_*`) porting** (see `../../../src/api/geometry/validateType.ts`'s own
+// header comment for the original story): `test_validating_a_non_csg_representation`/
+// `test_failing_a_non_csg_representation` build a pure-curve (non-boolean) fixture via
+// `ShapeBuilder.rectangle()` (an `IfcPolyline` on IFC2X3), which `validateType` feeds
+// straight into `guessType` -- and `guessType`'s `Curve2D` branch reads the EXPRESS
+// DERIVED `.Dim` attribute. Phase EX-2 chunk 1
+// (`planning/ifcopenshell-ts/70-express-rules-plan.md` §4, PR #170) ported
+// `calc_IfcCartesianPoint_Dim`, and chunk 2 ported `calc_IfcCurve_Dim`'s own
+// `IfcPolyline` dispatch branch (`Points[0].Dim`) -- together these resolve
+// `IfcPolyline.Dim` for real IFC2X3 polylines, so `guessType`'s `Curve2D` branch (and
+// therefore `validateType` itself) now completes successfully on IFC2X3 instead of
+// throwing. Re-verified directly (not assumed) with a throwaway script against the
+// real, built native addon before updating these tests: both fixtures now return a
+// real, deterministic result (`true`/`Curve2D` and `false`/`null` respectively, see
+// below) -- not a different thrown error, and not a flaky/partial result.
+//
+// On IFC4/IFC4X3 the fixture construction itself still throws one step earlier
+// (`ShapeBuilder.rectangle()`'s own disclosed, UNRELATED `IfcLineIndex`/`IfcArcIndex`
+// defined-type-creation gap, `util/shapeBuilder.ts`'s own header comment -- Phase EX-2
+// has nothing to do with that gap, it's a `createEntity`-on-a-defined-type limitation,
+// not a DERIVE-attribute one) -- so the `IFC4`/`IFC4X3` branches of these same 2 tests
+// (below) are UNCHANGED, still pinning the original disclosed thrown behavior.
 //
 // The 5th real Python test (`test_failing_validation_on_unreconcilable_types`) ALSO
 // uses `ShapeBuilder.rectangle()` for its 3rd (non-operand) item -- but since that
@@ -56,25 +63,40 @@ function bodyContext(file: IfcFile): EntityInstance {
 }
 
 describe.each(AVAILABLE_SCHEMAS)("api.geometry.validateType (%s)", (schema) => {
-	// --- disclosed blocker: see this file's own header comment. Pinned, not skipped. ---
-	test("validating a non-CSG representation (blocked: guessType's Dim gap)", () => {
+	// --- IFC2X3: genuinely UNBLOCKED as of Phase EX-2 (see this file's own header
+	// comment) -- real Python's own `test_validating_a_non_csg_representation`
+	// asserts `guess_type(...) == 'Curve2D'` and `validate_type(...) is True`; verified
+	// directly against the real, built native addon (not assumed) before writing this
+	// assertion. IFC4/IFC4X3 still hit the separate, unrelated, still-real
+	// `IfcLineIndex`/`IfcArcIndex` gap one step earlier, in fixture construction. ---
+	test("validating a non-CSG representation", () => {
 		const file = createTestFile(schema);
 		const body = bodyContext(file);
 		const builder = new ShapeBuilder(file);
-		expect(() => {
-			const rep = builder.getRepresentation(body, [builder.rectangle()]);
-			validateType(file, { representation: rep });
-		}).toThrow();
+		if (schema !== "IFC2X3") {
+			expect(() => builder.rectangle()).toThrow(/Attribute access is only supported on entity instances/);
+			return;
+		}
+		const rep = builder.getRepresentation(body, [builder.rectangle()]);
+		expect(validateType(file, { representation: rep })).toBe(true);
+		expect(rep.get("RepresentationType")).toBe("Curve2D");
 	});
 
-	test("failing a non-CSG representation (blocked: guessType's Dim gap)", () => {
+	// Real Python's own `test_failing_a_non_csg_representation` asserts
+	// `guess_type(...) == 'Curve2D'` and `validate_type(...) is False` (the mixed
+	// curve+block item list can't reconcile to one `RepresentationType`) -- same
+	// IFC2X3-unblocked / IFC4-IFC4X3-still-blocked-earlier split as the test above.
+	test("failing a non-CSG representation", () => {
 		const file = createTestFile(schema);
 		const body = bodyContext(file);
 		const builder = new ShapeBuilder(file);
-		expect(() => {
-			const rep = builder.getRepresentation(body, [builder.rectangle(), builder.block()]);
-			validateType(file, { representation: rep });
-		}).toThrow();
+		if (schema !== "IFC2X3") {
+			expect(() => builder.rectangle()).toThrow(/Attribute access is only supported on entity instances/);
+			return;
+		}
+		const rep = builder.getRepresentation(body, [builder.rectangle(), builder.block()]);
+		expect(validateType(file, { representation: rep })).toBe(false);
+		expect(rep.get("RepresentationType")).toBeNull();
 	});
 
 	test("validating a correct representation", () => {

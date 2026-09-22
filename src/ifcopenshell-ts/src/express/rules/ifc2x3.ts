@@ -677,3 +677,231 @@ registerSchemaCalcFunctions("IFC2X3", {
 	"IfcVector.Dim": calc_IfcVector_Dim,
 	"IfcSolidModel.Dim": calc_IfcSolidModel_Dim,
 });
+
+// =============================================================================
+// Phase EX-2, second chunk (planning/ifcopenshell-ts/70-express-rules-plan.md §4):
+// the NEXT 15 of IFC2X3's 55 `calc_*` functions, in real file order (verified
+// directly against `IFC2X3.py` before porting, not just trusted from the task brief
+// that dispatched this chunk):
+//
+//   calc_IfcCompositeCurveSegment_Dim, calc_IfcCsgPrimitive3D_Dim, calc_IfcCurve_Dim,
+//   calc_IfcCurveBoundedPlane_Dim, calc_IfcElementarySurface_Dim,
+//   calc_IfcFaceBasedSurfaceModel_Dim, calc_IfcGeometricSet_Dim,
+//   calc_IfcHalfSpaceSolid_Dim, calc_IfcPlacement_Dim, calc_IfcPointOnCurve_Dim,
+//   calc_IfcPointOnSurface_Dim, calc_IfcRectangularTrimmedSurface_Dim,
+//   calc_IfcSectionedSpine_Dim, calc_IfcShellBasedSurfaceModel_Dim,
+//   calc_IfcSweptSurface_Dim
+//
+// All 15 are the same conceptual shape as this chunk's own name: spatial
+// dimensionality (`Dim`, always 2 or 3), computed either as a bare constant or by
+// delegating to some other attribute's own (possibly also DERIVE) `Dim`. Exported
+// under their exact real-Python names, matching this file's own established
+// convention (see the chunk-1 header comment above for the full rationale).
+//
+// **One necessary, minimal, disclosed extension, exactly as anticipated by this
+// chunk's own task brief**: `calc_IfcCurve_Dim` doesn't compute inline -- it
+// delegates to a small helper, `IfcCurveDim(curve)` (real source,
+// `IFC2X3.py` line 7684, re-verified directly against the real file before
+// porting), which dispatches on `curve`'s own runtime type via `typeof(curve)`
+// membership checks (`'ifc2x3.ifcline' in typeof(curve)`, etc.) across
+// `IfcLine`/`IfcConic`/`IfcPolyline`/`IfcTrimmedCurve`/`IfcCompositeCurve`/
+// `IfcBSplineCurve`/`IfcOffsetCurve2D`/`IfcOffsetCurve3D`. This is not itself a
+// `calc_*` function (same "shared EXPRESS library function" bucket chunk 1's own
+// `IfcNormalise`/`IfcCrossProduct`/etc. belong to, per this file's own header
+// comment) -- ported below as `ifcCurveDim`, using `typeOf(...).has(...)` for the
+// `'x' in typeof(...)` membership check, matching this file's own already-
+// established idiom for exactly this pattern (see `ifcNormalise`/`ifcCrossProduct`/
+// `ifcScalarTimesVector`/`ifcVectorDifference` above, all of which already use
+// `typeOf(...).has("ifc2x3.ifcvector")` the same way).
+//
+// **No new real Python bugs found in this chunk's own 15 assigned functions or
+// their one helper.** Every one of them is a one- or two-line direct attribute
+// delegation (`return N` for a bare dimensionality constant, or
+// `express_getattr(express_getattr(self, 'X', INDETERMINATE), 'Dim', INDETERMINATE)`
+// for a delegation to another entity's own `Dim`) -- re-read each of the 15 real
+// function bodies plus `IfcCurveDim` directly against `IFC2X3.py` before porting
+// (line numbers in this chunk's own task brief, re-verified rather than trusted:
+// all matched exactly), and none of them touch the tuple/list-comparison or
+// tuple-mutation patterns chunk 1's own disclosed bugs #1/#2 hinge on, nor
+// `IfcListToArray`'s 0-based-lower-bound rotation bug #3. This chunk introduces no
+// new disclosed divergences beyond the pre-existing, already-flagged
+// `INDETERMINATE`-poisoning-through-plain-JS-operators gap this file's own header
+// comment already covers once (not repeated here) -- none of these 15 functions'
+// bodies perform arithmetic/comparison on a possibly-indeterminate value anyway
+// (they're pure attribute reads and dispatch, no `*`/`+`/`<` anywhere), so that
+// gap is not even reachable from this chunk's own code.
+//
+// This chunk's own test file (`test/express/rules/ifc2x3.test.ts`) also updates
+// one PRE-EXISTING test from chunk 1 -- "an unported DERIVE-shaped attribute still
+// throws" previously used `IfcCsgPrimitive3D.Dim` as its example of a real,
+// not-yet-ported DERIVE attribute; this chunk now ports exactly that function, so
+// the old example would silently start asserting the wrong thing (that dispatch
+// still fails) instead of failing loudly. Swapped for `IfcCompositeCurve.NSegments`
+// (`IFC2X3.py` line 4501, `calc_IfcCompositeCurve_NSegments` -- a real DERIVE
+// attribute genuinely untouched by either chunk 1 or this chunk), confirmed via the
+// same `grep -n "^def calc_"` sweep of `IFC2X3.py` this chunk used to verify its own
+// 15 assigned functions' line numbers.
+// =============================================================================
+
+/**
+ * Python: `IfcCurveDim` (`IFC2X3.py` line 7684) -- the shared dispatch helper
+ * `calc_IfcCurve_Dim` (below) delegates to; not itself a `calc_*` function (see
+ * this section's own header comment). Recurses once for `IfcTrimmedCurve`
+ * (`IfcCurveDim(BasisCurve)`), matching the real Python's own direct recursive
+ * call exactly.
+ *
+ * **Disclosed fix, found by an adversarial review pass on this chunk's own PR**:
+ * an explicit `!exists(curve)` guard is added here, ABSENT from the real Python
+ * source's own `IfcCurveDim` -- real Python needs no such guard because
+ * `indeterminate_type` overrides `__bool__` to return `False` (confirmed by
+ * reading `IFC2X3.py` directly: `class indeterminate_type: def __bool__(self):
+ * return False`), so its own `typeof(inst)` (`if not inst: return
+ * express_set([])`) already safely short-circuits for an indeterminate/`None`
+ * `curve` before ever touching `inst.is_a(...)`. This port's `INDETERMINATE`
+ * sentinel is a plain JS `Symbol` (always truthy), and `typeOf()`
+ * (`runtimeShim.ts`, not touched by this chunk) only special-cases `null`/
+ * `undefined` -- so, unlike real Python, `typeOf(INDETERMINATE as
+ * EntityInstance)` here would fall through to `instance.declaration()` on a
+ * `Symbol` and throw, rather than returning an empty set. Reachable via this
+ * function's own `IfcTrimmedCurve` recursion (`ifcCurveDim(expressGetAttr(curve,
+ * "BasisCurve", INDETERMINATE))`) whenever a real `IfcTrimmedCurve.BasisCurve`
+ * is unset (`$`) -- schema-mandatory, but not something this port's own
+ * attribute-write path enforces today, so a malformed/incomplete real file can
+ * still reach it. Every other `typeOf(...)` call site already ported in this
+ * file (chunk 1's `ifcNormalise`/`ifcCrossProduct`/`ifcDotProduct`/
+ * `ifcScalarTimesVector`/`ifcVectorDifference`) already guards with its own
+ * `exists(...)` check before ever calling `typeOf` -- this function is brought
+ * in line with that same, already-established pattern, not a new one. Matches
+ * real Python's own actual net behavior (`IfcCurveDim(INDETERMINATE)` falls
+ * through every branch and returns `None`) exactly -- not a silent behavior
+ * change, a bug fix restoring parity.
+ */
+function ifcCurveDim(curve: unknown): unknown {
+	if (!exists(curve)) return null;
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcline")) {
+		return expressGetAttr(expressGetAttr(curve, "Pnt", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcconic")) {
+		return expressGetAttr(expressGetAttr(curve, "Position", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcpolyline")) {
+		return expressGetAttr(
+			expressGetItem(expressGetAttr(curve, "Points", INDETERMINATE), 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifctrimmedcurve")) {
+		return ifcCurveDim(expressGetAttr(curve, "BasisCurve", INDETERMINATE));
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifccompositecurve")) {
+		return expressGetAttr(
+			expressGetItem(expressGetAttr(curve, "Segments", INDETERMINATE), 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcbsplinecurve")) {
+		return expressGetAttr(
+			expressGetItem(
+				expressGetAttr(curve, "ControlPointsList", INDETERMINATE),
+				1 - EXPRESS_ONE_BASED_INDEXING,
+				INDETERMINATE,
+			),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcoffsetcurve2d")) return 2;
+	if (typeOf(curve as EntityInstance).has("ifc2x3.ifcoffsetcurve3d")) return 3;
+	return null;
+}
+
+// --- the 15 assigned `calc_*` functions (exact real-Python names, file order) ---
+
+export function calc_IfcCompositeCurveSegment_Dim(self: EntityInstance): unknown {
+	const parentcurve = expressGetAttr(self, "ParentCurve", INDETERMINATE);
+	return expressGetAttr(parentcurve, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcCsgPrimitive3D_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcCurve_Dim(self: EntityInstance): unknown {
+	return ifcCurveDim(self);
+}
+
+export function calc_IfcCurveBoundedPlane_Dim(self: EntityInstance): unknown {
+	const basissurface = expressGetAttr(self, "BasisSurface", INDETERMINATE);
+	return expressGetAttr(basissurface, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcElementarySurface_Dim(self: EntityInstance): unknown {
+	const position = expressGetAttr(self, "Position", INDETERMINATE);
+	return expressGetAttr(position, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcFaceBasedSurfaceModel_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcGeometricSet_Dim(self: EntityInstance): unknown {
+	const elements = expressGetAttr(self, "Elements", INDETERMINATE);
+	return expressGetAttr(expressGetItem(elements, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE), "Dim", INDETERMINATE);
+}
+
+export function calc_IfcHalfSpaceSolid_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcPlacement_Dim(self: EntityInstance): unknown {
+	const location = expressGetAttr(self, "Location", INDETERMINATE);
+	return expressGetAttr(location, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcPointOnCurve_Dim(self: EntityInstance): unknown {
+	const basiscurve = expressGetAttr(self, "BasisCurve", INDETERMINATE);
+	return expressGetAttr(basiscurve, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcPointOnSurface_Dim(self: EntityInstance): unknown {
+	const basissurface = expressGetAttr(self, "BasisSurface", INDETERMINATE);
+	return expressGetAttr(basissurface, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcRectangularTrimmedSurface_Dim(self: EntityInstance): unknown {
+	const basissurface = expressGetAttr(self, "BasisSurface", INDETERMINATE);
+	return expressGetAttr(basissurface, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcSectionedSpine_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcShellBasedSurfaceModel_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcSweptSurface_Dim(self: EntityInstance): unknown {
+	const position = expressGetAttr(self, "Position", INDETERMINATE);
+	return expressGetAttr(position, "Dim", INDETERMINATE);
+}
+
+registerSchemaCalcFunctions("IFC2X3", {
+	"IfcCompositeCurveSegment.Dim": calc_IfcCompositeCurveSegment_Dim,
+	"IfcCsgPrimitive3D.Dim": calc_IfcCsgPrimitive3D_Dim,
+	"IfcCurve.Dim": calc_IfcCurve_Dim,
+	"IfcCurveBoundedPlane.Dim": calc_IfcCurveBoundedPlane_Dim,
+	"IfcElementarySurface.Dim": calc_IfcElementarySurface_Dim,
+	"IfcFaceBasedSurfaceModel.Dim": calc_IfcFaceBasedSurfaceModel_Dim,
+	"IfcGeometricSet.Dim": calc_IfcGeometricSet_Dim,
+	"IfcHalfSpaceSolid.Dim": calc_IfcHalfSpaceSolid_Dim,
+	"IfcPlacement.Dim": calc_IfcPlacement_Dim,
+	"IfcPointOnCurve.Dim": calc_IfcPointOnCurve_Dim,
+	"IfcPointOnSurface.Dim": calc_IfcPointOnSurface_Dim,
+	"IfcRectangularTrimmedSurface.Dim": calc_IfcRectangularTrimmedSurface_Dim,
+	"IfcSectionedSpine.Dim": calc_IfcSectionedSpine_Dim,
+	"IfcShellBasedSurfaceModel.Dim": calc_IfcShellBasedSurfaceModel_Dim,
+	"IfcSweptSurface.Dim": calc_IfcSweptSurface_Dim,
+});

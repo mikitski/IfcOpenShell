@@ -146,6 +146,21 @@
 // for this chunk's own cross-reference (not a new gap -- the same 2 pre-existing primitive-
 // layer gaps, just the most pervasive real-world call site found for them so far).
 //
+// **UPDATE (Phase EX-2 chunks 1+2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4) --
+// finding 1 ("`.profile()`'s `Dim` gap") is now RESOLVED FOR IFC2X3, finding 2
+// (`IfcLineIndex`/`IfcArcIndex`) is UNCHANGED.** `entityInstance.ts`'s DERIVE dispatch now
+// resolves `IfcCurve.Dim`/`IfcElementarySurface.Dim`/etc. for real IFC2X3 geometry (see
+// `TODOS.md`'s "`util.representation.guessType`'s `Curve2D`/... branches..." entry for the
+// full writeup) -- so on IFC2X3, `createIfcWindowFrameSimple`'s `.profile()` call and
+// `getRepresentation()`'s `guessType()` fallback (finding 3, itself the same `Dim` gap at a
+// different call site) both now succeed, and this function completes end-to-end for every
+// `TargetView`/`partitionType` on IFC2X3 (verified against the real, built native addon).
+// IFC4/IFC4X3 are unaffected -- finding 2 still fires first there, before finding 1 is ever
+// reached, exactly as documented above. `addWindowRepresentation.test.ts` has been updated
+// accordingly; this header's own narrative above is left intact as the ORIGINAL, still-
+// accurate-for-IFC4/IFC4X3 description of how execution reaches each blocker, not rewritten,
+// since IFC4/IFC4X3's own control-flow story is unchanged.
+//
 // *** Two real, disclosed, verbatim-preserved Python-source quirks (independent of the
 // blockers above) ***
 //
