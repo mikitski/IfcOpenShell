@@ -273,6 +273,7 @@ ifcopenshell_argument_type_t ifcopenshell_attribute_value_type(ifcopenshell_attr
 ifcopenshell_spf_header_t* ifcopenshell_spf_header_new();
 ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_file(ifcopenshell_file_t* file);
 ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_file_logger(ifcopenshell_file_t* file, ifcopenshell_logger_t* logger);
+ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_other(ifcopenshell_spf_header_t* other);
 void ifcopenshell_spf_header_owner_file(ifcopenshell_spf_header_t* handle, ifcopenshell_file_t* file);
 void ifcopenshell_spf_header_assign(ifcopenshell_spf_header_t* handle, ifcopenshell_spf_header_t* other);
 ifcopenshell_file_t* ifcopenshell_file_new_with_path(const char* path);

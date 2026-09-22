@@ -260,13 +260,26 @@ def _collect_enum_cursors(translation_units, config: WrapperConfig, allowed_head
     enums: dict[str, object] = {}
     for translation_unit in translation_units:
         for cursor in _iter_children(translation_unit.cursor):
+            # `_iter_children` walks EVERY descendant of the whole translation unit,
+            # including cursors deep inside transitively-included system headers this
+            # generator was never going to use anyway (e.g. an Apple SDK header pulled
+            # in by a plain `#include <cstdint>`). The location check
+            # (`_is_in_allowed_headers`, via `cursor.location.file`) must run before
+            # `cursor.kind` is touched on any of those: some third-party `libclang`
+            # PyPI builds have real gaps in their `CursorKind` id->name table for
+            # certain system-header-only cursor kinds (seen in practice: IDs 420-437,
+            # including `CXCursor_FlagEnum`), and `.kind` raises `ValueError` for any
+            # cursor that happens to hit one of those gaps -- crashing the whole
+            # generator on cursors it was always going to discard. See TODOS.md's
+            # "src/wrappergen/'s own generator crashes on this dev machine" entry for
+            # the full diagnosis.
+            if not _is_in_allowed_headers(cursor, allowed_headers):
+                continue
             if cursor.kind != cindex.CursorKind.ENUM_DECL:
                 continue
             if not cursor.is_definition():
                 continue
             if not _is_top_level_type(cursor):
-                continue
-            if not _is_in_allowed_headers(cursor, allowed_headers):
                 continue
             cpp_name = _qualified_name(cursor)
             if not cpp_name or not _is_in_allowed_namespace(cpp_name, config):
@@ -284,13 +297,15 @@ def _collect_class_cursors(translation_units, config: WrapperConfig, allowed_hea
     classes: dict[str, object] = {}
     for translation_unit in translation_units:
         for cursor in _iter_children(translation_unit.cursor):
+            # Filter by location before touching `.kind` -- see the identical check in
+            # `_collect_enum_cursors` above for why the order matters here.
+            if not _is_in_allowed_headers(cursor, allowed_headers):
+                continue
             if cursor.kind not in {cindex.CursorKind.CLASS_DECL, cindex.CursorKind.STRUCT_DECL}:
                 continue
             if not cursor.is_definition():
                 continue
             if not _is_top_level_type(cursor):
-                continue
-            if not _is_in_allowed_headers(cursor, allowed_headers):
                 continue
             cpp_name = _qualified_name(cursor)
             if not cpp_name or not _is_in_allowed_namespace(cpp_name, config):

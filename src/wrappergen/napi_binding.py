@@ -37,6 +37,10 @@ own note on why this is checked-in rather than generated at CI/build time.
 from __future__ import annotations
 
 import argparse
+import functools
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,6 +72,65 @@ else:
 # `<string>`/`<sstream>` includes), independent of wrappergen, filed as a follow-up
 # rather than fixed here (out of this PR's `src/wrappergen/`-only scope).
 _ROCKSDB_HEADER_ORDERING_WORKAROUND = ["-include", "vector", "-include", "string", "-include", "sstream"]
+
+
+@functools.lru_cache(maxsize=1)
+def _discover_boost_include_dir() -> str | None:
+    """Best-effort discovery of a directory containing `boost/*.hpp` headers, needed
+    because `clang_frontend.py`'s `_build_translation_unit` calls `clang.cindex.Index.parse`
+    directly with no `compile_commands.json` configured (there isn't one anywhere in this
+    repo -- confirmed by search) and no Boost include path of its own. Several
+    `src/ifcparse/*.h` headers this generator parses (`argument.h`, `file.h`, `schema.h`,
+    `parse.h`, `instance_data.h`, `file_reader.h`, `global_id.h`, `exception.h`)
+    transitively include real Boost headers (e.g. `boost/lexical_cast.hpp`), so without
+    *some* Boost include path this fails outright with a "file not found" fatal diagnostic
+    on every run, on every machine where Boost doesn't happen to already sit on clang's
+    default search path.
+
+    This project's real C++ build (`cmake/CMakeLists.txt`) already solves the identical
+    problem portably via CMake's `find_package(Boost)`, which locates Boost correctly
+    regardless of where it's installed on the build machine. `clang_frontend.py`'s
+    clang-based parser has no equivalent mechanism, so it needs its own, deliberately NOT
+    a single hardcoded path (that would only work on one machine's exact package-manager
+    layout, and fail silently -- no error, just a confusing later crash -- everywhere
+    else). Instead, in order: (1) `BOOST_INCLUDEDIR`/`BOOST_ROOT`, the same environment
+    variables CMake's own `FindBoost` module already recognizes, so any non-Homebrew or
+    non-macOS setup can point this at the right place with zero code changes; (2) `brew
+    --prefix boost` when Homebrew is on `PATH`, which resolves correctly on any Homebrew
+    install location (Apple Silicon `/opt/homebrew`, Intel `/usr/local`, or a custom
+    prefix) rather than assuming one; (3) a short list of locations Boost conventionally
+    ends up at system-wide (mainly Linux package managers, where Boost is typically
+    already reachable without any extra flag -- this fallback exists so a genuinely
+    missing Boost still fails loudly via `_check_diagnostics` rather than silently, not
+    because these paths are expected to fire often in practice). Every candidate is
+    verified to actually contain `boost/version.hpp` before being used, so a stale or
+    wrong guess can never inject a bogus `-isystem` path.
+    """
+    candidates: list[Path] = []
+
+    boost_includedir = os.environ.get("BOOST_INCLUDEDIR")
+    if boost_includedir:
+        candidates.append(Path(boost_includedir))
+    boost_root = os.environ.get("BOOST_ROOT")
+    if boost_root:
+        candidates.append(Path(boost_root) / "include")
+
+    if shutil.which("brew"):
+        try:
+            prefix = subprocess.run(
+                ["brew", "--prefix", "boost"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+            if prefix:
+                candidates.append(Path(prefix) / "include")
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+    candidates.extend(Path(path) for path in ("/opt/homebrew/include", "/usr/local/include", "/usr/include"))
+
+    for candidate in candidates:
+        if (candidate / "boost" / "version.hpp").is_file():
+            return str(candidate)
+    return None
 
 
 def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
@@ -200,7 +263,21 @@ def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
         compilation=CompilationConfig(
             headers=headers,
             include_dirs=include_dirs,
-            clang_args=["-x", "c++", "-std=c++17", *_ROCKSDB_HEADER_ORDERING_WORKAROUND],
+            clang_args=[
+                "-x",
+                "c++",
+                "-std=c++17",
+                *_ROCKSDB_HEADER_ORDERING_WORKAROUND,
+                # See `_discover_boost_include_dir`'s doc comment: several parsed
+                # `src/ifcparse/*.h` headers transitively include real Boost headers, and
+                # this generator has no `compile_commands.json` to source an include path
+                # from. Portably discovered per-environment rather than hardcoded; a `None`
+                # result (Boost genuinely not found anywhere) intentionally adds nothing
+                # here, so the resulting "file not found" fails loudly via
+                # `_check_diagnostics` instead of silently omitting Boost-dependent
+                # headers' content.
+                *(["-isystem", boost_include_dir] if (boost_include_dir := _discover_boost_include_dir()) else []),
+            ],
         ),
     )
 

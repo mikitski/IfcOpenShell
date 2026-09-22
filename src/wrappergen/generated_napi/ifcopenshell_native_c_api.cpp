@@ -2523,6 +2523,20 @@ ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_file_logger(ifcopens
     }
 }
 
+ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_other(ifcopenshell_spf_header_t* other) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (other == nullptr) {
+            throw std::runtime_error("Null handle parameter received for other");
+        }
+        auto constructed_value = ifcopenshell::spf_header(other->value);
+        return new ifcopenshell_spf_header_t{ std::move(constructed_value) };
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
 void ifcopenshell_spf_header_owner_file(ifcopenshell_spf_header_t* handle, ifcopenshell_file_t* file) {
     ifcopenshell_last_error_clear();
     try {
