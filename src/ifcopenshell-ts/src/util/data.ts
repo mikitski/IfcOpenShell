@@ -87,15 +87,18 @@
 // Real Python's `raise Exception(f"Provided clipping of unexpected IFC class: {raw_data}")`
 // (and the final catch-all `f"Unexpected clipping type provided: {raw_data}"`) interpolate
 // `raw_data` via Python's own `__repr__`/`__str__` (a real `entity_instance` prints its own
-// STEP-like representation, e.g. `#33=IFCWALL(...)`). This port's `EntityInstance` class
-// has no such `toString()` override (confirmed by reading `entityInstance.ts` directly --
-// none exists), so interpolating an `EntityInstance` into a template literal would print
-// the unhelpful default `"[object Object]"`. To keep the thrown message genuinely useful
-// (not just textually close), the entity-class-mismatch message below names the offending
-// class via `.isA()` instead of interpolating the raw instance -- a deliberate, disclosed
-// substitution for a real JS limitation (matching `addPset.ts`'s own identical, already-
-// established "JS has no typed exception classes"-style disclosure precedent for
-// error-message text), not a silently different condition or control flow.
+// STEP-like representation, e.g. `#33=IFCWALL(...)`). At the time this file was written,
+// this port's `EntityInstance` class had no such `toString()` override (confirmed by
+// reading `entityInstance.ts` directly -- none existed then), so interpolating an
+// `EntityInstance` into a template literal printed the unhelpful default
+// `"[object Object]"`. `entityInstance.ts` has since gained `toString()`/`toStepString()`
+// (the `EntityInstance.toString()` chunk, `PROGRESS.md`) -- a real STEP-text
+// interpolation would now be possible here, but the entity-class-mismatch message below
+// still deliberately names the offending class via `.isA()` instead: a full SPF
+// entity-text line (including every attribute value) is noisier than useful for a
+// class-mismatch error, matching `addPset.ts`'s own identical, already-established
+// "JS has no typed exception classes"-style disclosure precedent for error-message text,
+// not a silently different condition or control flow.
 //
 // *** One small, disclosed compensating check: a dict missing BOTH `location`/`normal`
 // AND `matrix` ***

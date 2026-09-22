@@ -505,6 +505,10 @@ export class entity_instance {
         return native.base_is_a(this._handle, name);
     }
 
+    to_string(uppercase: boolean): string {
+        return native.base_to_string(this._handle, uppercase);
+    }
+
     get_all_attribute_values(): unknown {
         return native.base_get_all_attribute_values(this._handle);
     }

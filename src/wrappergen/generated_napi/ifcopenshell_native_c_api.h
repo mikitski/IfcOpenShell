@@ -200,6 +200,7 @@ char* ifcopenshell_base_attribute_name(ifcopenshell_express_base_t* handle, int 
 char* ifcopenshell_base_attribute_type(ifcopenshell_express_base_t* handle, int attribute_index);
 int ifcopenshell_base_get_attribute_category(ifcopenshell_express_base_t* handle, const char* name);
 bool ifcopenshell_base_is_a(ifcopenshell_express_base_t* handle, const char* name);
+char* ifcopenshell_base_to_string(ifcopenshell_express_base_t* handle, bool uppercase);
 ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_values(ifcopenshell_express_base_t* handle);
 ifcopenshell_express_base_list_t* ifcopenshell_base_traverse(ifcopenshell_express_base_t* handle, int max_depth);
 ifcopenshell_express_base_list_t* ifcopenshell_base_traverse_breadth_first(ifcopenshell_express_base_t* handle, int max_depth);

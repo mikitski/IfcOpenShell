@@ -170,6 +170,26 @@ std::vector<std::string> get_inverse_attribute_names(const express::base& instan
 // `entity_instance.is_a(name)`.
 bool is_a(const express::base& instance, const std::string& name);
 
+// `entity_instance.to_string(valid_spf=True)` / Python's own implicit
+// `__str__`/`__repr__` (`IfcParseWrapper.i`'s `%extend express::base { __repr__,
+// to_string }`) -- both SWIG wrappers are thin pass-throughs to the real, already-
+// complete `express::base::to_string(std::ostream&, bool uppercase) const`
+// (express.h/parse.cpp): writes `#<id>=` for a real (non-header-section) entity,
+// then the entity type name (uppercased iff `uppercase`), then delegates to
+// `instance_data::to_string` for the parenthesized, comma-separated,
+// `\X4\`-escaping attribute list. `__repr__` calls the raw method with its own
+// default (`uppercase=false`); Python's own public `to_string` method defaults its
+// SWIG-only `valid_spf` parameter to `true` -- despite the name, it is literally
+// just the `uppercase` flag, nothing to do with SPF validity (confirmed against
+// `IfcParseWrapper.i` directly). This free function takes `uppercase` explicit
+// (no default -- C++ default arguments aren't visible to wrappergen's generator,
+// same reason `max_depth`/every other parameter here is required) so both real
+// callers are reachable: the TS layer supplies `false` for its `toString()`
+// override and (by default) `true` for its `toStepString(uppercase = true)`
+// (Python's own public `to_string()` default) -- see `entityInstance.ts`'s header
+// comment for the full naming rationale.
+std::string to_string(const express::base& instance, bool uppercase);
+
 // The bulk, single-call attribute-value fetch this PR's Phase 1 primitive
 // layer offers in place of Python's fully-recursive `get_info_cpp`
 // (research/01-python-core-and-lowlevel.md SS2.3, SS5 point 3;

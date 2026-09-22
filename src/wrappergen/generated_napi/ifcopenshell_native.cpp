@@ -2069,6 +2069,23 @@ napi_value napi_base_is_a(napi_env env, napi_callback_info info) {
     return js_result;
 }
 
+napi_value napi_base_to_string(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    auto* handle = unwrap_express_base(env, argv[0]);
+    bool js_uppercase = false;
+    napi_get_value_bool(env, argv[1], &js_uppercase);
+    char* result = ifcopenshell_base_to_string(handle, js_uppercase);
+    if (result == nullptr) {
+        return throw_last_error(env, "Native call failed");
+    }
+    napi_value js_result;
+    napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &js_result);
+    ifcopenshell_string_free(result);
+    return js_result;
+}
+
 napi_value napi_base_get_all_attribute_values(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value argv[1];
@@ -4612,6 +4629,11 @@ napi_value Init(napi_env env, napi_value exports) {
         napi_value fn;
         napi_create_function(env, "base_is_a", NAPI_AUTO_LENGTH, napi_base_is_a, nullptr, &fn);
         napi_set_named_property(env, exports, "base_is_a", fn);
+    }
+    {
+        napi_value fn;
+        napi_create_function(env, "base_to_string", NAPI_AUTO_LENGTH, napi_base_to_string, nullptr, &fn);
+        napi_set_named_property(env, exports, "base_to_string", fn);
     }
     {
         napi_value fn;
