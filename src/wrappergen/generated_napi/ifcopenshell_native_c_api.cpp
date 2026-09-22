@@ -1501,6 +1501,20 @@ bool ifcopenshell_base_is_a(ifcopenshell_express_base_t* handle, const char* nam
     }
 }
 
+char* ifcopenshell_base_to_string(ifcopenshell_express_base_t* handle, bool uppercase) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::to_string(handle->value, uppercase);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
 ifcopenshell_attribute_value_variant_list_t ifcopenshell_base_get_all_attribute_values(ifcopenshell_express_base_t* handle) {
     ifcopenshell_last_error_clear();
     try {

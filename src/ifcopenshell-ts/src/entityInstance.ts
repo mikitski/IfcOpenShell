@@ -191,6 +191,37 @@ export class EntityInstance {
 	}
 
 	/**
+	 * SPF entity-text serialization (`express::base::to_string`, `express.h`/`parse.cpp`
+	 * -- see `attribute_value_shim.h`'s `to_string` doc comment for the full trace):
+	 * writes `#<id>=`, then the entity type name (uppercased iff `uppercase`), then the
+	 * parenthesized, comma-separated, `\X4\`-escaped attribute list.
+	 *
+	 * Real Python exposes this same C++ method two different ways with two different
+	 * defaults, both ported here as two differently-named TS methods rather than one
+	 * method with a mismatched-sounding parameter:
+	 * - `str(inst)`/`__str__` (SWIG's `__repr__` `%extend`) calls the raw method with
+	 *   its own default, `uppercase=false` -- ported as this no-arg `toString()`.
+	 * - The explicit public `entity_instance.to_string(valid_spf=True)` defaults its
+	 *   SWIG-only `valid_spf` parameter to `true` -- despite the name, it is literally
+	 *   just the `uppercase` flag, nothing to do with SPF validity (confirmed against
+	 *   `IfcParseWrapper.i` directly, per `test_instance_string_formatting.py`'s own
+	 *   assertions). Ported as `toStepString(uppercase = true)`, named for what the
+	 *   output actually is (a STEP Physical File entity-text line) rather than porting
+	 *   the confusing `valid_spf` name verbatim.
+	 *
+	 * `toString()` is therefore always equal to `toStepString(false)` -- matching real
+	 * Python's own `str(inst) == inst.to_string(False)` assertion exactly.
+	 */
+	toString(): string {
+		return this.toStepString(false);
+	}
+
+	/** See `toString()`'s doc comment for the full naming rationale. */
+	toStepString(uppercase = true): string {
+		return this.native.to_string(uppercase);
+	}
+
+	/**
 	 * The schema declaration of this instance (`entity_instance_mixin.declaration`, a
 	 * Python property). Added by `util/schema.ts`'s `getDeclaration` port (Phase 3,
 	 * `util.schema` chunk): this class already resolved `this.native.declaration()`

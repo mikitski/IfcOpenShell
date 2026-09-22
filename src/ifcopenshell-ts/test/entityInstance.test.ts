@@ -25,6 +25,24 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 		expect(wall.isEntity()).toBe(true);
 	});
 
+	test("toString()/toStepString(): SPF entity-text serialization -- ports real Python's " +
+		"test_instance_string_formatting.py assertions exactly", () => {
+		const file = newFile();
+		const wall = file.createEntity("IfcWall");
+		// A non-ASCII character (astral-plane codepoint, matching Python's `chr(0x1F37A)`)
+		// in the `Name` attribute.
+		wall.set("Name", String.fromCodePoint(0x1f37a));
+
+		// 0x1F37A should be encoded using \X4\.
+		expect(wall.toStepString()).toContain("\\X4\\");
+		// to_string()/toStepString() should use upper case entity names.
+		expect(wall.toStepString()).toContain("IFCWALL");
+		// toString() uses camel case entity names.
+		expect(wall.toString()).toContain("IfcWall");
+		// in fact, toString() is equal to toStepString(false).
+		expect(wall.toString()).toBe(wall.toStepString(false));
+	});
+
 	test("equals(): two separately-fetched wrappers of the same instance compare equal via " +
 		"identity, never via JS reference equality (research/07-fresh-wrapper-per-access.md's " +
 		"regression case)", () => {

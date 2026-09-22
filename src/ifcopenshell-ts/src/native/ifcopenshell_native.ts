@@ -510,6 +510,10 @@ export class entity_instance {
         return native.base_is_a(this._handle, name);
     }
 
+    to_string(uppercase: boolean): string {
+        return native.base_to_string(this._handle, uppercase);
+    }
+
     get_all_attribute_values(): unknown {
         return native.base_get_all_attribute_values(this._handle);
     }
@@ -861,6 +865,10 @@ export class spf_header {
 
     static create(file: file, logger: logger): spf_header {
         return new spf_header(native.spf_header_new_with_file_logger(file._handle, logger._handle));
+    }
+
+    static with_other(other: spf_header): spf_header {
+        return new spf_header(native.spf_header_new_with_other(other._handle));
     }
 
     owner_file(file: file): void {
