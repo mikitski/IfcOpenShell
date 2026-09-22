@@ -171,8 +171,17 @@ jobs:
       # Build and install just enough of the C++ core for the addon to link
       # against: BUILD_IFCGEOM=OFF skips OpenCASCADE/CGAL entirely, since the
       # Phase 0 smoke test only needs ifcparse (open a file, read its schema).
-      # A single schema version keeps this fast - Phase 0 has no schema-
-      # specific porting work yet.
+      #
+      # Widened from a single schema (`4`) to all three (2026-09, Phase EX-2 of
+      # planning/ifcopenshell-ts/70-express-rules-plan.md): that plan's own
+      # smallest-schema-first sequencing starts with IFC2X3-specific tests
+      # (test/express/rules/ifc2x3.test.ts), and test/bootstrap.ts's
+      # `isSchemaAvailable` gap-disclosure comment already flagged that this
+      # single-schema build was the reason IFC2X3/IFC4X3 tests were silently
+      # skipped in CI - this is that flagged decision being made. `4x3_add2` is
+      # the identifier the core actually registers for "IFC4X3" (see
+      # test/bootstrap.ts's own `SCHEMA_IDENTIFIERS` mapping and its cited
+      # research doc).
       - name: Configure and install IfcOpenShell core (Unix)
         id: core-unix
         if: matrix.os != 'windows' && steps.cache-core.outputs.cache-hit != 'true'
@@ -184,7 +193,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES:-}" \
-            -DSCHEMA_VERSIONS=4 \
+            -DSCHEMA_VERSIONS="2x3;4;4x3_add2" \
             -DBUILD_IFCGEOM=OFF \
             -DBUILD_IFCPYTHON=OFF \
             -DBUILD_CONVERT=OFF \
@@ -205,7 +214,7 @@ jobs:
             -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }} `
             -DCMAKE_INSTALL_PREFIX="$env:INSTALL_PREFIX" `
             -DCMAKE_INSTALL_LIBDIR=lib `
-            -DSCHEMA_VERSIONS=4 `
+            -DSCHEMA_VERSIONS="2x3;4;4x3_add2" `
             -DBUILD_IFCGEOM=OFF `
             -DBUILD_IFCPYTHON=OFF `
             -DBUILD_CONVERT=OFF `
@@ -460,7 +469,7 @@ jobs:
             -DCMAKE_CXX_FLAGS="$SANITIZE_FLAGS" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
             -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined" \
-            -DSCHEMA_VERSIONS=4 \
+            -DSCHEMA_VERSIONS="2x3;4;4x3_add2" \
             -DBUILD_IFCGEOM=OFF \
             -DBUILD_IFCPYTHON=OFF \
             -DBUILD_CONVERT=OFF \
