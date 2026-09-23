@@ -171,14 +171,40 @@
 // reachable and correct for IFC4, with ZERO further changes needed here (this file's
 // own code was already correct, real, working code the moment the underlying gap
 // closed -- exactly as this comment's own paragraph above anticipated). `Surface2D`/
-// `Surface3D` remain genuinely blocked for IFC4 (no `IfcSurface`-subtype `Dim`
-// function ported by any chunk yet). This file's own `guessType` test coverage was
-// only ever written against a hardcoded IFC4 fixture (no IFC2X3-specific `Curve2D`/
-// `Curve3D` test exists here at all, even though IFC2X3 ported `calc_IfcCurve_Dim`
-// itself several chunks ago) -- out of scope for this chunk to add, which only
-// touches IFC4's own dispatch; IFC4X3 remains blocked regardless (no `rules/
-// ifc4x3.ts` module exists yet). `representation.test.ts`'s own `guessType` coverage
-// is updated accordingly for IFC4 (see that file's own updated comment).
+// `Surface3D` remained genuinely blocked for IFC4 at that time (no `IfcSurface`-
+// subtype `Dim` function ported by any chunk yet -- see the UPDATE 2 section
+// immediately below for how this changes). This file's own `guessType` test coverage
+// was only ever written against a hardcoded IFC4 fixture (no IFC2X3-specific
+// `Curve2D`/`Curve3D` test exists here at all, even though IFC2X3 ported
+// `calc_IfcCurve_Dim` itself several chunks ago) -- out of scope for this chunk to
+// add, which only touches IFC4's own dispatch; IFC4X3 remains blocked regardless (no
+// `rules/ifc4x3.ts` module exists yet). `representation.test.ts`'s own `guessType`
+// coverage is updated accordingly for IFC4 (see that file's own updated comment).
+//
+// --- UPDATE 2 (Phase EX-2, IFC4's FOURTH and LAST `calc_*`-porting chunk): the
+//     `Surface2D`/`Surface3D` HALF of this gap is now closed for IFC4 too --
+//     and, as a direct, disclosed consequence, `Surface2D` becomes unreachable ---
+//
+// That chunk ports `calc_IfcSurface_Dim` (real source: a bare `return 3`, no
+// `IfcSurface` subtype re-declares its own `Dim` as DERIVE anywhere in `IFC4.py` --
+// real, verified schema evolution vs. IFC2X3, which redeclares `Dim` separately on
+// `IfcElementarySurface`/`IfcCurveBoundedPlane`/`IfcRectangularTrimmedSurface`/
+// `IfcSweptSurface`; see `ifc4.ts`'s own fourth-chunk header comment for the full
+// citation). `i.get("Dim")` on a real `IfcSurface` subtype now resolves (always to
+// `3`) instead of throwing, for any IFC4 file -- `guessType`'s `Surface3D` branch is
+// therefore now genuinely reachable and correct for IFC4. **But `Surface2D` is a
+// DIFFERENT story**: since `IfcSurface.Dim` is now known to be an unconditional
+// constant `3` for IFC4 (never `2`, for any concrete subtype), the `Surface2D`
+// branch (`i.get("Dim") === 2`) can never actually match for IFC4 -- it is
+// permanently unreachable dead code there, the exact same shape of finding this
+// file's own header comment (finding 5, below) already documents for
+// `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"`/`"PointCloud"`, just reached via a
+// DERIVE-attribute's own fixed value rather than a class-hierarchy shadowing. Not
+// reordered or special-cased here (same "reproduce Python's exact branch order and
+// logic verbatim" discipline as the rest of this function) -- `representation.
+// test.ts`'s own `guessType` coverage is updated accordingly (asserting the real,
+// resolved `Surface3D` behavior, plus this unreachability finding, instead of the
+// old disclosed-throw regression test).
 //
 // *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be

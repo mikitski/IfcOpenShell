@@ -96,12 +96,23 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions
 	// 5) for the full writeup. No Python counterpart -- real Python's own
 	// `test_edit_named_unit.py::test_edit_si_unit` never exercises this combination
 	// either.
-	test.skipIf(schema !== "IFC2X3")(
-		"IFC2X3: silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)",
+	// **Updated by Phase EX-2's IFC4 FOURTH (and last) chunk** (`src/express/rules/
+	// ifc4.ts`): that chunk ports `calc_IfcSIUnit_Dimensions` for IFC4 too (completing
+	// IFC4 to the full 62/62 `calc_*` functions), so IFC4 now behaves exactly like
+	// IFC2X3 here (DERIVE dispatch resolves `.Dimensions` to a foreign, disposable
+	// scratch instance) -- re-verified directly against the real built addon, not
+	// assumed. Only IFC4X3 (no `rules/ifc4x3.ts` module exists at all yet) remains
+	// genuinely blocked.
+	test.skipIf(schema === "IFC4X3")(
+		"IFC2X3/IFC4: silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)",
 		() => {
 			const file = createTestFile(schema);
 			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
-			// METRE -> IfcDimensionsForSiUnit -> (1, 0, 0, 0, 0, 0, 0).
+			// METRE -> IfcDimensionsForSiUnit -> (1, 0, 0, 0, 0, 0, 0) (same for both
+			// IFC2X3's and IFC4's own `IfcDimensionsForSiUnit` -- METRE's own branch is
+			// one of the 29 byte-identical ones between the two schemas' real tables,
+			// see `ifc4.ts`'s own fourth-chunk header comment for the one branch,
+			// FARAD, that actually differs).
 			expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
 
 			editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } });
@@ -112,8 +123,8 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions
 		},
 	);
 
-	test.skipIf(schema === "IFC2X3")(
-		"IFC4/IFC4X3: still throws (no ported calc_IfcSIUnit_Dimensions for this schema yet)",
+	test.skipIf(schema !== "IFC4X3")(
+		"IFC4X3: still throws (no rules/ifc4x3.ts module -- no ported calc_IfcSIUnit_Dimensions for this schema yet)",
 		() => {
 			const file = createTestFile(schema);
 			const unit = file.createEntity("IfcSIUnit");

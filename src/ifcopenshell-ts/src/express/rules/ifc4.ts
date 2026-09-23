@@ -1454,3 +1454,365 @@ registerSchemaCalcFunctions("IFC4", {
 	"IfcPointOnSurface.Dim": calc_IfcPointOnSurface_Dim,
 	"IfcRevolvedAreaSolid.AxisLine": calc_IfcRevolvedAreaSolid_AxisLine,
 });
+
+// =============================================================================
+// Phase EX-2, IFC4's FOURTH (and LAST) chunk (planning/ifcopenshell-ts/
+// 70-express-rules-plan.md §4): the final 14 of IFC4's 62 `calc_*` functions, in real
+// file order (line numbers re-verified directly against `IFC4.py` before porting, not
+// just trusted from the task brief that dispatched this chunk -- all 14 matched
+// exactly: 9033/9056/9552/9634/9753/10271/10294/10329/10334/10599/10603/10607/
+// 10745/10865):
+//
+//   calc_IfcRationalBSplineCurveWithKnots_Weights,
+//   calc_IfcRationalBSplineSurfaceWithKnots_Weights, calc_IfcSIUnit_Dimensions,
+//   calc_IfcSectionedSpine_Dim, calc_IfcShellBasedSurfaceModel_Dim, calc_IfcSurface_Dim,
+//   calc_IfcSurfaceCurve_BasisSurface, calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis,
+//   calc_IfcSurfaceOfRevolution_AxisLine, calc_IfcTable_NumberOfCellsInRow,
+//   calc_IfcTable_NumberOfHeadings, calc_IfcTable_NumberOfDataRows,
+//   calc_IfcTessellatedFaceSet_Dim, calc_IfcTriangulatedFaceSet_NumberOfTriangles
+//
+// **This chunk brings IFC4 to the FULL 62/62 `calc_*` functions** -- confirmed by
+// summing this file's own 4 `registerSchemaCalcFunctions` calls' key counts (18 + 15 +
+// 15 + 14 = 62) and by the same `grep -n "^def calc_" IFC4.py | wc -l` sweep (62)
+// every prior IFC4/IFC2X3 chunk in this project has used. (The dispatching task
+// brief's own "45/62 after chunks 1-3" figure underrepresented this file's own actual
+// prior state by 3 -- re-counted directly here, not trusted: chunks 1-3 together
+// already registered 48 keys, not 45, once the "3 minimal extra dependencies" chunk 1
+// itself disclosed adding -- `IfcDirection.Dim`/`IfcVector.Dim`/`IfcSolidModel.Dim`,
+// all 3 real `calc_*` functions in their own right -- are correctly counted toward the
+// 62. Cross-checked with a `diff` of the full 62-name list against this file's own 48
+// already-`export function calc_`-declared names before starting: the diff produced
+// EXACTLY these 14 names, confirming both the starting count and this chunk's own
+// assigned scope independently.)
+//
+// **7 of these 14 SHARE A NAME with an already-ported IFC2X3 function** -- each
+// diffed directly against both real Python sources (`IFC2X3.py`/`IFC4.py`) AND
+// `ifc2x3.ts`'s own already-shipped port, per this chunk's own task brief:
+//
+// - `calc_IfcSectionedSpine_Dim` (`IFC2X3.py` line 6575 / `IFC4.py` line 9634),
+//   `calc_IfcShellBasedSurfaceModel_Dim` (6635 / 9753),
+//   `calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis` (6843 / 10329),
+//   `calc_IfcSurfaceOfRevolution_AxisLine` (6848 / 10334),
+//   `calc_IfcTable_NumberOfCellsInRow` (7004 / 10599), `calc_IfcTable_NumberOfHeadings`
+//   (7008 / 10603), and `calc_IfcTable_NumberOfDataRows` (7012 / 10607) are all
+//   BYTE-IDENTICAL between `IFC2X3.py` and `IFC4.py` (confirmed by direct `diff`, not
+//   name-overlap assumption) -- ported below closely mirroring `ifc2x3.ts`'s own
+//   approach for each (the `ifcVector`/`ifcLine` scratch-constructors the 2
+//   `SurfaceOf*` functions need are this file's own chunk-1/chunk-3 versions, already
+//   in scope; `IfcTable`'s 3 functions need no new dependency at all).
+//
+// - `calc_IfcSIUnit_Dimensions` (`IFC2X3.py` line 6541 / `IFC4.py` line 9552) is
+//   GENUINELY DIFFERENT, by exactly ONE value, in its own `IfcDimensionsForSiUnit`
+//   dependency (real source line 7723 / 11727): confirmed by a direct `diff` of both
+//   real, complete 30-branch (29 `elif` plus 1 `else`) tables, not a spot-check -- the
+//   ONLY line that differs anywhere in either table is the `FARAD` branch's 4th
+//   positional argument (`ElectricCurrentExponent`): `1` in `IFC2X3.py`, `2` in
+//   `IFC4.py`. Every other one of the 29 real branches (`metre` through `sievert`)
+//   plus the `else` all-zero fallback are byte-for-byte identical between the two
+//   schemas. This is real, verified schema evolution between IFC2X3 and IFC4 (IFC4's
+//   own `2` is also the dimensionally-correct SI exponent for capacitance,
+//   `A^2 * s^4 * kg^-1 * m^-2` -- IFC2X3's own `1` reads like an upstream bSI
+//   schema-authoring mistake that IFC4 quietly corrected, though this port makes no
+//   claim about *why* upstream changed it, only that it verifiably did) -- NOT
+//   "additional/different SI unit entries" as the dispatching task brief's own
+//   speculation framed the possibility (re-verified directly: both schemas' tables
+//   cover the exact same 29 `IfcSIUnitName` labels, confirmed by an independent
+//   `grep -c "elif n =="` count on each real file, both 29). Ported below as a fresh,
+//   IFC4-scoped `ifcDimensionsForSiUnit` (not imported from `ifc2x3.ts`, which has its
+//   own separate copy) -- same reason this file's own `ifcDeriveDimensionalExponents`
+//   (chunk 2) isn't shared with `ifc2x3.ts` either: it needs THIS file's own
+//   `getScratchFile()`, scoped to the IFC4 schema. `IfcDimensionalExponents` is,
+//   again, a genuine ENTITY, not a defined type -- same already-established,
+//   empirically-confirmed fact `ifc2x3.ts`'s own chunk-5 header comment first
+//   documented (not re-verified from scratch a third time here, since this chunk's
+//   own `getScratchFile().createEntity("IfcDimensionalExponents", ...)` calls below
+//   are structurally identical to this file's own already-working chunk-2
+//   `ifcDeriveDimensionalExponents`, which already exercises the exact same
+//   construction against the exact same IFC4 schema).
+//
+// **The other 6 (`IfcRationalBSplineCurveWithKnots_Weights`,
+// `IfcRationalBSplineSurfaceWithKnots_Weights`, `IfcSurface_Dim`,
+// `IfcSurfaceCurve_BasisSurface`, `IfcTessellatedFaceSet_Dim`,
+// `IfcTriangulatedFaceSet_NumberOfTriangles`) are genuinely IFC4-only** (confirmed
+// directly: none of `IfcRationalBSplineCurveWithKnots`/`IfcRationalBSplineSurfaceWithKnots`/
+// `IfcSurface`/`IfcSurfaceCurve`/`IfcTessellatedFaceSet`/`IfcTriangulatedFaceSet` appear
+// anywhere in `IFC2X3.py`) -- and, per this chunk's own task brief's specific
+// instruction to check, EVERY ONE of them reuses a helper this file's own chunk 1/2
+// already ported, needing ZERO new shared dependencies:
+//
+// - `calc_IfcRationalBSplineCurveWithKnots_Weights` (real source line 9033) is
+//   `IfcListToArray(WeightsData, 0, UpperIndexOnControlPoints)` -- delegates straight
+//   to chunk 1's own `ifcListToArray`, the EXACT SAME call shape (`low=0`) as chunk
+//   1's own `calc_IfcBSplineCurve_ControlPoints` (and `ifc2x3.ts`'s own
+//   `calc_IfcRationalBezierCurve_Weights`). This is therefore a NEW CALL SITE into
+//   chunk 1's own already-disclosed bug #3 (`IfcListToArray`'s cyclic left-rotation
+//   for `low === 0`) -- NOT a new bug; see this file's own top-of-file header comment
+//   for the full original citation. Ported the same direct, structural way.
+//
+// - `calc_IfcRationalBSplineSurfaceWithKnots_Weights` (real source line 9056) is
+//   `IfcMakeArrayOfArray(WeightsData, 0, UUpper, 0, VUpper)` -- delegates straight to
+//   chunk 2's own `ifcMakeArrayOfArray`, the EXACT SAME call shape as chunk 2's own
+//   `calc_IfcBSplineSurface_ControlPoints`. This is therefore a NEW CALL SITE into
+//   chunk 2's own already-disclosed bug #1 (`IfcMakeArrayOfArray`'s unconditional
+//   `TypeError`, `list * int` then `list - int` via Python's own operator precedence)
+//   -- NOT a new bug. **Net effect, same as `calc_IfcBSplineSurface_ControlPoints`
+//   itself: this function can never successfully compute a value in real Python, for
+//   ANY structurally valid `IfcRationalBSplineSurfaceWithKnots`** -- an unconditional
+//   crash on every real call once both of `ifcMakeArrayOfArray`'s own preceding
+//   size-validation guards pass (which they always do for a schema-valid instance,
+//   per chunk 2's own original citation). Ported as the same direct delegation,
+//   inheriting the same thrown `Error`.
+//
+// - `calc_IfcSurface_Dim` (real source line 10271) is a bare `return 3` -- no IFC4
+//   subtype of `IfcSurface` (`IfcElementarySurface`/`IfcSweptSurface`/
+//   `IfcBoundedSurface`/etc.) re-declares its own `Dim` as DERIVE in `IFC4.py` at all
+//   (confirmed directly: `grep -n "^def calc_Ifc.*Surface.*_Dim" IFC4.py` finds only
+//   `IfcFaceBasedSurfaceModel_Dim`/`IfcPointOnSurface_Dim`/`IfcShellBasedSurfaceModel_Dim`/
+//   this function itself -- none of them a genuine `IfcSurface` subtype's own
+//   `Dim`), UNLIKE IFC2X3, which re-declares `Dim` separately on
+//   `IfcElementarySurface`/`IfcCurveBoundedPlane`/`IfcRectangularTrimmedSurface`/
+//   `IfcSweptSurface` (all 4 already ported in `ifc2x3.ts`'s own second chunk). Real,
+//   verified schema evolution, not a porting gap: IFC4 simply declares `IfcSurface`'s
+//   own `Dim` as an unconditional constant at the base-entity level instead of
+//   needing per-subtype recomputation. **This has a real, disclosed, cascading
+//   consequence for `util/representation.ts`'s own `guessType` -- see that file's own
+//   updated header comment and `representation.test.ts`'s own updated tests for the
+//   full writeup: IFC4's `Surface2D`/`Surface3D` `.Dim`-DERIVED-attribute gap (this
+//   file's own third chunk's header comment, "remain genuinely blocked for IFC4") is
+//   now fully closed, AND, as a direct consequence of `Dim` always being the constant
+//   `3` with no way to ever be `2`, `guessType`'s own `Surface2D` branch becomes
+//   permanently unreachable dead code for IFC4 -- the same shape of finding
+//   `representation.ts`'s own header comment (finding 5) already documents for
+//   `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"`/`"PointCloud"`, not a new kind of
+//   observation, just a new instance of it.**
+//
+// - `calc_IfcSurfaceCurve_BasisSurface` (real source line 10294) is
+//   `IfcGetBasisSurface(SELF)` -- delegates straight to chunk 2's own
+//   `ifcGetBasisSurface`, the EXACT SAME one-line delegation shape as chunk 2's own
+//   `calc_IfcCompositeCurveOnSurface_BasisSurface`. Since `self` here is always (a
+//   subtype of) `IfcSurfaceCurve` specifically (never `IfcPcurve` -- confirmed
+//   directly against the real schema, `IfcPcurve` is a subtype of `IfcCurve`, NOT
+//   `IfcSurfaceCurve` -- nor `IfcCompositeCurveOnSurface`, a subtype of
+//   `IfcCompositeCurve`, also unrelated), `ifcGetBasisSurface`'s own dispatch always
+//   lands in its `'ifc4.ifcsurfacecurve'` branch for this call site, which is chunk
+//   2's own already-disclosed bug #2 (`surfs = surfs + IfcAssociatedSurface(...)`,
+//   `list + non-list`, unconditional `TypeError`) -- NOT a new bug, but a NEW CALL
+//   SITE that makes its real-world impact concrete: `AssociatedGeometry` is
+//   schema-mandatory (`LIST [1:2]`) on `IfcSurfaceCurve`, so **this function can never
+//   successfully compute a value in real Python for any schema-valid
+//   `IfcSurfaceCurve` with `AssociatedGeometry` actually populated** -- confirmed with
+//   a dedicated test below using a real, populated `AssociatedGeometry`. (The
+//   completely-unset-`AssociatedGeometry` edge case is not separately explored here --
+//   not schema-valid, and this port's own native-binding representation of an unset,
+//   non-optional `LIST` attribute at construction time is a separate question from
+//   this chunk's own scope, already covered in general by this file's/`entityInstance
+//   .ts`'s own pre-existing disclosures elsewhere.)
+//
+// - `calc_IfcTessellatedFaceSet_Dim` (real source line 10745) is a bare `return 3` --
+//   same shape as `calc_IfcCsgPrimitive3D_Dim`/`calc_IfcHalfSpaceSolid_Dim`/etc.
+//   already ported in this file's own earlier chunks, no new dependency.
+//
+// - `calc_IfcTriangulatedFaceSet_NumberOfTriangles` (real source line 10865) is a bare
+//   `return sizeof(CoordIndex)` -- a direct, one-line attribute-length read, no new
+//   dependency.
+//
+// **No genuinely NEW real Python bugs found in this chunk's own 14 assigned
+// functions.** The 2 new-call-site cases above (`IfcListToArray`'s bug #3,
+// `IfcMakeArrayOfArray`/`IfcGetBasisSurface`'s bugs #1/#2) are all pre-existing,
+// already-disclosed bugs in shared helpers this file's own chunks 1-2 already found
+// and pinned -- reused, not re-discovered, and re-confirmed here to actually apply to
+// each of THIS chunk's own new call sites (not assumed just because the helper name
+// matches). None of this chunk's other 12 functions touch a tuple/list-comparison,
+// tuple-mutation, or 0-based-rotation pattern, and none perform arithmetic/comparison
+// on a possibly-indeterminate value beyond this file's own already-flagged, inherited
+// `INDETERMINATE`-poisoning-through-plain-JS-operators gap (`IfcTable
+// .NumberOfHeadings`/`.NumberOfDataRows`'s own `not express_getattr(temp, 'IsHeading',
+// INDETERMINATE)` negation is the one expression in this chunk that comes closest,
+// but this is the exact same, already-disclosed shape of gap `ifc2x3.ts`'s own
+// identical `IfcTable.NumberOfHeadings`/`.NumberOfDataRows` port already carries,
+// silently reachable only if a real file leaves the schema-mandatory `IsHeading`
+// attribute unset -- not a new divergence introduced by this chunk).
+//
+// **Cascading test-fidelity fixes, required by this chunk -- disclosed here, not
+// silently left stale, matching this file's own established convention (chunks 2/3
+// each found several such regressions):**
+//
+// 1. `test/express/rules/ifc2x3.test.ts`'s own "an unported-for-THIS-SCHEMA
+//    DERIVE-shaped attribute still throws" test (chunk 5's own version, updated again
+//    by this file's own second chunk) read `IfcSIUnit.Dimensions` off an `IFC4`
+//    fixture specifically BECAUSE `calc_IfcSIUnit_Dimensions` was still genuinely
+//    unported for IFC4 at that time. This chunk now ports exactly that function (one
+//    of its own 14), so the read would silently start succeeding instead of throwing.
+//    Swapped to an `IFC4X3` fixture instead (same attribute name, `IfcSIUnit.Dimensions`
+//    -- `calc_IfcSIUnit_Dimensions` exists in `IFC4X3.py` too, but no `rules/
+//    ifc4x3.ts` module exists in this port yet at all) -- the exact same "move to the
+//    next, still fully empty schema" pattern that test's own chunk-5 update already
+//    used once before (IFC2X3 -> IFC4), applied a second time (IFC4 -> IFC4X3), now
+//    that this chunk completes IFC4 to 62/62 and leaves no remaining genuinely-unported
+//    IFC4 DERIVE attribute to demonstrate a dispatch MISS with either.
+//
+// 2. `test/api/unit/editNamedUnit.test.ts`'s own "IFC4/IFC4X3: still throws (no ported
+//    calc_IfcSIUnit_Dimensions for this schema yet)" test previously covered both
+//    schemas with one assertion. This chunk ports `calc_IfcSIUnit_Dimensions` for
+//    IFC4, so IFC4 now behaves like IFC2X3's own already-passing "silently a no-op"
+//    sibling test in the same `describe` block (the edit lands on a disposable
+//    scratch `IfcDimensionalExponents`, unreachable through `unit`'s own real
+//    attribute-read path) -- re-verified directly against the real built addon, not
+//    assumed. Split into 2 schema-conditional tests (`schema !== "IFC4X3"` vs.
+//    `schema === "IFC4X3"`), matching this project's established schema-conditional
+//    test-splitting precedent (`editSurveyPoint.test.ts`).
+//
+// 3. This file's own second chunk's `calc_IfcDerivedUnit_Dimensions` test comment
+//    ("these tests don't need `calc_IfcSIUnit_Dimensions` (deliberately NOT ported by
+//    this chunk, still genuinely unported for IFC4)") is now stale prose (this
+//    chunk ports exactly that function) -- corrected below to note it's simply no
+//    longer needed for those tests' own narrow purpose (isolating
+//    `IfcDeriveDimensionalExponents`'s own accumulation logic from any other DERIVE
+//    dependency), not that it's still unported.
+//
+// 4. `src/util/representation.ts`'s own header comment and `test/util/
+//    representation.test.ts`'s own `guessType` coverage (Surface2D/Surface3D) -- see
+//    this chunk's own `calc_IfcSurface_Dim` writeup above for the full citation of
+//    WHY this changes; both files' own updated comments/tests are in this same PR.
+// =============================================================================
+
+/**
+ * Python: `IfcDimensionsForSiUnit` (`IFC4.py` line 11727) -- not itself a `calc_*`
+ * function (see this section's own header comment). Delegated to by
+ * `calc_IfcSIUnit_Dimensions` (below). GENUINELY DIFFERENT from `ifc2x3.ts`'s own
+ * `ifcDimensionsForSiUnit` by exactly ONE value -- see this section's own header
+ * comment for the full citation (a direct `diff` of both real, complete 30-branch
+ * tables): the `FARAD` branch's 4th positional argument (`ElectricCurrentExponent`)
+ * is `2` here vs. IFC2X3's own `1`, real verified schema evolution, not a porting
+ * error. Every other branch is byte-for-byte identical to `ifc2x3.ts`'s own version,
+ * ported below using that file's own already-established `n === "METRE"`/etc.
+ * string-chain idiom (see its own doc comment for the full `enum_namespace`
+ * re-export citation, not repeated here) against THIS file's own `getScratchFile()`,
+ * scoped to the IFC4 schema.
+ */
+function ifcDimensionsForSiUnit(n: unknown): EntityInstance {
+	const file = getScratchFile();
+	if (n === "METRE") return file.createEntity("IfcDimensionalExponents", 1, 0, 0, 0, 0, 0, 0);
+	if (n === "SQUARE_METRE") return file.createEntity("IfcDimensionalExponents", 2, 0, 0, 0, 0, 0, 0);
+	if (n === "CUBIC_METRE") return file.createEntity("IfcDimensionalExponents", 3, 0, 0, 0, 0, 0, 0);
+	if (n === "GRAM") return file.createEntity("IfcDimensionalExponents", 0, 1, 0, 0, 0, 0, 0);
+	if (n === "SECOND") return file.createEntity("IfcDimensionalExponents", 0, 0, 1, 0, 0, 0, 0);
+	if (n === "AMPERE") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 1, 0, 0, 0);
+	if (n === "KELVIN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 1, 0, 0);
+	if (n === "MOLE") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 1, 0);
+	if (n === "CANDELA") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 1);
+	if (n === "RADIAN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	if (n === "STERADIAN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	if (n === "HERTZ") return file.createEntity("IfcDimensionalExponents", 0, 0, -1, 0, 0, 0, 0);
+	if (n === "NEWTON") return file.createEntity("IfcDimensionalExponents", 1, 1, -2, 0, 0, 0, 0);
+	if (n === "PASCAL") return file.createEntity("IfcDimensionalExponents", -1, 1, -2, 0, 0, 0, 0);
+	if (n === "JOULE") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, 0, 0, 0, 0);
+	if (n === "WATT") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, 0, 0, 0, 0);
+	if (n === "COULOMB") return file.createEntity("IfcDimensionalExponents", 0, 0, 1, 1, 0, 0, 0);
+	if (n === "VOLT") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, -1, 0, 0, 0);
+	// GENUINELY DIFFERENT from IFC2X3's own `-2, -1, 4, 1, 0, 0, 0` -- see this
+	// function's own doc comment above for the full citation.
+	if (n === "FARAD") return file.createEntity("IfcDimensionalExponents", -2, -1, 4, 2, 0, 0, 0);
+	if (n === "OHM") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, -2, 0, 0, 0);
+	if (n === "SIEMENS") return file.createEntity("IfcDimensionalExponents", -2, -1, 3, 2, 0, 0, 0);
+	if (n === "WEBER") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, -1, 0, 0, 0);
+	if (n === "TESLA") return file.createEntity("IfcDimensionalExponents", 0, 1, -2, -1, 0, 0, 0);
+	if (n === "HENRY") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, -2, 0, 0, 0);
+	if (n === "DEGREE_CELSIUS") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 1, 0, 0);
+	if (n === "LUMEN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 1);
+	if (n === "LUX") return file.createEntity("IfcDimensionalExponents", -2, 0, 0, 0, 0, 0, 1);
+	if (n === "BECQUEREL") return file.createEntity("IfcDimensionalExponents", 0, 0, -1, 0, 0, 0, 0);
+	if (n === "GRAY") return file.createEntity("IfcDimensionalExponents", 2, 0, -2, 0, 0, 0, 0);
+	if (n === "SIEVERT") return file.createEntity("IfcDimensionalExponents", 2, 0, -2, 0, 0, 0, 0);
+	return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+}
+
+// --- the 14 assigned `calc_*` functions (exact real-Python names, file order) ---
+
+export function calc_IfcRationalBSplineCurveWithKnots_Weights(self: EntityInstance): unknown {
+	const weightsdata = expressGetAttr(self, "WeightsData", INDETERMINATE);
+	return ifcListToArray(weightsdata, 0, expressGetAttr(self, "UpperIndexOnControlPoints", INDETERMINATE) as number);
+}
+
+export function calc_IfcRationalBSplineSurfaceWithKnots_Weights(self: EntityInstance): unknown {
+	const uupper = expressGetAttr(self, "UUpper", INDETERMINATE) as number;
+	const vupper = expressGetAttr(self, "VUpper", INDETERMINATE) as number;
+	const weightsdata = expressGetAttr(self, "WeightsData", INDETERMINATE);
+	return ifcMakeArrayOfArray(weightsdata, 0, uupper, 0, vupper);
+}
+
+export function calc_IfcSIUnit_Dimensions(self: EntityInstance): unknown {
+	return ifcDimensionsForSiUnit(expressGetAttr(self, "Name", INDETERMINATE));
+}
+
+export function calc_IfcSectionedSpine_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcShellBasedSurfaceModel_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcSurface_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcSurfaceCurve_BasisSurface(self: EntityInstance): unknown {
+	return ifcGetBasisSurface(self);
+}
+
+export function calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis(self: EntityInstance): unknown {
+	const extrudeddirection = expressGetAttr(self, "ExtrudedDirection", INDETERMINATE);
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE) as number;
+	return ifcVector(extrudeddirection as EntityInstance, depth);
+}
+
+export function calc_IfcSurfaceOfRevolution_AxisLine(self: EntityInstance): unknown {
+	const axisposition = expressGetAttr(self, "AxisPosition", INDETERMINATE);
+	return ifcLine(
+		expressGetAttr(axisposition, "Location", INDETERMINATE),
+		ifcVector(expressGetAttr(axisposition, "Z", INDETERMINATE) as EntityInstance, 1.0),
+	);
+}
+
+export function calc_IfcTable_NumberOfCellsInRow(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE);
+	const firstRow = expressGetItem(rows, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	return hiIndex(expressGetAttr(firstRow, "RowCells", INDETERMINATE));
+}
+
+export function calc_IfcTable_NumberOfHeadings(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE) as unknown[];
+	return sizeof(rows.filter((temp) => expressGetAttr(temp, "IsHeading", INDETERMINATE)));
+}
+
+export function calc_IfcTable_NumberOfDataRows(self: EntityInstance): unknown {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE) as unknown[];
+	return sizeof(rows.filter((temp) => !expressGetAttr(temp, "IsHeading", INDETERMINATE)));
+}
+
+export function calc_IfcTessellatedFaceSet_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcTriangulatedFaceSet_NumberOfTriangles(self: EntityInstance): unknown {
+	const coordindex = expressGetAttr(self, "CoordIndex", INDETERMINATE);
+	return sizeof(coordindex);
+}
+
+registerSchemaCalcFunctions("IFC4", {
+	"IfcRationalBSplineCurveWithKnots.Weights": calc_IfcRationalBSplineCurveWithKnots_Weights,
+	"IfcRationalBSplineSurfaceWithKnots.Weights": calc_IfcRationalBSplineSurfaceWithKnots_Weights,
+	"IfcSIUnit.Dimensions": calc_IfcSIUnit_Dimensions,
+	"IfcSectionedSpine.Dim": calc_IfcSectionedSpine_Dim,
+	"IfcShellBasedSurfaceModel.Dim": calc_IfcShellBasedSurfaceModel_Dim,
+	"IfcSurface.Dim": calc_IfcSurface_Dim,
+	"IfcSurfaceCurve.BasisSurface": calc_IfcSurfaceCurve_BasisSurface,
+	"IfcSurfaceOfLinearExtrusion.ExtrusionAxis": calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis,
+	"IfcSurfaceOfRevolution.AxisLine": calc_IfcSurfaceOfRevolution_AxisLine,
+	"IfcTable.NumberOfCellsInRow": calc_IfcTable_NumberOfCellsInRow,
+	"IfcTable.NumberOfHeadings": calc_IfcTable_NumberOfHeadings,
+	"IfcTable.NumberOfDataRows": calc_IfcTable_NumberOfDataRows,
+	"IfcTessellatedFaceSet.Dim": calc_IfcTessellatedFaceSet_Dim,
+	"IfcTriangulatedFaceSet.NumberOfTriangles": calc_IfcTriangulatedFaceSet_NumberOfTriangles,
+});
