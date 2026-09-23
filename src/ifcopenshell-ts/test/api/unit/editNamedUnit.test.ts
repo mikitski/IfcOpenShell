@@ -8,8 +8,10 @@
 // BasedUnitWithOffset` doesn't exist in IFC2X3). Plus one supplementary test (no
 // Python counterpart) exercising the copy-on-write "shared Dimensions" branch
 // (`file.get_total_inverses(dimensions) > 1`) `editNamedUnit.ts`'s own header comment
-// documents but no real Python test happens to reach, and new Transaction/undo-redo
-// regression coverage.
+// documents but no real Python test happens to reach, new Transaction/undo-redo
+// regression coverage, and (added by Phase EX-2's IFC2X3 chunk 5) a dedicated,
+// schema-scoped regression test for the `IfcSIUnit.Dimensions` edit combination --
+// see `editNamedUnit.ts`'s own updated header comment for the full writeup.
 
 import { describe, expect, test } from "vitest";
 import { editNamedUnit } from "../../../src/api/unit/editNamedUnit";
@@ -87,6 +89,39 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit (%s)", (schema) => {
 		expect(exponents(unit2)).toEqual([9, 9, 9, 9, 9, 9, 9]);
 		expect((unit1.get("Dimensions") as EntityInstance).equals(unit2.get("Dimensions") as EntityInstance)).toBe(false);
 	});
+});
+
+describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions edit (%s)", (schema) => {
+	// See `editNamedUnit.ts`'s own updated header comment (Phase EX-2's IFC2X3 chunk
+	// 5) for the full writeup. No Python counterpart -- real Python's own
+	// `test_edit_named_unit.py::test_edit_si_unit` never exercises this combination
+	// either.
+	test.skipIf(schema !== "IFC2X3")(
+		"IFC2X3: silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)",
+		() => {
+			const file = createTestFile(schema);
+			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
+			// METRE -> IfcDimensionsForSiUnit -> (1, 0, 0, 0, 0, 0, 0).
+			expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+
+			editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } });
+
+			// Unchanged -- the edit landed on a disposable scratch instance, not on
+			// anything reachable through `unit`'s own real attribute-read path.
+			expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+		},
+	);
+
+	test.skipIf(schema === "IFC2X3")(
+		"IFC4/IFC4X3: still throws (no ported calc_IfcSIUnit_Dimensions for this schema yet)",
+		() => {
+			const file = createTestFile(schema);
+			const unit = file.createEntity("IfcSIUnit");
+			expect(() => editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } })).toThrow(
+				/has no attribute 'Dimensions'/,
+			);
+		},
+	);
 });
 
 describe("api.unit.editNamedUnit (IFC4-only)", () => {
