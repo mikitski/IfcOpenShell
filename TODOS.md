@@ -3692,6 +3692,22 @@ values, which lock in the buggy arithmetic as the documented, expected behavior.
 `util.representation.guessType`'s entry and every other entry in this family above (not yet
 scheduled/started).
 
+**UPDATE (Phase EX-2, per-schema `calc_*` DERIVE porting, `70-express-rules-plan.md`): finding 1
+(`addSurveyPoint`'s `WorldCoordinateSystem`) is now RESOLVED for real, on the only schema this
+function is ever exercised on.** `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem`
+is ported for IFC4X3 by that schema's own SECOND `calc_*`-porting chunk (`src/express/rules
+/ifc4x3.ts`) -- `IfcAnnotation.PredefinedType`'s own IFC4X3-only schema constraint (noted below)
+means IFC4X3 was always the only schema this function could ever actually run on, and IFC2X3/IFC4
+had already ported the identical formula in their own respective third chunks earlier still --
+`addSurveyPoint` now succeeds end to end, restoring real Python's own test assertions verbatim
+(`addSurveyPoint.test.ts`'s own updated header comment has the full citation). Finding 2
+(`editSurveyPoint`'s `IfcCartesianPoint.Dim`) remains a live gap for IFC4X3 specifically ONLY --
+`calc_IfcCartesianPoint_Dim` was ported for IFC2X3/IFC4 in each schema's own first chunk (already
+resolved there), but ADD2 consolidated it into a differently-named `calc_IfcPoint_Dim` at an
+abstract supertype level, genuinely not yet ported by any chunk (`rules/ifc4x3.ts`'s own header
+comment has the full writeup) -- `editSurveyPoint.test.ts`'s own IFC4X3 branch is unaffected by
+this update and still asserts the disclosed throw.
+
 ---
 
 ### `api.alignment.updateEndPoint` needs the unported `api.alignment.addZeroLengthSegment` -- itself transitively blocked on the already-tracked `_get_segment_endpoint`/geometry-kernel gap -- **RESOLVED 2026-09-18, see UPDATE below: `addZeroLengthSegment` landed for real (conditionally), `updateEndPoint.ts` now wired in**

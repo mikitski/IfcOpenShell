@@ -306,11 +306,18 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 		// creation" entry, its own "on IFC2X3 ... arcs not supported" branch) -- a
 		// disclosed, pre-existing gap unrelated to DERIVE-attribute porting.
 		//
-		// IFC4X3: `IfcIndexedPolyCurve.Dim` (reached first, inside `createSweptDiskSolid`)
-		// dispatches to `calc_IfcCurve_Dim`, which is not one of the 15 functions Phase
-		// EX-2's IFC4X3 first chunk ported (`rules/ifc4x3.ts`'s own header comment), so it
-		// still throws "has no attribute 'Dim'" -- unaffected by that chunk, re-verified
-		// directly against the real built addon, not assumed unaffected.
+		// IFC4X3 (see `addRailingRepresentation.ts`'s own header comment, UPDATE 3, for
+		// the full writeup): Phase EX-2's IFC4X3 SECOND chunk ports `calc_IfcCurve_Dim`
+		// for IFC4X3, so `IfcIndexedPolyCurve.Dim` (the point UPDATE 2's own citation
+		// named) now resolves -- the call proceeds further, but still doesn't succeed:
+		// it now throws via the SAME still-unported `IfcPlacement.Dim` dependency
+		// (`builder.circle(...)`'s own `IfcCircle.Dim` -> `Position.Dim`) UPDATE 1/2
+		// already identified blocking IFC4 until ITS OWN third chunk -- surfacing as
+		// `ShapeBuilder.profile()`'s own pre-existing error-message template literal
+		// choking on `runtimeShim.INDETERMINATE` (`TypeError: Cannot convert a Symbol
+		// value to a string`), NOT the original "has no attribute 'Dim'". Re-verified
+		// directly against the real built addon, not assumed from the IFC4 precedent
+		// alone.
 		test("a default-args call throws the disclosed, current ShapeBuilder blocker (message shape is schema-dependent)", () => {
 			const { file, body } = setupContext(schema);
 			expect(() =>
@@ -322,7 +329,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 					],
 				}),
 			).toThrow(
-				/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\./,
+				/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\.|Cannot convert a Symbol value to a string/,
 			);
 		});
 	}

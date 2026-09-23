@@ -241,10 +241,32 @@
 // accordingly for IFC4 (asserts success, mirroring real Python's own test, instead of
 // a disclosed throw) -- IFC2X3 (still throws "Arcs are not supported for IFC2X3.",
 // `ShapeBuilder`'s own separate, pre-existing, unrelated-to-DERIVE-porting arc gap) and
-// IFC4X3 (still throws "has no attribute 'Dim'": `IfcCurve.Dim`/`IfcPlacement.Dim` are
-// not among the 15 functions Phase EX-2's IFC4X3 first chunk ported, `rules/ifc4x3.ts`'s
-// own header comment -- so neither resolves there yet) are UNCHANGED, confirmed by
-// direct re-run, not assumed unaffected.
+// IFC4X3 (see UPDATE 3 below for its own, separately re-verified, current state) are
+// UNCHANGED by THIS chunk, confirmed by direct re-run, not assumed unaffected.
+//
+// --- UPDATE 3 (Phase EX-2, IFC4X3's own SECOND chunk, `src/express/rules/ifc4x3.ts`):
+//     IFC4X3's OWN symptom changes too, the SAME way IFC4's did in UPDATE 1 above --
+//     still genuinely blocked overall, just at a DIFFERENT, later point ---
+//
+// That chunk ports `calc_IfcCurve_Dim` for IFC4X3 (a completely fresh, ADD2-scoped
+// `ifcCurveDim`, not shared with IFC4's own) -- `IfcIndexedPolyCurve.Dim` (the FIRST
+// blocker UPDATE 2's own citation named for IFC4X3) now resolves there too, so
+// `addRailingRepresentation` proceeds further on IFC4X3 -- but does NOT fully
+// succeed: it still throws, via the SAME `IfcPlacement.Dim` dependency UPDATE 1/2
+// identified for IFC4 (`builder.circle(...)`'s own `IfcCircle.Dim` -> `Position.Dim`,
+// `IfcAxis2Placement2D`'s own `Dim` declared DERIVE at the `IfcPlacement` supertype
+// level) -- `calc_IfcPlacement_Dim` is NOT one of IFC4X3's own second chunk's 15
+// functions either (a future chunk's scope, matching IFC4's own need for a THIRD
+// chunk to close this exact gap). Re-verified directly against the real, built addon
+// (not assumed from the IFC4 precedent alone -- IFC4X3's own `ifcCurveDim`/
+// `IfcGetBasisSurface` are freshly-ported, ADD2-scoped functions, so this needed its
+// own direct confirmation): the observable symptom is the SAME shape UPDATE 1 found
+// for IFC4 -- `TypeError: Cannot convert a Symbol value to a string`
+// (`ShapeBuilder.profile()`'s own pre-existing error-message template literal
+// choking on `runtimeShim.INDETERMINATE`, the swallowed result of `Position.Dim`'s
+// still-missing dispatch), NOT the original "has no attribute 'Dim'".
+// `addRailingRepresentation.test.ts`'s own smoke test and regex are updated
+// accordingly for IFC4X3.
 //
 // *** `ShapeBuilder` methods used, and their exact signatures verified directly against
 // `util/shapeBuilder.ts` (not assumed from the Python method names alone) ***

@@ -198,6 +198,7 @@ import {
 	expressGetItem,
 	expressRange,
 	hiIndex,
+	loIndex,
 	nvl,
 	sizeof,
 	typeOf,
@@ -644,4 +645,649 @@ registerSchemaCalcFunctions("IFC4X3_ADD2", {
 	"IfcDirection.Dim": calc_IfcDirection_Dim,
 	"IfcVector.Dim": calc_IfcVector_Dim,
 	"IfcSolidModel.Dim": calc_IfcSolidModel_Dim,
+});
+
+// =============================================================================
+// Phase EX-2, IFC4X3's second chunk (planning/ifcopenshell-ts/70-express-rules-plan.md
+// §4): 15 more of IFC4X3_ADD2's 60 `calc_*` (DERIVE) functions from
+// `IFC4X3_ADD2.py`, in real file order (line numbers re-verified directly against
+// that file before porting, not just trusted from the task brief that dispatched
+// this chunk -- all 15 matched exactly: 6572/6603/6616/6657/6681/6685/6910/6914/
+// 6929/7303/7336/7441/7822/8248/8673):
+//
+//   calc_IfcCartesianTransformationOperator_Dim, calc_IfcCartesianTransformationOperator2D_U,
+//   calc_IfcCartesianTransformationOperator2DnonUniform_Scl2, calc_IfcCartesianTransformationOperator3D_U,
+//   calc_IfcCartesianTransformationOperator3DnonUniform_Scl2, calc_IfcCartesianTransformationOperator3DnonUniform_Scl3,
+//   calc_IfcCompositeCurve_NSegments, calc_IfcCompositeCurve_ClosedCurve,
+//   calc_IfcCompositeCurveOnSurface_BasisSurface, calc_IfcCsgPrimitive3D_Dim,
+//   calc_IfcCurve_Dim, calc_IfcDerivedUnit_Dimensions, calc_IfcEdgeLoop_Ne,
+//   calc_IfcFaceBasedSurfaceModel_Dim, calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem
+//
+// **`calc_IfcDirection_Dim` (`IFC4X3_ADD2.py` line 7455), sitting right between
+// this chunk's own #12 and #13 in real file order, is deliberately EXCLUDED** --
+// already ported in this file's own FIRST chunk (one of its "3 minimal, necessary,
+// extra functions"), not re-ported here. Confirmed still registered under the same
+// key from this chunk's own tests (an end-to-end regression, see the test file).
+//
+// **All 15 of this chunk's own assigned `calc_*` function BODIES are BYTE-IDENTICAL
+// to `IFC4.py`'s own same-named versions** (confirmed by direct `diff`, function by
+// function, not a name-overlap assumption -- verified with a real `diff` against
+// both `IFC4X3_ADD2.py` and `IFC4.py` before writing this file, not merely read and
+// eyeballed). All 15 also exist, byte-identical, in `IFC2X3.py` too, EXCEPT
+// `calc_IfcCompositeCurveOnSurface_BasisSurface` (`IfcCompositeCurveOnSurface`/
+// `IfcPcurve`/`IfcSurfaceCurve` all postdate IFC2X3 entirely -- confirmed absent,
+// matching `ifc4.ts`'s own chunk-2 header comment's identical finding for the same
+// function) -- cross-referenced against `rules/ifc2x3.ts`'s own chunk-2/3
+// disclosures throughout, not re-derived from scratch.
+//
+// **The dependency closure re-derived from scratch for THIS chunk's own 15
+// functions** (per this chunk's own task brief's explicit instruction -- not
+// assumed to carry over from IFC2X3's/IFC4's own equivalent chunks' closures):
+//
+// - `IfcBaseAxis` (`IFC4X3_ADD2.py` line 13176) and `IfcSecondProjAxis` (line
+//   13821) are BOTH now genuinely needed -- `calc_IfcCartesianTransformationOperator2D_U`/
+//   `_3D_U` (this chunk's own #2/#4) call directly into `IfcBaseAxis`, and
+//   `IfcBaseAxis`'s own `dim === 3` branch calls `IfcSecondProjAxis`. This chunk's
+//   own FIRST chunk explicitly did NOT port either (neither was reachable from that
+//   chunk's own 15 functions) -- both are ported fresh here. Both confirmed
+//   BYTE-IDENTICAL to `IFC4.py`'s own versions (direct `diff`), which are in turn
+//   byte-identical to IFC2X3's own (`rules/ifc4.ts`'s own chunk-1 header comment) --
+//   so this chunk's own `ifcBaseAxis`/`ifcSecondProjAxis` mirror `rules/ifc4.ts`'s
+//   own chunk-1 implementations directly, including preserving the SAME 2 disclosed
+//   Python bugs (see below), NOT re-derived independently.
+// - `IfcGetBasisSurface` (`IFC4X3_ADD2.py` line 13628, delegated to by
+//   `calc_IfcCompositeCurveOnSurface_BasisSurface`) and `IfcDeriveDimensionalExponents`
+//   (line 13516, delegated to by `calc_IfcDerivedUnit_Dimensions`) are also newly
+//   needed. `IfcDeriveDimensionalExponents` is BYTE-IDENTICAL to `IFC4.py`'s own
+//   version (confirmed by direct `diff`) -- ported fresh here (not imported from
+//   `rules/ifc4.ts`) since it needs THIS file's own `getScratchFile()`, scoped to
+//   the `IFC4X3_ADD2` schema, same reason this file's own first chunk's
+//   `ifcDirection`/`ifcVector` aren't shared with `rules/ifc4.ts` either.
+//   `IfcGetBasisSurface` is GENUINELY DIFFERENT from `IFC4.py`'s own version --
+//   see below, its own dedicated writeup.
+// - A new `ifcCurveDim` (delegated to by `calc_IfcCurve_Dim`, this chunk's own #11)
+//   is GENUINELY DIFFERENT from both `IFC4.py`'s and `IFC2X3.py`'s own versions --
+//   see below, its own dedicated writeup.
+// - `IfcNormalise`/`IfcCrossProduct`/`IfcDotProduct`/`IfcOrthogonalComplement`/
+//   `IfcFirstProjAxis`/`IfcScalarTimesVector`/`IfcVectorDifference`/`IfcBuildAxes`/
+//   `IfcBuild2Axes`/`IfcListToArray` are ALL already ported in this file's own first
+//   chunk and reused unchanged here (no new call sites need a different version) --
+//   re-confirmed by direct `diff` against `IFC4X3_ADD2.py` before reuse, not merely
+//   assumed still current (`IfcNormalise`/`IfcScalarTimesVector`/`IfcVectorDifference`
+//   still carry the same `'ifc4x3_add2.ifcvector'`-namespace-string difference vs.
+//   `IFC4.py` this file's own first-chunk header comment already disclosed; all
+//   others remain byte-identical to `IFC4.py`).
+//
+// **`IfcCurveDim` (`IFC4X3_ADD2.py` line 13471) -- GENUINELY DIFFERENT from BOTH
+// `IFC4.py`'s own version (10 branches: Line/Conic/Polyline/TrimmedCurve/
+// CompositeCurve/BSplineCurve/OffsetCurve2D/OffsetCurve3D/Pcurve/IndexedPolyCurve)
+// AND `IFC2X3.py`'s own (8 branches, no Pcurve/IndexedPolyCurve at all).** ADD2
+// adds 7 MORE branches on top of IFC4's own 10, for curve types that postdate IFC4
+// entirely: `IfcGradientCurve`/`IfcSegmentedReferenceCurve` (both constant `3`),
+// `IfcOffsetCurveByDistances` (constant `3`), `IfcCurveSegment2D` (constant `2` --
+// see its own dedicated finding below), `IfcPolynomialCurve` (a 2-vs-3 branch on
+// `CoefficientsZ`/`Position.Dim`), and `IfcSpiral` (`Position.Dim`, an ABSTRACT
+// entity -- confirmed via a real built addon, `IfcSpiral.is_abstract() === True`,
+// so this branch matches any of its real concrete subtypes, e.g. `IfcClothoid`).
+// Ported fresh below as a completely new, IFC4X3_ADD2-scoped `ifcCurveDim`, all 17
+// branches, not reusing or extending `rules/ifc4.ts`'s own 10-branch copy. Same
+// disclosed `!exists(curve)` upstream guard fix `rules/ifc2x3.ts`'s/`rules/ifc4.ts`'s
+// own versions already establish (this port's `INDETERMINATE` sentinel is a plain,
+// always-truthy JS `Symbol`, unlike real Python's `indeterminate_type.__bool__() ==
+// False`) -- not a new fix invented here.
+//
+// **Genuinely new disclosed FINDING (not a crash-causing bug): `IfcCurveDim`'s own
+// `'ifc4x3_add2.ifccurvesegment2d' in typeof(curve)` branch is permanently, unconditionally
+// DEAD CODE.** Confirmed directly against a real built addon: `schema.declaration_by_name
+// ("IfcCurveSegment2D")` raises `RuntimeError: Entity with name 'IfcCurveSegment2D' not
+// found in schema 'IFC4X3_ADD2'` -- no such entity exists anywhere in the ADD2 schema, so
+// `typeOf(curve)` (which only ever contains a real instance's own actual declared
+// ancestor-type names) can never contain this string, and this branch's `return 2` can
+// never execute for any real instance. Traced the provenance across every IFC4X3 schema
+// revision this repo ships (`grep -n "ifccurvesegment2d" IFC4X3*.py`): `IfcCurveSegment2D`
+// WAS a real, concrete entity as of `IFC4X3_RC1`/`RC2` (both have their own real
+// `def IfcCurveSegment2D(*args, **kwargs)` convenience constructor) -- by `RC3` onward
+// (RC3/RC4/TC1/ADD1/ADD2/the base `IFC4X3.py` release) the entity itself was renamed or
+// consolidated away entirely (into today's `IfcCurveSegment`, one of `IfcSegment`'s
+// exactly 2 concrete subtypes -- confirmed via `schema.declaration_by_name
+// ("IfcSegment").as_entity().subtypes()` = `['IfcCompositeCurveSegment', 'IfcCurveSegment']`),
+// but this ONE dispatch branch in the generated `IfcCurveDim` function was never
+// removed, surviving unchanged all the way through to ADD2 (and the base `IFC4X3.py`
+// too -- confirmed identical there as well). Ported below for full structural fidelity
+// to the real generated source (same "port even genuinely unreachable branches
+// faithfully" precedent this file's own first-chunk header comment already established
+// for `IfcFirstProjAxis`'s dead `else`), pinned by a dedicated regression test proving
+// it can never fire (not silently omitted).
+//
+// **`IfcGetBasisSurface` (`IFC4X3_ADD2.py` line 13628) -- GENUINELY DIFFERENT
+// control-flow shape from `IFC4.py`'s own version, but the SAME 2 underlying real
+// Python bugs, confirmed to have the SAME net observable effect for any real,
+// schema-valid instance.** The difference: IFC4's own `Segments` attribute is typed
+// `LIST OF IfcCompositeCurveSegment` (one concrete class), so `IfcGetBasisSurface`
+// unconditionally recurses into `Segments[0].ParentCurve`/multiplies for `n > 1`
+// with no type check at all. ADD2's own `IfcCompositeCurve.Segments` is typed `LIST
+// OF IfcSegment` instead -- an ABSTRACT supertype ADD2 introduced with exactly 2
+// concrete subtypes, confirmed via a real built addon:
+// `schema.declaration_by_name("IfcSegment").as_entity().subtypes()` =
+// `['IfcCompositeCurveSegment', 'IfcCurveSegment']` (both confirmed to still carry
+// their own `ParentCurve` attribute) -- so ADD2's own generated formula gates each
+// recursion/multiplication behind an explicit `'ifc4x3_add2.ifccurvesegment' in
+// typeof(...)` / `'ifc4x3_add2.ifccompositecurvesegment' in typeof(...)` check
+// (2 separate, structurally-duplicated `if` statements, not `elif`/`or` -- ported
+// below the same way, 1:1, not collapsed into a single combined condition, matching
+// this project's "port the real control flow exactly, even when a simplification
+// would be behaviorally equivalent" discipline). Since these 2 checks are the
+// schema's ONLY 2 concrete subtypes of the abstract `IfcSegment`, they are jointly
+// exhaustive for any real, schema-valid `IfcCompositeCurveOnSurface` instance --
+// meaning, empirically, this gating is always satisfied in practice, and the
+// SAME 2 underlying bugs `rules/ifc4.ts`'s own chunk-2 header comment already
+// disclosed fire with the SAME unconditional-in-practice frequency:
+//
+// 1. The `'ifc4x3_add2.ifcsurfacecurve' in typeof(c)` branch's own
+//    `surfs = surfs + IfcAssociatedSurface(...)` raises `TypeError` (`list` + a
+//    single `IfcSurface` value, not a list) the first time its own loop runs --
+//    always, since `AssociatedGeometry` is still schema-mandatory `LIST [1:2]` on
+//    ADD2 too (confirmed directly against the real built addon's own
+//    `IfcSurfaceCurve.AssociatedGeometry` attribute type). Ported as an equivalent
+//    thrown `Error` as soon as this branch is entered with a non-empty
+//    `AssociatedGeometry` -- shares the SAME underlying bug as `rules/ifc4.ts`'s own
+//    chunk-2 disclosed bug 2 (not a new bug), just reached via the same code shape.
+// 2. The `'ifc4x3_add2.ifccompositecurveonsurface' in typeof(c)` branch's own `n > 1`
+//    loop does `surfs = surfs * IfcGetBasisSurface(...)` -- `list * list`, also
+//    unconditionally rejected by Python -- reached whenever a real
+//    `IfcCompositeCurveOnSurface` has more than one segment (gated behind the same
+//    2-concrete-subtype check described above, which -- per the schema fact just
+//    confirmed -- always holds). Ported as an equivalent thrown `Error` at the same
+//    point. Shares the SAME underlying bug as `rules/ifc4.ts`'s own chunk-2
+//    disclosed bug 3 (not a new bug).
+//
+// `IfcAssociatedSurface` (`IFC4X3_ADD2.py` line 13172) is confirmed byte-identical
+// to `IFC4.py`'s own -- not separately ported as its own TS function, same reason
+// `rules/ifc4.ts`'s own chunk-2 header comment already gives: it is unreachable in
+// every path bug 1 above leaves standing.
+//
+// **Real, disclosed Python bugs INHERITED (not newly introduced) by this chunk's
+// own newly-ported `ifcBaseAxis`/`ifcSecondProjAxis`** -- shared with IFC2X3's own
+// disclosed bug 2/2b AND IFC4's own disclosed bug 2/2b (both already-merged chunks'
+// own header comments), confirmed present, verbatim, in `IFC4X3_ADD2.py` too (byte-
+// identical function body, independently re-checked at ADD2's own real line 13176,
+// not inferred from the byte-identical `diff` alone):
+//
+// 1. `IfcBaseAxis`'s tuple-mutation crash when `Axis1` AND `Axis2` are both set,
+//    with a negative dot product against the orthogonal complement of the
+//    normalised `Axis1`. Ported as an equivalent thrown `Error` at the same point.
+// 1b. `IfcBaseAxis`'s SECOND, unconditional tuple-mutation crash when `Axis1` is
+//    absent and `Axis2` is set (no guarding condition at all, unlike case 1 above).
+//    Ported as an equivalent thrown `Error` at the same point.
+//
+// **No new real Python bugs found in this chunk's own 15 assigned functions
+// themselves** (the CartesianTransformationOperator-family functions/`NSegments`/
+// `ClosedCurve`/`CsgPrimitive3D.Dim`/`EdgeLoop.Ne`/`FaceBasedSurfaceModel.Dim`/
+// `GeometricRepresentationSubContext.WorldCoordinateSystem` are all plain
+// delegations/constants/comparisons with no branching of their own) -- every
+// disclosed bug above lives in a shared dependency, not in one of the 15 themselves.
+//
+// **Genuinely new disclosed FINDING, empirically verified against the real built
+// addon (not just reasoned from the dependency chain): `calc_IfcCartesianTransformationOperator_Dim`
+// and MOST of `calc_IfcCurve_Dim`'s own branches currently resolve to
+// `runtimeShim.INDETERMINATE` on IFC4X3, not a real number** -- a genuinely
+// different, WORSE-resolved outcome than the same-named functions' own IFC4/IFC2X3
+// tests, which get real numbers, because this port's IFC4X3 chunks have not yet
+// ported the specific DERIVE dependency each one bottoms out on:
+// `calc_IfcCartesianTransformationOperator_Dim` reads `LocalOrigin.Dim`, and
+// `LocalOrigin` is ALWAYS a plain `IfcCartesianPoint` (confirmed via the real
+// schema) -- but IFC4X3_ADD2 consolidated `IfcCartesianPoint.Dim` into
+// `calc_IfcPoint_Dim` (an abstract-supertype formula, `IFC4X3_ADD2.py` line 9831),
+// which is NOT one of either of this file's own 2 chunks' 30 functions and remains
+// genuinely unported -- confirmed directly: `expressGetAttr`'s own `try/catch`
+// (`runtimeShim.ts`) silently swallows the resulting "has no attribute 'Dim'" throw
+// and returns the caller's own `INDETERMINATE` default, so
+// `calc_IfcCartesianTransformationOperator_Dim` never throws, it just silently
+// resolves to `INDETERMINATE` for every real instance. The SAME silent-fallback
+// shape hits most of `ifcCurveDim`'s own branches too, EMPIRICALLY CONFIRMED against
+// the real built addon for every branch (not assumed): `IfcLine` (`Pnt.Dim`),
+// `IfcConic`/`IfcSpiral` (`Position.Dim`, itself blocked on the ALSO-still-unported
+// `calc_IfcPlacement_Dim`), `IfcPolyline` (`Points[0].Dim`), `IfcCompositeCurve`
+// (`Segments[0].Dim`, blocked on the ALSO-still-unported `calc_IfcCompositeCurveSegment_Dim`
+// -- ported for IFC4 in ITS OWN chunk 2, but not one of either of THIS file's own 2
+// chunks), and `IfcBSplineCurve` (`ControlPointsList[0].Dim`) ALL resolve to
+// `INDETERMINATE`, empirically confirmed one by one. The ONLY `ifcCurveDim` branches
+// that resolve to a REAL number today are the ones that either read a hardcoded
+// constant with no further dependency (`IfcOffsetCurve2D`=2, `IfcOffsetCurve3D`=3,
+// `IfcOffsetCurveByDistances`=3, `IfcGradientCurve`=3, `IfcSegmentedReferenceCurve`=3,
+// `IfcPcurve`=3) or delegate into an attribute this file's own FIRST chunk already
+// ported (`IfcIndexedPolyCurve` -> `Points.Dim` -> `calc_IfcCartesianPointList_Dim`,
+// confirmed empirically to resolve correctly, e.g. `2` for an `IfcCartesianPointList2D`).
+// A DIRECT, testable consequence for `IfcPolynomialCurve`: since `Position.Dim`
+// always resolves to `INDETERMINATE` (not `2`), the branch's own `=== 2` comparison
+// is always `false` regardless of `CoefficientsZ`, so `IfcPolynomialCurve.Dim`
+// ALWAYS returns `3` on IFC4X3 today, empirically confirmed for both a `CoefficientsZ`-set
+// and `CoefficientsZ`-unset fixture -- never `2`, even though real Python's own
+// formula is genuinely conditional. None of this is a bug in this chunk's own code
+// (`expressGetAttr`'s catch-and-default behavior is itself already an established,
+// correct, previously-verified design, not something this chunk introduces or
+// changes) -- it is a real, disclosed, CURRENT-STATE consequence of exactly which
+// functions have and haven't been ported for IFC4X3 so far, expected to keep
+// resolving further (to real numbers) as later IFC4X3 chunks port `calc_IfcPoint_Dim`/
+// `calc_IfcPlacement_Dim`/`calc_IfcCompositeCurveSegment_Dim`. Pinned by dedicated
+// regression tests asserting the CURRENT, real, empirically-confirmed `INDETERMINATE`
+// outcomes (not the eventually-resolved values), matching this project's own
+// "assert what real Python/this port ACTUALLY does today, not what it will do once
+// more chunks land" precedent (e.g. `rules/ifc4.ts`'s own chunk-2 `calc_IfcCurve_Dim`
+// test, before ITS OWN chunk 3 later resolved `IfcPlacement.Dim` for IFC4).
+//
+// **The same pre-existing, inherited (not newly introduced) `INDETERMINATE`-
+// poisoning-through-plain-JS-operators limitation this file's own first-chunk
+// header comment already flags** applies here identically -- not repeated in full.
+//
+// **Cascading-test check performed** (matching this chunk's own task brief's
+// explicit instruction, and this file's own first-chunk precedent) -- run against the
+// FULL suite, not just the previously-flagged recurring-risk list, since this
+// re-check surfaced real cascades beyond that original list too:
+//
+// - **`shapeBuilder.ts`'s own `profile()`/`createSweptDiskSolid()`**: their IFC4X3
+//   blocked-tests build a straight, non-closed, no-arc `IfcIndexedPolyCurve`-based
+//   polyline -- `calc_IfcCurve_Dim`'s new `IfcIndexedPolyCurve` branch (delegating
+//   into `calc_IfcCartesianPointList_Dim`, this file's own first chunk) now resolves
+//   for IFC4X3 too, matching IFC4's own chunk-2 precedent exactly -- both now
+//   complete successfully end-to-end. `shapeBuilder.test.ts`'s own IFC4X3-scoped
+//   "DISCLOSED BLOCKED" tests are updated to assert the new, real, resolved success.
+// - **`api.cogo.addSurveyPoint`**: reads `IfcGeometricRepresentationSubContext
+//   .WorldCoordinateSystem` -- NOT one of this chunk's own 15, but already-ported for
+//   IFC2X3/IFC4 in each schema's own earlier third chunk, and `IfcAnnotation
+//   .PredefinedType`'s own IFC4X3-only schema constraint means IFC4X3 was always the
+//   only schema this function could ever run on -- this chunk's OWN #15,
+//   `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem`, closes this
+//   for real: `addSurveyPoint` now succeeds end-to-end, restoring real Python's own
+//   test assertions. `addSurveyPoint.ts`/`.test.ts` and `TODOS.md`'s corresponding
+//   entry are updated accordingly.
+// - **`api.alignment._createOffsetCurveRepresentation`/`createAsOffsetCurve`**: read
+//   `basisCurve.get("Dim")` where `basisCurve` is a realistic `IfcLine`/`IfcPolyline`
+//   -- `calc_IfcCurve_Dim` now resolves this call (no more throw), but -- per this
+//   header comment's own `INDETERMINATE`-cascade finding above -- it resolves to
+//   `INDETERMINATE`, not a real number, so both functions now COMPLETE
+//   SUCCESSFULLY but always take their own 2D branch, regardless of the real curve's
+//   dimensionality -- a new, disclosed, current-state latent correctness gap
+//   (silently wrong branch, not a crash), NOT this chunk's own concern to fix (fixing
+//   it needs `calc_IfcPoint_Dim`, a future chunk's scope). Both files' own header
+//   comments and test files are updated accordingly.
+// - **`api.geometry.addRailingRepresentation`**: genuinely progresses further too
+//   (`IfcIndexedPolyCurve.Dim`, reached first inside `createSweptDiskSolid`, now
+//   resolves) but does NOT fully succeed -- it still throws, via the SAME
+//   `IfcPlacement.Dim` dependency (`builder.circle(...)`'s own `IfcCircle.Dim` ->
+//   `Position.Dim`) that also blocks IFC4 until IFC4's own THIRD chunk -- **NOT**, as
+//   an earlier draft of this very paragraph incorrectly claimed before being
+//   corrected by direct re-verification, still blocked by the unrelated
+//   `IfcLineIndex`/`IfcArcIndex` gap (that gap was already fixed by PR #179, well
+//   before this chunk). The observable symptom also changes: `TypeError: Cannot
+//   convert a Symbol value to a string` (`ShapeBuilder.profile()`'s own pre-existing
+//   error-message template literal choking on `runtimeShim.INDETERMINATE`), not the
+//   original "has no attribute 'Dim'". `addRailingRepresentation.ts`'s own header
+//   comment (UPDATE 3) and its test file's regex are updated accordingly.
+// - **`util/representation.ts`'s `guessType`**: `Curve2D`/`Curve3D` (and the
+//   `Dim`-independent `Curve` fallback) are now reachable for the SUBSET of
+//   `IfcCurve` subtypes whose `.Dim` actually resolves to a real number today
+//   (`IfcIndexedPolyCurve` plus every constant branch) -- NOT for a plain
+//   `IfcLine`/`IfcPolyline`-based item, which still resolves to `INDETERMINATE` and
+//   therefore still fails both comparisons, falling through further down the `elif`
+//   chain exactly as Python's own control flow would. No existing test in that file
+//   exercises IFC4X3 at all, so no test-fidelity fix was required there -- only a
+//   disclosure addendum (UPDATE 3) to avoid a future reader overclaiming full
+//   resolution.
+// - **`editSurveyPoint`/`editNamedUnit`**: confirmed UNCHANGED for IFC4X3 --
+//   `editSurveyPoint` is blocked by `IfcCartesianPoint.Dim`/`calc_IfcPoint_Dim` (not
+//   this chunk's scope); `editNamedUnit`/`test/express/rules/ifc4x3.test.ts`'s own
+//   DERIVE-dispatch-wiring test both key off `IfcSIUnit.Dimensions` (also not one of
+//   this chunk's own 15).
+//
+// All of the above re-verified directly against the real built addon (not assumed
+// from the dependency chain alone), including running the FULL `vitest run` suite
+// end-to-end after every fix, not just the individually-touched files.
+// =============================================================================
+
+/** Python: `IfcSecondProjAxis` (`IFC4X3_ADD2.py` line 13821) -- byte-identical to `IFC4.py`'s own. */
+function ifcSecondProjAxis(zaxis: unknown, xaxis: unknown, arg: unknown): unknown {
+	const v = exists(arg) ? arg : ifcDirection([0.0, 1.0, 0.0]);
+	let temp = ifcScalarTimesVector(ifcDotProduct(v, zaxis), zaxis);
+	let yaxis: unknown = ifcVectorDifference(v, temp);
+	temp = ifcScalarTimesVector(ifcDotProduct(v, xaxis), xaxis);
+	yaxis = ifcVectorDifference(yaxis, temp);
+	yaxis = ifcNormalise(yaxis);
+	return expressGetAttr(yaxis, "Orientation", INDETERMINATE);
+}
+
+/**
+ * Python: `IfcBaseAxis` (`IFC4X3_ADD2.py` line 13176) -- byte-identical to `IFC4.py`'s
+ * own; see this section's own header comment, disclosed bugs 1/1b (inherited from
+ * IFC2X3's/IFC4's own disclosed bug 2/2b, not newly introduced here).
+ */
+function ifcBaseAxis(dim: number, axis1: unknown, axis2: unknown, axis3: unknown): unknown[] {
+	if (dim === 3) {
+		const d1 = nvl(ifcNormalise(axis3), ifcDirection([0.0, 0.0, 1.0]));
+		const d2 = ifcFirstProjAxis(d1, axis1);
+		return [d2, ifcSecondProjAxis(d1, d2, axis2), d1];
+	}
+	if (exists(axis1)) {
+		const d1 = ifcNormalise(axis1);
+		const u: unknown[] = [d1, ifcOrthogonalComplement(d1)];
+		if (exists(axis2)) {
+			const factor = ifcDotProduct(axis2, expressGetItem(u, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE));
+			if ((factor as number) < 0.0) {
+				// Real Python's own generated code here unconditionally raises
+				// `TypeError: 'tuple' object does not support item assignment` -- ported
+				// as an equivalent thrown error at the same point, rather than silently
+				// applying the evidently-intended sign flip or no-op'ing past it (either
+				// "fix" would produce a numeric answer real Python itself can never
+				// actually produce here).
+				throw new Error(
+					"IfcBaseAxis: real Python's own generated formula raises " +
+						"TypeError('tuple' object does not support item assignment) at this exact " +
+						"point (Axis1 and Axis2 both set, with a negative dot product against the " +
+						"orthogonal complement) -- see rules/ifc4x3.ts's own header comment (this " +
+						"chunk's disclosed bug 1), for the full citation.",
+				);
+			}
+		}
+		return u;
+	}
+	if (exists(axis2)) {
+		// Real Python's own generated code here unconditionally raises
+		// `TypeError: 'tuple' object does not support item assignment` -- this branch
+		// (axis1 absent, axis2 present) has no guarding condition at all, unlike the
+		// `exists(axis1)` branch's `if factor < 0.0` -- it ALWAYS hits the buggy
+		// mutation, so real Python can never successfully compute a value for this case.
+		throw new Error(
+			"IfcBaseAxis: real Python's own generated formula raises " +
+				"TypeError('tuple' object does not support item assignment) at this exact " +
+				"point (Axis1 absent, Axis2 set) -- unconditionally, every time this branch is " +
+				"reached -- see rules/ifc4x3.ts's own header comment (this chunk's disclosed bug " +
+				"1b), for the full citation.",
+		);
+	}
+	return [ifcDirection([1.0, 0.0]), ifcDirection([0.0, 1.0])];
+}
+
+/**
+ * Python: `IfcCurveDim` (`IFC4X3_ADD2.py` line 13471) -- the shared dispatch helper
+ * `calc_IfcCurve_Dim` (below) delegates to; not itself a `calc_*` function. GENUINELY
+ * DIFFERENT from both `rules/ifc2x3.ts`'s own (8 branches) and `rules/ifc4.ts`'s own
+ * (10 branches) -- see this section's own header comment for the full 17-branch diff
+ * writeup, including the permanently-dead `IfcCurveSegment2D` branch (genuinely new
+ * disclosed finding, not a bug shared with any other schema's port).
+ *
+ * Same disclosed fix as `rules/ifc2x3.ts`'s/`rules/ifc4.ts`'s own `ifcCurveDim` (an
+ * explicit `!exists(curve)` guard, absent from real Python's own source, needed here
+ * because this port's `INDETERMINATE` sentinel is a plain, always-truthy JS `Symbol`).
+ */
+function ifcCurveDim(curve: unknown): unknown {
+	if (!exists(curve)) return null;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcline")) {
+		return expressGetAttr(expressGetAttr(curve, "Pnt", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcconic")) {
+		return expressGetAttr(expressGetAttr(curve, "Position", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcpolyline")) {
+		return expressGetAttr(
+			expressGetItem(expressGetAttr(curve, "Points", INDETERMINATE), 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifctrimmedcurve")) {
+		return ifcCurveDim(expressGetAttr(curve, "BasisCurve", INDETERMINATE));
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcgradientcurve")) return 3;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcsegmentedreferencecurve")) return 3;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifccompositecurve")) {
+		return expressGetAttr(
+			expressGetItem(expressGetAttr(curve, "Segments", INDETERMINATE), 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcbsplinecurve")) {
+		return expressGetAttr(
+			expressGetItem(
+				expressGetAttr(curve, "ControlPointsList", INDETERMINATE),
+				1 - EXPRESS_ONE_BASED_INDEXING,
+				INDETERMINATE,
+			),
+			"Dim",
+			INDETERMINATE,
+		);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcoffsetcurve2d")) return 2;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcoffsetcurve3d")) return 3;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcoffsetcurvebydistances")) return 3;
+	// Genuinely, permanently DEAD CODE -- see this section's own header comment for
+	// the full provenance writeup: `IfcCurveSegment2D` is not a real entity anywhere
+	// in `IFC4X3_ADD2`'s schema (confirmed against a real built addon), so
+	// `typeOf(curve)` can never contain this string for any real instance. Ported
+	// for structural fidelity to the real generated source anyway, pinned by a
+	// dedicated regression test proving it can never fire.
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifccurvesegment2d")) return 2;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcpolynomialcurve")) {
+		if (
+			!exists(expressGetAttr(curve, "CoefficientsZ", INDETERMINATE)) &&
+			expressGetAttr(expressGetAttr(curve, "Position", INDETERMINATE), "Dim", INDETERMINATE) === 2
+		) {
+			return 2;
+		}
+		return 3;
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcpcurve")) return 3;
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcindexedpolycurve")) {
+		return expressGetAttr(expressGetAttr(curve, "Points", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	if (typeOf(curve as EntityInstance).has("ifc4x3_add2.ifcspiral")) {
+		return expressGetAttr(expressGetAttr(curve, "Position", INDETERMINATE), "Dim", INDETERMINATE);
+	}
+	return null;
+}
+
+/**
+ * Python: `IfcDeriveDimensionalExponents` (`IFC4X3_ADD2.py` line 13516) -- not
+ * itself a `calc_*` function; byte-identical to `IFC4.py`'s own (confirmed by direct
+ * diff) -- ported fresh here rather than imported, since it needs THIS file's own
+ * `getScratchFile()`, scoped to the `IFC4X3_ADD2` schema (same reason this file's
+ * own first chunk's `ifcDirection`/`ifcVector` aren't shared with `rules/ifc4.ts`
+ * either).
+ */
+function ifcDeriveDimensionalExponents(unitelements: unknown): EntityInstance {
+	const result = getScratchFile().createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	const mutable = result as unknown as Record<string, unknown>;
+	for (const i of expressRange(loIndex(unitelements), (hiIndex(unitelements) as number) + 1)) {
+		const element = expressGetItem(unitelements, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		const exponent = expressGetAttr(element, "Exponent", INDETERMINATE) as number;
+		const unitDimensions = expressGetAttr(expressGetAttr(element, "Unit", INDETERMINATE), "Dimensions", INDETERMINATE);
+		mutable.LengthExponent =
+			(expressGetAttr(result, "LengthExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "LengthExponent", INDETERMINATE) as number);
+		mutable.MassExponent =
+			(expressGetAttr(result, "MassExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "MassExponent", INDETERMINATE) as number);
+		mutable.TimeExponent =
+			(expressGetAttr(result, "TimeExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "TimeExponent", INDETERMINATE) as number);
+		mutable.ElectricCurrentExponent =
+			(expressGetAttr(result, "ElectricCurrentExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "ElectricCurrentExponent", INDETERMINATE) as number);
+		mutable.ThermodynamicTemperatureExponent =
+			(expressGetAttr(result, "ThermodynamicTemperatureExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "ThermodynamicTemperatureExponent", INDETERMINATE) as number);
+		mutable.AmountOfSubstanceExponent =
+			(expressGetAttr(result, "AmountOfSubstanceExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "AmountOfSubstanceExponent", INDETERMINATE) as number);
+		mutable.LuminousIntensityExponent =
+			(expressGetAttr(result, "LuminousIntensityExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "LuminousIntensityExponent", INDETERMINATE) as number);
+	}
+	return result;
+}
+
+/**
+ * Python: `IfcGetBasisSurface` (`IFC4X3_ADD2.py` line 13628) -- not itself a
+ * `calc_*` function; delegated to by `calc_IfcCompositeCurveOnSurface_BasisSurface`
+ * (below). GENUINELY DIFFERENT control-flow shape from `rules/ifc4.ts`'s own version
+ * -- see this section's own header comment for the full writeup (ADD2's own
+ * `IfcSegment` consolidation gates each recursion/multiplication behind an explicit
+ * concrete-subtype check) -- but the SAME 2 underlying real Python bugs (shared with
+ * `rules/ifc4.ts`'s own chunk-2 disclosed bugs 2/3, not new).
+ */
+function ifcGetBasisSurface(c: unknown): unknown[] {
+	let surfs: unknown[] = [];
+	if (typeOf(c as EntityInstance).has("ifc4x3_add2.ifcpcurve")) {
+		surfs = [expressGetAttr(c, "BasisSurface", INDETERMINATE)];
+	} else if (typeOf(c as EntityInstance).has("ifc4x3_add2.ifcsurfacecurve")) {
+		const associatedGeometry = expressGetAttr(c, "AssociatedGeometry", INDETERMINATE);
+		if ((sizeof(associatedGeometry) as number) > 0) {
+			throw new Error(
+				"IfcGetBasisSurface: real Python's own generated formula raises TypeError " +
+					"(list + non-list, concatenating a plain list with a single IfcSurface value " +
+					"returned by IfcAssociatedSurface) at this exact point (an IfcSurfaceCurve's " +
+					"own AssociatedGeometry loop) -- unconditionally, every time this branch is " +
+					"reached (AssociatedGeometry is schema-mandatory, LIST [1:2]) -- see " +
+					"rules/ifc4x3.ts's own header comment (this chunk's disclosed bug 2) for the " +
+					"full citation.",
+			);
+		}
+	}
+	if (typeOf(c as EntityInstance).has("ifc4x3_add2.ifccompositecurveonsurface")) {
+		const segments = expressGetAttr(c, "Segments", INDETERMINATE);
+		const n = sizeof(segments) as number;
+		const firstSegment = expressGetItem(segments, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		if (typeOf(firstSegment as EntityInstance).has("ifc4x3_add2.ifccurvesegment")) {
+			surfs = ifcGetBasisSurface(expressGetAttr(firstSegment, "ParentCurve", INDETERMINATE));
+		}
+		if (typeOf(firstSegment as EntityInstance).has("ifc4x3_add2.ifccompositecurvesegment")) {
+			surfs = ifcGetBasisSurface(expressGetAttr(firstSegment, "ParentCurve", INDETERMINATE));
+		}
+		if (n > 1) {
+			for (const i of expressRange(2, n + 1)) {
+				const segment = expressGetItem(segments, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+				const bug3Message =
+					"IfcGetBasisSurface: real Python's own generated formula raises TypeError " +
+					"(list * list, multiplying two plain lists together) at this exact point " +
+					"(an IfcCompositeCurveOnSurface with more than one segment) -- " +
+					"unconditionally, every time this branch is reached -- see rules/ifc4x3.ts's " +
+					"own header comment (this chunk's disclosed bug 3) for the full citation.";
+				if (typeOf(segment as EntityInstance).has("ifc4x3_add2.ifccurvesegment")) {
+					throw new Error(bug3Message);
+				}
+				if (typeOf(segment as EntityInstance).has("ifc4x3_add2.ifccompositecurvesegment")) {
+					throw new Error(bug3Message);
+				}
+			}
+		}
+	}
+	return surfs;
+}
+
+// --- the 15 assigned `calc_*` functions (exact real-Python names, file order) ---
+
+export function calc_IfcCartesianTransformationOperator_Dim(self: EntityInstance): unknown {
+	const localorigin = expressGetAttr(self, "LocalOrigin", INDETERMINATE);
+	return expressGetAttr(localorigin, "Dim", INDETERMINATE);
+}
+
+export function calc_IfcCartesianTransformationOperator2D_U(self: EntityInstance): unknown {
+	return ifcBaseAxis(
+		2,
+		expressGetAttr(self, "Axis1", INDETERMINATE),
+		expressGetAttr(self, "Axis2", INDETERMINATE),
+		null,
+	);
+}
+
+export function calc_IfcCartesianTransformationOperator2DnonUniform_Scl2(self: EntityInstance): unknown {
+	const scale2 = expressGetAttr(self, "Scale2", INDETERMINATE);
+	return nvl(scale2, expressGetAttr(self, "Scl", INDETERMINATE));
+}
+
+export function calc_IfcCartesianTransformationOperator3D_U(self: EntityInstance): unknown {
+	const axis3 = expressGetAttr(self, "Axis3", INDETERMINATE);
+	return ifcBaseAxis(
+		3,
+		expressGetAttr(self, "Axis1", INDETERMINATE),
+		expressGetAttr(self, "Axis2", INDETERMINATE),
+		axis3,
+	);
+}
+
+export function calc_IfcCartesianTransformationOperator3DnonUniform_Scl2(self: EntityInstance): unknown {
+	const scale2 = expressGetAttr(self, "Scale2", INDETERMINATE);
+	return nvl(scale2, expressGetAttr(self, "Scl", INDETERMINATE));
+}
+
+export function calc_IfcCartesianTransformationOperator3DnonUniform_Scl3(self: EntityInstance): unknown {
+	const scale3 = expressGetAttr(self, "Scale3", INDETERMINATE);
+	return nvl(scale3, expressGetAttr(self, "Scl", INDETERMINATE));
+}
+
+export function calc_IfcCompositeCurve_NSegments(self: EntityInstance): unknown {
+	const segments = expressGetAttr(self, "Segments", INDETERMINATE);
+	return sizeof(segments);
+}
+
+export function calc_IfcCompositeCurve_ClosedCurve(self: EntityInstance): unknown {
+	const segments = expressGetAttr(self, "Segments", INDETERMINATE);
+	const nsegments = expressGetAttr(self, "NSegments", INDETERMINATE) as number;
+	return (
+		expressGetAttr(
+			expressGetItem(segments, nsegments - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			"Transition",
+			INDETERMINATE,
+		) !== "DISCONTINUOUS"
+	);
+}
+
+export function calc_IfcCompositeCurveOnSurface_BasisSurface(self: EntityInstance): unknown {
+	return ifcGetBasisSurface(self);
+}
+
+export function calc_IfcCsgPrimitive3D_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcCurve_Dim(self: EntityInstance): unknown {
+	return ifcCurveDim(self);
+}
+
+export function calc_IfcDerivedUnit_Dimensions(self: EntityInstance): unknown {
+	const elements = expressGetAttr(self, "Elements", INDETERMINATE);
+	return ifcDeriveDimensionalExponents(elements);
+}
+
+export function calc_IfcEdgeLoop_Ne(self: EntityInstance): unknown {
+	const edgelist = expressGetAttr(self, "EdgeList", INDETERMINATE);
+	return sizeof(edgelist);
+}
+
+export function calc_IfcFaceBasedSurfaceModel_Dim(_self: EntityInstance): unknown {
+	return 3;
+}
+
+export function calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem(self: EntityInstance): unknown {
+	const parentcontext = expressGetAttr(self, "ParentContext", INDETERMINATE);
+	return expressGetAttr(parentcontext, "WorldCoordinateSystem", INDETERMINATE);
+}
+
+registerSchemaCalcFunctions("IFC4X3_ADD2", {
+	"IfcCartesianTransformationOperator.Dim": calc_IfcCartesianTransformationOperator_Dim,
+	"IfcCartesianTransformationOperator2D.U": calc_IfcCartesianTransformationOperator2D_U,
+	"IfcCartesianTransformationOperator2DnonUniform.Scl2": calc_IfcCartesianTransformationOperator2DnonUniform_Scl2,
+	"IfcCartesianTransformationOperator3D.U": calc_IfcCartesianTransformationOperator3D_U,
+	"IfcCartesianTransformationOperator3DnonUniform.Scl2": calc_IfcCartesianTransformationOperator3DnonUniform_Scl2,
+	"IfcCartesianTransformationOperator3DnonUniform.Scl3": calc_IfcCartesianTransformationOperator3DnonUniform_Scl3,
+	"IfcCompositeCurve.NSegments": calc_IfcCompositeCurve_NSegments,
+	"IfcCompositeCurve.ClosedCurve": calc_IfcCompositeCurve_ClosedCurve,
+	"IfcCompositeCurveOnSurface.BasisSurface": calc_IfcCompositeCurveOnSurface_BasisSurface,
+	"IfcCsgPrimitive3D.Dim": calc_IfcCsgPrimitive3D_Dim,
+	"IfcCurve.Dim": calc_IfcCurve_Dim,
+	"IfcDerivedUnit.Dimensions": calc_IfcDerivedUnit_Dimensions,
+	"IfcEdgeLoop.Ne": calc_IfcEdgeLoop_Ne,
+	"IfcFaceBasedSurfaceModel.Dim": calc_IfcFaceBasedSurfaceModel_Dim,
+	"IfcGeometricRepresentationSubContext.WorldCoordinateSystem":
+		calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem,
 });

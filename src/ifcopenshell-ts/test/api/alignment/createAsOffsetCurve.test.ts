@@ -4,14 +4,21 @@
 // reading the whole real test directory). Original test coverage written here, gated
 // to IFC4X3.
 //
-// Every real invocation of `createAsOffsetCurve` currently throws inside the
-// already-landed `_createOffsetCurveRepresentation` (chunk 6) -- either its own real,
-// portable `offsets[i].isA()` type-check (a genuinely fully-portable, real assertion),
-// or its own already-disclosed `IfcCurve.Dim` EXPRESS DERIVED-attribute gap (see
-// `createAsOffsetCurve.ts`'s own header comment). Both tests below confirm the real
-// `IfcAlignment` entity is ALREADY created in the file by the time either throw
-// happens -- pinning that real orchestration logic (guid creation, entity
-// construction) genuinely runs before the disclosed blocker, not that the whole
+// **UPDATE (Phase EX-2, IFC4X3's own SECOND `calc_*`-porting chunk): a real
+// invocation with a valid `offsets` list no longer throws.** See
+// `createAsOffsetCurve.ts`'s own header comment for the full writeup:
+// `_createOffsetCurveRepresentation`'s own `basisCurve.get("Dim")` read no longer
+// throws for IFC4X3 (`calc_IfcCurve_Dim` is now ported there), so `createAsOffsetCurve`
+// now completes successfully end-to-end for a valid `offsets` list, returning a real,
+// aggregated `IfcAlignment` -- matching real Python's own success path (with a
+// disclosed, current-state latent gap: the representation built is always the 2D-
+// shaped one today, regardless of the real curve's dimensionality, since `.Dim`
+// itself still resolves to `runtimeShim.INDETERMINATE` for a realistic basis curve --
+// see the source file's own header comment). An invalid `offsets` element still
+// throws its own real, portable `TypeError` (unaffected by this update) -- that test
+// below confirms the real `IfcAlignment` entity is ALREADY created in the file by the
+// time that throw happens, pinning that real orchestration logic (guid creation,
+// entity construction) genuinely runs before the type-check, not that the whole
 // function is a no-op stub.
 
 import { describe, expect, test } from "vitest";
@@ -47,38 +54,52 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createAsOf
 		expect(file.byType("IfcAlignment")[alignmentCountBefore].get("Name")).toBe("A1");
 	});
 
-	test("throws the already-disclosed Dim gap for valid offsets, with the IfcAlignment already created", () => {
+	// **Was**: "throws the already-disclosed Dim gap for valid offsets" (any throw).
+	// **Now**: genuinely unblocked -- see this file's own header comment.
+	test("now genuinely unblocked for valid offsets: returns a real, aggregated IfcAlignment", () => {
 		const file = createTestFile("IFC4X3");
 		const basisCurve = dummyBasisCurve(file);
 		const offset = pointByDistanceExpression(file, basisCurve);
 		const alignmentCountBefore = file.byType("IfcAlignment").length;
 
-		expect(() => createAsOffsetCurve(file, "A2", [offset])).toThrow();
+		const alignment = createAsOffsetCurve(file, "A2", [offset]);
 
+		expect(alignment.isA("IfcAlignment")).toBe(true);
+		expect(alignment.get("Name")).toBe("A2");
 		expect(file.byType("IfcAlignment").length).toBe(alignmentCountBefore + 1);
+		// "The IfcAlignment is aggregated to IfcProject" (this file's own JSDoc) --
+		// `createTestFile` provides a real IfcProject, so the `if (project)` branch runs.
+		const project = file.byType("IfcProject")[0];
+		const inverses = file.getInverse(project, true) as EntityInstance[];
+		const aggregates = inverses.filter((rel) => rel.isA("IfcRelAggregates"));
+		const relatedObjects = aggregates.flatMap((rel) => rel.get("RelatedObjects") as EntityInstance[]);
+		expect(relatedObjects.some((o) => o.equals(alignment))).toBe(true);
 	});
 
-	test("real, CONFIRMED Python quirk: startStation is accepted but never used -- identical behavior regardless of its value", () => {
+	// **Was**: "startStation is accepted but never used" pinned via IDENTICAL ERROR
+	// MESSAGES (the only observable effect available while this function was fully
+	// blocked). **Now genuinely unblocked** (see this file's own header comment) --
+	// the SAME real Python quirk is now pinned more directly: 2 calls differing only
+	// in `startStation` produce structurally IDENTICAL results (not just identical
+	// error text).
+	test("real, CONFIRMED Python quirk: startStation is accepted but never used -- identical results regardless of its value", () => {
 		const file1 = createTestFile("IFC4X3");
 		const file2 = createTestFile("IFC4X3");
 		const offset1 = pointByDistanceExpression(file1, dummyBasisCurve(file1));
 		const offset2 = pointByDistanceExpression(file2, dummyBasisCurve(file2));
 
-		let error1: unknown;
-		let error2: unknown;
-		try {
-			createAsOffsetCurve(file1, "A", [offset1], 0.0);
-		} catch (e) {
-			error1 = e;
-		}
-		try {
-			createAsOffsetCurve(file2, "A", [offset2], 12345.678);
-		} catch (e) {
-			error2 = e;
-		}
+		const alignment1 = createAsOffsetCurve(file1, "A", [offset1], 0.0);
+		const alignment2 = createAsOffsetCurve(file2, "A", [offset2], 12345.678);
 
-		expect(error1).toBeInstanceOf(Error);
-		expect(error2).toBeInstanceOf(Error);
-		expect((error1 as Error).message).toBe((error2 as Error).message);
+		const representation1 = (alignment1.get("Representation") as EntityInstance).get(
+			"Representations",
+		) as EntityInstance[];
+		const representation2 = (alignment2.get("Representation") as EntityInstance).get(
+			"Representations",
+		) as EntityInstance[];
+		expect(representation1[0].get("RepresentationType")).toBe(representation2[0].get("RepresentationType"));
+		expect((representation1[0].get("Items") as EntityInstance[])[0].isA()).toBe(
+			(representation2[0].get("Items") as EntityInstance[])[0].isA(),
+		);
 	});
 });

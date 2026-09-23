@@ -19,9 +19,9 @@
 // own "plain function, not `wrapUsecase`-wrapped" precedent for the same reason, this
 // port is a plain exported function too, no undo/redo transaction wiring.
 //
-// --- BLOCKED on literally every real invocation, by the pre-existing, already-
-//     disclosed `entityInstance.ts` EXPRESS DERIVED-attribute gap -- a NEW confirmed
-//     consequence of that same gap, not a new gap of its own ---
+// --- Formerly BLOCKED on literally every real invocation, by the pre-existing,
+//     already-disclosed `entityInstance.ts` EXPRESS DERIVED-attribute gap -- now
+//     RESOLVED (Phase EX-2, IFC4X3's own SECOND chunk) ---
 //
 // `context = get_context(file, "Model", "Annotation", "MODEL_VIEW")` -- passing BOTH
 // a subcontext identifier AND a target view means `get_context` (see
@@ -34,40 +34,41 @@
 // `WorldCoordinateSystem` is NOT a stored attribute at all -- it's a real EXPRESS
 // DERIVED attribute (`DERIVE WorldCoordinateSystem := ParentContext
 // .WorldCoordinateSystem`, confirmed by reading `ifcopenshell.express.rules
-// .IFC4X3`'s own compiled `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem
+// .IFC4X3_ADD2`'s own compiled `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem
 // (self): return express_getattr(express_getattr(self, 'ParentContext', ...),
 // 'WorldCoordinateSystem', ...)` directly, and by confirming `WorldCoordinateSystem`
 // is absent from `IfcGeometricRepresentationSubContext`'s own generated interface on
 // ALL 3 schemas -- identical across `ifc2x3.d.ts`/`ifc4.d.ts`/`ifc4x3.d.ts`, so this
-// isn't schema-specific either). Real Python resolves this via its own DERIVED-
-// category `__getattr__` fallback (the same mechanism `editSurveyPoint.ts`'s own
-// header comment already documents for `IfcCartesianPoint.Dim`); this TS port's
-// `EntityInstance.get()` has NO such fallback at all (the SAME pre-existing,
-// already-disclosed `entityInstance.ts` gap, not a second, independent one) -- so
-// `context.get("WorldCoordinateSystem")` throws every time a matching context is
-// actually found, which is the common, intended case (an `IfcAnnotation` without
-// this line ever succeeding at all is thus, by construction, unreachable). Confirmed
-// EMPIRICALLY by actually running this chunk's own test suite against a locally-built
-// multi-schema native addon, not just reasoned about -- see `addSurveyPoint.test.ts`'s
-// own header comment. Ported completely and faithfully anyway (every other line
-// below the throw point runs in real Python and is preserved verbatim, reachable the
-// moment the underlying gap is fixed, with zero further changes needed here). See
-// `TODOS.md`'s updated entry for the full writeup, now covering both this
-// `WorldCoordinateSystem`-via-`ParentContext` case and `editSurveyPoint.ts`'s own
-// `Dim` case as 2 confirmed consequences of the same foundational gap.
+// isn't schema-specific either).
 //
-// --- Two further genuine, verbatim-preserved Python-source quirks below that throw
-//     point, neither silently fixed (unreachable until the gap above is fixed, but
-//     preserved for when it is) ---
+// **UPDATE (Phase EX-2, IFC4X3's own SECOND chunk,
+// planning/ifcopenshell-ts/70-express-rules-plan.md §4): this port's `EntityInstance
+// .get()` DERIVED-attribute dispatch mechanism now covers exactly this attribute for
+// IFC4X3.** `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem` is one
+// of that chunk's own 15 ported functions (`src/express/rules/ifc4x3.ts`) -- since
+// `IfcAnnotation.PredefinedType` restricts this function to IFC4X3-only invocations
+// anyway (see below), and IFC2X3/IFC4 already ported the identical formula in their
+// own respective third chunks well before this one, `context.get
+// ("WorldCoordinateSystem")` now resolves on the ONLY schema this function is ever
+// actually exercised on -- `addSurveyPoint` now succeeds end to end for every real
+// invocation that finds a matching context (the common, intended case), restoring
+// real Python's own success behavior. Re-verified EMPIRICALLY against a locally-built
+// multi-schema native addon (not just reasoned about) -- see `addSurveyPoint.test.ts`'s
+// own updated header comment for the exact restored assertions. `TODOS.md`'s
+// corresponding entry is updated to reflect this closed consequence (the sibling
+// `editSurveyPoint.ts`/`IfcCartesianPoint.Dim` consequence of the same foundational
+// gap remains open for IFC2X3/IFC4 -- both already resolved there too, in each
+// schema's own first chunk -- see that file's own header comment).
+//
+// --- Two further genuine, verbatim-preserved Python-source quirks, now REACHABLE
+//     (previously blocked by the throw point above, before this chunk) ---
 //
 // 1. `context = get_context(...)` is otherwise used completely UNGUARDED -- real
 //    `get_context` returns `None` when no matching context exists at all, and real
 //    Python then crashes with `AttributeError: 'NoneType' object has no attribute
 //    'WorldCoordinateSystem'`. This port throws an equivalently blunt, disclosed error
 //    at the exact same point rather than silently guarding around a case real Python
-//    itself doesn't handle either -- distinct from, and checked BEFORE, the DERIVED-
-//    attribute throw above (this one only fires when NO context exists; the DERIVED
-//    throw fires once one is actually found).
+//    itself doesn't handle either.
 // 2. `ObjectPlacement=context.WorldCoordinateSystem` -- once resolved, that value is
 //    an `IfcAxis2Placement2D | IfcAxis2Placement3D` (`IfcGeometricRepresentationContext
 //    .WorldCoordinateSystem`'s own declared type, confirmed identical across all 3
@@ -75,9 +76,10 @@
 //    own declared type). Neither real Python nor this port's `createEntity` validates
 //    attribute VALUE types against the schema at write time (only argument COUNT, via
 //    `IfcFile.createEntity`'s own `attributeCount()` check) -- so this "wrong type"
-//    assignment would silently succeed on both sides, once reachable. Preserved
-//    verbatim, not silently corrected to a real `IfcLocalPlacement` wrapping that same
-//    placement.
+//    assignment silently succeeds on both sides, confirmed EMPIRICALLY now that this
+//    line is genuinely reachable: the resulting `IfcAnnotation.ObjectPlacement` reads
+//    back as a real `IfcAxis2Placement3D`, not an `IfcLocalPlacement`. Preserved
+//    verbatim, not silently corrected.
 // 3. `if site == None: site = file.by_type("IfcSite")[0]` -- an unguarded index into a
 //    possibly-empty list (real Python: `IndexError` if the model has no `IfcSite`).
 //    This port preserves the same lack of a guard: `byType(...)[0]` on an empty result
@@ -86,7 +88,9 @@
 //    as Python's own lack of a bounds check) -- `assignContainer` below then fails
 //    downstream reading `undefined.get(...)`, matching real Python's own `IndexError`
 //    failing before `assign_container` is ever reached, just via a different (JS,
-//    not Python) crash shape.
+//    not Python) crash shape. Not exercised by this file's own test (which always
+//    supplies a real `IfcSite`), so this specific quirk remains unverified end-to-end,
+//    same as before this chunk.
 //
 // --- Schema-availability constraint: `PredefinedType` is IFC4X3-only ---
 //
@@ -120,11 +124,6 @@ import { assignContainer } from "../spatial/assignContainer";
  *
  * IFC4X3-only: `IfcAnnotation.PredefinedType` doesn't exist on IFC2X3/IFC4 -- see this
  * file's own header comment.
- *
- * BLOCKED today: throws for every real invocation that finds a matching context (the
- * common case), via the pre-existing `entityInstance.ts` EXPRESS DERIVED-attribute
- * gap (`IfcGeometricRepresentationSubContext.WorldCoordinateSystem` is DERIVED, not
- * stored) -- see this file's own header comment.
  *
  * @param file The IFC file.
  * @param surveyPoint The survey point (an `IfcCartesianPoint`).
