@@ -30,7 +30,21 @@ on:
       - v0.9.0
 
 concurrency:
-  group: ci-ifcopenshell-ts-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # PR runs: grouped by PR number, cancel-in-progress - a superseded commit's run is
+  # useless once a newer commit exists, so cancelling it is correct and desired.
+  #
+  # push runs (v0.9.0 only, see the `on:` block's own comment for why this trigger
+  # exists at all): grouped by commit SHA, NOT by `github.ref` - every push to
+  # v0.9.0 previously shared one group (`github.ref` is the same value,
+  # `refs/heads/v0.9.0`, for every push to that branch), so `cancel-in-progress: true`
+  # cancelled an in-progress push run the instant a SECOND merge landed before the
+  # first one finished. Confirmed happening for real: PR #173's own post-merge
+  # cache-seeding run was cancelled by PR #174's merge landing ~1.5 minutes later,
+  # before the C++ core cache this trigger exists to seed could ever be saved -
+  # exactly the failure mode this fix exists to prevent. This project's own merge
+  # cadence (small, frequent PRs) makes back-to-back merges routine, not an edge
+  # case, so every push run must be allowed to run to completion independently.
+  group: ci-ifcopenshell-ts-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
