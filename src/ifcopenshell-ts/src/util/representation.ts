@@ -236,6 +236,24 @@
 // true), so no test-fidelity fix is required here; this paragraph exists purely so a
 // future reader doesn't assume IFC4X3 is now as fully resolved as IFC4.
 //
+// --- UPDATE 4 (Phase EX-2, IFC4X3's own THIRD `calc_*`-porting chunk,
+//     `src/express/rules/ifc4x3.ts`): the `Curve2D`/`Curve3D` HALF of this gap is now
+//     essentially as resolved for IFC4X3 as it is for IFC4 ---
+//
+// That chunk ports `calc_IfcPoint_Dim` (ADD2's own consolidated supertype formula
+// `IfcCartesianPoint.Dim` dispatches through) together with `calc_IfcPlacement_Dim` --
+// re-verified directly against the real built addon (not assumed from the dependency
+// chain alone): `IfcLine`/`IfcPolyline`/`IfcTrimmedCurve`/`IfcBSplineCurve` (all
+// bottoming out on a plain `IfcCartesianPoint`) and `IfcConic`/`IfcSpiral` (bottoming
+// out on an `IfcPlacement` subtype's own `Position.Dim`) now ALL resolve to real
+// numbers for IFC4X3 too. **The ONLY `IfcCurve` subtype whose own `.Dim` still
+// resolves to `runtimeShim.INDETERMINATE` for IFC4X3 is `IfcCompositeCurve`**
+// (`Segments[0].Dim`, blocked on the separately-still-unported `calc_IfcSegment_Dim`
+// -- not this chunk's own scope). No existing test in this file exercises IFC4X3 at
+// all (still true), so no test-fidelity fix is required here either; this paragraph
+// exists purely so a future reader doesn't assume `IfcCompositeCurve` is the only
+// remaining gap without checking it's genuinely the ONLY one left, not one of several.
+//
 // *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be
 // independently reachable): `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"` are dead

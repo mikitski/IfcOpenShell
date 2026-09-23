@@ -10,16 +10,22 @@
 // `_createOffsetCurveRepresentation`'s own `basisCurve.get("Dim")` read no longer
 // throws for IFC4X3 (`calc_IfcCurve_Dim` is now ported there), so `createAsOffsetCurve`
 // now completes successfully end-to-end for a valid `offsets` list, returning a real,
-// aggregated `IfcAlignment` -- matching real Python's own success path (with a
-// disclosed, current-state latent gap: the representation built is always the 2D-
-// shaped one today, regardless of the real curve's dimensionality, since `.Dim`
-// itself still resolves to `runtimeShim.INDETERMINATE` for a realistic basis curve --
-// see the source file's own header comment). An invalid `offsets` element still
-// throws its own real, portable `TypeError` (unaffected by this update) -- that test
-// below confirms the real `IfcAlignment` entity is ALREADY created in the file by the
-// time that throw happens, pinning that real orchestration logic (guid creation,
-// entity construction) genuinely runs before the type-check, not that the whole
-// function is a no-op stub.
+// aggregated `IfcAlignment` -- matching real Python's own success path. At that point,
+// the representation built was always the 2D-shaped one regardless of the real curve's
+// dimensionality, since `.Dim` itself resolved to `runtimeShim.INDETERMINATE` for a
+// realistic basis curve -- a disclosed, then-current-state latent gap.
+//
+// **UPDATE AGAIN (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/
+// ifc4x3.ts`): that latent gap is now closed for real** (`calc_IfcPoint_Dim` is now
+// ported, `.Dim` resolves to the real dimensionality) -- see
+// `_createOffsetCurveRepresentation.test.ts`'s own dedicated 2D/3D branch-selection
+// tests for direct coverage of the fix itself; this file's own `dummyBasisCurve` fixture
+// happens to be 2D, so its own assertions below were never sensitive to this gap
+// either way and require no changes. An invalid `offsets` element still throws its own
+// real, portable `TypeError` (unaffected by either update) -- that test below confirms
+// the real `IfcAlignment` entity is ALREADY created in the file by the time that throw
+// happens, pinning that real orchestration logic (guid creation, entity construction)
+// genuinely runs before the type-check, not that the whole function is a no-op stub.
 
 import { describe, expect, test } from "vitest";
 import { createAsOffsetCurve } from "../../../src/api/alignment/createAsOffsetCurve";

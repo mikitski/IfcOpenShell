@@ -104,39 +104,32 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions
 	// assumed. Only IFC4X3 remains genuinely blocked.
 	//
 	// **UPDATE (Phase EX-2, IFC4X3's own first chunk, `src/express/rules/ifc4x3.ts`):**
-	// `rules/ifc4x3.ts` now exists, but `calc_IfcSIUnit_Dimensions` is not one of that
-	// chunk's own 15 assigned functions, so IFC4X3 remains genuinely blocked here --
-	// re-verified directly against the real built addon, not assumed.
-	test.skipIf(schema === "IFC4X3")(
-		"IFC2X3/IFC4: silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)",
-		() => {
-			const file = createTestFile(schema);
-			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
-			// METRE -> IfcDimensionsForSiUnit -> (1, 0, 0, 0, 0, 0, 0) (same for both
-			// IFC2X3's and IFC4's own `IfcDimensionsForSiUnit` -- METRE's own branch is
-			// one of the 29 byte-identical ones between the two schemas' real tables,
-			// see `ifc4.ts`'s own fourth-chunk header comment for the one branch,
-			// FARAD, that actually differs).
-			expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+	// `rules/ifc4x3.ts` now exists, but `calc_IfcSIUnit_Dimensions` was not one of that
+	// chunk's own 15 assigned functions, so IFC4X3 remained genuinely blocked here.
+	//
+	// **UPDATE AGAIN (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/
+	// ifc4x3.ts`):** that chunk ports `calc_IfcSIUnit_Dimensions` for IFC4X3 too (one of
+	// its own 15 assigned functions) -- IFC4X3 now behaves exactly like IFC2X3/IFC4
+	// here (DERIVE dispatch resolves `.Dimensions` to a foreign, disposable scratch
+	// instance) -- re-verified directly against the real built addon, not assumed. The
+	// former schema-conditional "still throws" branch is removed; a single,
+	// unconditional test now covers all 3 schemas.
+	test("silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)", () => {
+		const file = createTestFile(schema);
+		const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
+		// METRE -> IfcDimensionsForSiUnit -> (1, 0, 0, 0, 0, 0, 0) (the same for all 3
+		// schemas' own `IfcDimensionsForSiUnit`/`IfcDimensionsForSIUnit` -- METRE's own
+		// branch is one of the 29 byte-identical ones across all 3 schemas' real
+		// tables, see `ifc4x3.ts`'s own third-chunk header comment for the one branch,
+		// FARAD, that actually differs between IFC2X3 and IFC4/IFC4X3).
+		expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
 
-			editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } });
+		editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } });
 
-			// Unchanged -- the edit landed on a disposable scratch instance, not on
-			// anything reachable through `unit`'s own real attribute-read path.
-			expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
-		},
-	);
-
-	test.skipIf(schema !== "IFC4X3")(
-		"IFC4X3: still throws (rules/ifc4x3.ts exists, but calc_IfcSIUnit_Dimensions is not ported for this schema yet)",
-		() => {
-			const file = createTestFile(schema);
-			const unit = file.createEntity("IfcSIUnit");
-			expect(() => editNamedUnit(file, { unit, attributes: { Dimensions: [9, 9, 9, 9, 9, 9, 9] } })).toThrow(
-				/has no attribute 'Dimensions'/,
-			);
-		},
-	);
+		// Unchanged -- the edit landed on a disposable scratch instance, not on
+		// anything reachable through `unit`'s own real attribute-read path.
+		expect(exponents(unit)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+	});
 });
 
 describe("api.unit.editNamedUnit (IFC4-only)", () => {

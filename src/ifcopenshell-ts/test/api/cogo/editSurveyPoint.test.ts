@@ -19,8 +19,14 @@
 // **Updated again by Phase EX-2's IFC4 first chunk** (`src/express/rules/ifc4.ts`):
 // that chunk independently ported the exact same 15 function names for IFC4 (confirmed
 // byte-identical real Python source for `calc_IfcCartesianPoint_Dim` specifically), so
-// `Dim` now resolves for IFC4 too -- the "still BLOCKED" branch below now applies to
-// IFC4X3 only (genuinely still unported).
+// `Dim` now resolves for IFC4 too -- the "still BLOCKED" branch below applied to IFC4X3
+// only (genuinely still unported) until the update below.
+//
+// **Updated AGAIN by Phase EX-2's IFC4X3 THIRD chunk** (`src/express/rules/ifc4x3.ts`):
+// that chunk ports `calc_IfcPoint_Dim` -- ADD2's own consolidated supertype formula
+// `IfcCartesianPoint.Dim` now dispatches through -- so `Dim` now resolves for IFC4X3
+// too. The former schema-conditional "still BLOCKED for IFC4X3" test is removed; a
+// single, unconditional test now covers all 3 schemas.
 //
 // Real Python's own fixture builds its precondition via `add_survey_point`, which is
 // STILL blocked in this port by the SAME foundational kind of gap, via a DIFFERENT
@@ -32,9 +38,10 @@
 //
 // Not gated to IFC4X3 (unlike `addSurveyPoint.test.ts`): `IfcCartesianPoint.Dim`'s
 // formula is schema-independent (`Coordinates`/`Dim`'s shape is identical across all 3
-// schemas) -- runs across every `AVAILABLE_SCHEMAS` entry; IFC2X3 and IFC4 both resolve
-// `Dim` via their own real ported `calc_IfcCartesianPoint_Dim` today, IFC4X3 picks up
-// the identical formula once a future chunk ports it for that schema too.
+// schemas) -- runs across every `AVAILABLE_SCHEMAS` entry; all 3 schemas now resolve
+// `Dim` via their own real ported DERIVE dispatch (`calc_IfcCartesianPoint_Dim` for
+// IFC2X3/IFC4, `calc_IfcPoint_Dim` for IFC4X3 -- see this file's own updated header
+// comment above).
 
 import { describe, expect, test } from "vitest";
 import { editSurveyPoint } from "../../../src/api/cogo/editSurveyPoint";
@@ -62,23 +69,16 @@ describe.each(AVAILABLE_SCHEMAS)("api.cogo.editSurveyPoint (%s)", (schema) => {
 		return { file, annotation, point };
 	}
 
-	if (schema === "IFC2X3" || schema === "IFC4") {
-		// `calc_IfcCartesianPoint_Dim` is ported for IFC2X3 (Phase EX-2's first chunk)
-		// and IFC4 (IFC4's own first chunk) -- `Dim` resolves, restoring real Python's
-		// own assertion.
-		test("editing a survey point's location", () => {
-			const { annotation, point } = buildFixture();
-			editSurveyPoint(annotation, 20.0, 30.0);
-			expect((point as unknown as { Coordinates: number[] }).Coordinates).toEqual([20.0, 30.0]);
-		});
-	} else {
-		// IFC4X3's own `calc_IfcCartesianPoint_Dim` (byte-for-byte the same formula in
-		// real Python) is NOT ported yet (a future Phase EX-2 chunk, per
-		// `70-express-rules-plan.md`'s own smallest-schema-first sequencing) -- `Dim`
-		// still throws exactly as it did before, for this schema only.
-		test("editing a survey point's location -- still BLOCKED for this schema (Dim not yet ported for IFC4X3)", () => {
-			const { annotation } = buildFixture();
-			expect(() => editSurveyPoint(annotation, 20.0, 30.0)).toThrow(/has no attribute 'Dim'/);
-		});
-	}
+	// **UPDATE (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/ifc4x3.ts`):**
+	// `calc_IfcPoint_Dim` is now ported for IFC4X3 too (ADD2's own consolidated
+	// supertype formula `IfcCartesianPoint.Dim` dispatches through) -- `Dim` now
+	// resolves on IFC4X3 as well, matching IFC2X3's/IFC4's own already-working
+	// behavior, so this test now runs unconditionally across every `AVAILABLE_SCHEMAS`
+	// entry -- re-verified directly against the real built addon, not assumed. The
+	// former schema-conditional "still BLOCKED for IFC4X3" branch is removed.
+	test("editing a survey point's location", () => {
+		const { annotation, point } = buildFixture();
+		editSurveyPoint(annotation, 20.0, 30.0);
+		expect((point as unknown as { Coordinates: number[] }).Coordinates).toEqual([20.0, 30.0]);
+	});
 });

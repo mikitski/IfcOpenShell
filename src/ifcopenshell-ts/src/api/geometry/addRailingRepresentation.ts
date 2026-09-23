@@ -268,6 +268,26 @@
 // `addRailingRepresentation.test.ts`'s own smoke test and regex are updated
 // accordingly for IFC4X3.
 //
+// --- UPDATE 4 (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/ifc4x3.ts`):
+//     `addRailingRepresentation` is now GENUINELY, FULLY UNBLOCKED on IFC4X3 too --
+//     UPDATE 3's own "still throws" framing is SUPERSEDED for IFC4X3 ---
+//
+// That chunk ports `calc_IfcPlacement_Dim` for IFC4X3 -- the exact dependency UPDATE 3
+// identified as the then-remaining blocker (`IfcAxis2Placement2D.Dim`, DERIVE at the
+// `IfcPlacement` supertype level, reached via `builder.circle(...)`'s own
+// `IfcCircle.Dim` -> `Position.Dim`). With it ported, `Position.Dim` resolves to a
+// real number instead of `INDETERMINATE` (via `calc_IfcPlacement_Dim` -> `Location.Dim`
+// -> the SAME chunk's own `calc_IfcPoint_Dim`) -- re-verified directly and
+// exhaustively against the real, built addon (not assumed from the IFC4 precedent
+// alone, matching this chunk's own established discipline): the documented 2-point
+// default straight path now produces a real `IfcShapeRepresentation` whose last item
+// `isA("IfcSweptDiskSolid")`, matching real Python's own end-to-end assertion, exactly
+// like IFC4's own UPDATE 2. `addRailingRepresentation.test.ts`'s own smoke test is
+// updated accordingly for IFC4X3 (moved into the same success branch as IFC4, asserts
+// success instead of a disclosed throw) -- IFC2X3 (still throws "Arcs are not
+// supported for IFC2X3.", `ShapeBuilder`'s own separate, pre-existing,
+// unrelated-to-DERIVE-porting arc gap) is UNCHANGED by THIS chunk.
+//
 // *** `ShapeBuilder` methods used, and their exact signatures verified directly against
 // `util/shapeBuilder.ts` (not assumed from the Python method names alone) ***
 //

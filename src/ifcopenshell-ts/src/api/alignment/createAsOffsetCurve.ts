@@ -25,13 +25,20 @@
 // throws for IFC4X3** (`calc_IfcCurve_Dim` is now ported there) -- so
 // `createAsOffsetCurve` itself now completes successfully end-to-end for a valid
 // `offsets` list, returning a real `IfcAlignment` (aggregated to the project, if one
-// exists), matching real Python's own success path. See
-// `_createOffsetCurveRepresentation.ts`'s own header comment for the still-real,
-// disclosed latent gap this now surfaces instead of a crash (a realistic basis curve's
-// `.Dim` currently always resolves to `runtimeShim.INDETERMINATE`, via the
-// still-unported `calc_IfcPoint_Dim`, so the representation this function builds is
-// always the 2D-shaped one, regardless of the real curve's dimensionality) -- not
-// this file's own concern to fix, just to disclose.
+// exists), matching real Python's own success path. At that point, `.Dim` always
+// resolved to `runtimeShim.INDETERMINATE` for a realistic basis curve (via the
+// then-still-unported `calc_IfcPoint_Dim`), so the representation this function built
+// was always the 2D-shaped one, regardless of the real curve's dimensionality -- a
+// disclosed latent gap in the dependency this function delegates to, not this file's
+// own concern to fix.
+//
+// **UPDATE AGAIN (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/
+// ifc4x3.ts`): that latent gap is now closed for real.** `calc_IfcPoint_Dim` is now
+// ported -- `_createOffsetCurveRepresentation`'s own `basisCurve.get("Dim")` read now
+// resolves to the REAL dimensionality, so `createAsOffsetCurve` now correctly builds a
+// 3D-shaped representation for a 3D basis curve and a 2D-shaped one for a 2D basis
+// curve -- inherited automatically from its own dependency's fix, re-verified directly
+// against the real built addon, not assumed.
 //
 // --- Real, CONFIRMED Python quirk: `start_station` is accepted but NEVER used ---
 //

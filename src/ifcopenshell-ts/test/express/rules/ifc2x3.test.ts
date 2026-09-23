@@ -1706,14 +1706,27 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 			// comment) and `dispatch.ts`'s per-schema registry now DOES have entries for
 			// it -- but NOT for `IfcSIUnit.Dimensions` specifically (`calc_IfcSIUnit_Dimensions`
 			// is not one of that chunk's own 15 assigned functions), so this test's own
-			// asserted behavior below is UNCHANGED, re-verified directly against the real
-			// built addon, not assumed. Only the "no `rules/ifc4x3.ts` module exists" framing
-			// above is now stale prose (left as historical narrative, not rewritten, matching
-			// this test's own established append-only update convention) -- the demonstrated
-			// FACT (a genuine dispatch miss for this specific attribute) still holds.
+			// asserted behavior below was UNCHANGED at that point, re-verified directly
+			// against the real built addon, not assumed.
+			//
+			// **UPDATE AGAIN (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/
+			// ifc4x3.ts`):** that chunk ports exactly `calc_IfcSIUnit_Dimensions` for
+			// IFC4X3 too (one of its own 15 assigned functions) -- `IfcSIUnit.Dimensions`
+			// now fully resolves on IFC4X3, so this test's own example would silently
+			// start asserting the wrong thing (that dispatch still fails) instead of
+			// failing loudly. Swapped to `IfcSurface.Dim` (`calc_IfcSurface_Dim`,
+			// `IFC4X3_ADD2.py` line 11960, confirmed the ONLY `Dim` formula declared
+			// anywhere on `IfcSurface`/its subtypes for ADD2, the same "no per-subtype
+			// override" shape `ifc4.ts`'s own fourth-chunk header comment already found
+			// for IFC4 -- genuinely still unported, not one of IFC4X3's first 3 chunks),
+			// matching this test's own established "move to the next, still genuinely
+			// unported attribute" pattern (applied here a third time: `IfcDerivedUnit
+			// .Dimensions` -> `IfcSIUnit.Dimensions` -> `IfcSurface.Dim`).
 			const file: IfcFile = createTestFile("IFC4X3");
-			const siUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
-			expect(() => (siUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(/has no attribute 'Dimensions'/);
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const placement = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			const plane = file.createEntity("IfcPlane", placement);
+			expect(() => (plane as unknown as { Dim: unknown }).Dim).toThrow(/has no attribute 'Dim'/);
 		},
 	);
 });

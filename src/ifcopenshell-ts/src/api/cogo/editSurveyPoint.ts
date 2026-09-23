@@ -31,22 +31,31 @@
 // exact same 15 function names (confirmed byte-identical real Python source for
 // `calc_IfcCartesianPoint_Dim` specifically) for IFC4 too. `Dim` now resolves correctly
 // for any `IfcCartesianPoint` in an IFC2X3 OR IFC4 file, so this function's own first
-// statement (reading `Items[0].Dim`) now succeeds on both. Still throws for IFC4X3
-// until a future chunk ports the identical formula for that schema too (same plan doc,
-// smallest-schema-first sequencing) -- and several OTHER callers this gap's own
-// `TODOS.md` entry lists (`util/shapeBuilder.ts`'s `.profile()`/`createSweptDiskSolid()`,
-// several `api.geometry` files) may depend on `Dim`/other DERIVE attributes on entity
-// types these chunks did NOT port (e.g. solids/curves/surfaces, not `IfcCartesianPoint`)
-// and remain blocked -- this is a narrow, additive fix for this one function's own
-// specific dependency, not a general claim that the whole gap family is closed.
+// statement (reading `Items[0].Dim`) now succeeds on both.
+//
+// **UPDATE (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/ifc4x3.ts`):**
+// that chunk ports `calc_IfcPoint_Dim` -- IFC4X3_ADD2's own consolidated
+// abstract-supertype formula that `IfcCartesianPoint.Dim` now dispatches through (ADD2
+// merged the base schema's separate `calc_IfcCartesianPoint_Dim`/
+// `calc_IfcPointOnCurve_Dim`/`calc_IfcPointOnSurface_Dim` into one formula at the
+// `IfcPoint` supertype level) -- so `Dim` now resolves for IFC4X3 too, re-verified
+// directly against the real built addon, not assumed. This function now succeeds on
+// all 3 schemas -- and several OTHER callers this gap's own `TODOS.md` entry lists
+// (`util/shapeBuilder.ts`'s `.profile()`/`createSweptDiskSolid()`, several
+// `api.geometry` files) may depend on other DERIVE attributes on entity types this
+// chunk did NOT port (e.g. surfaces/some curve subtypes) and may remain blocked -- this
+// is a narrow, additive fix for this one function's own specific dependency, not a
+// general claim that the whole gap family is closed.
 //
 // Note: `addSurveyPoint` (this module's own fixture-building sibling, and real
-// Python's own test fixture builder) remains blocked by the SAME general kind of gap,
-// via a DIFFERENT derived attribute this chunk does not port
-// (`IfcGeometricRepresentationSubContext.WorldCoordinateSystem`, not `Dim` -- see
-// `addSurveyPoint.ts`'s own header comment, unchanged), so `editSurveyPoint.test.ts`
-// still cannot reach `editSurveyPoint` via `addSurveyPoint` -- its own fixture is still
-// built with raw `file.createEntity(...)` calls instead.
+// Python's own test fixture builder) was ALSO fixed by this same Phase EX-2 effort --
+// `IfcGeometricRepresentationSubContext.WorldCoordinateSystem` was resolved earlier
+// still, by IFC4X3's own SECOND chunk (`addSurveyPoint.ts`'s own header comment has the
+// full citation) -- but `addSurveyPoint` itself is IFC4X3-only (`IfcAnnotation
+// .PredefinedType` doesn't exist on IFC2X3/IFC4 at all), while `editSurveyPoint.test.ts`
+// exercises all 3 schemas via `describe.each(AVAILABLE_SCHEMAS)` -- so its own fixture
+// is still built with raw `file.createEntity(...)` calls for schema-uniformity, not
+// because `addSurveyPoint` remains blocked.
 
 import type { EntityInstance } from "../../entityInstance";
 
@@ -54,9 +63,9 @@ import type { EntityInstance } from "../../entityInstance";
  * Edits the location of a previously defined survey point (Python:
  * `ifcopenshell.api.cogo.edit_survey_point`).
  *
- * Works on IFC2X3 and IFC4 (`IfcCartesianPoint.Dim` is ported for both, Phase EX-2's
- * respective first chunks); still throws on IFC4X3 until a future chunk ports the same
- * DERIVE formula for that schema too -- see this file's own header comment.
+ * Works on all 3 schemas (`IfcCartesianPoint.Dim` resolves everywhere: IFC2X3/IFC4 via
+ * their own `calc_IfcCartesianPoint_Dim`, IFC4X3 via ADD2's own consolidated
+ * `calc_IfcPoint_Dim` -- see this file's own header comment).
  *
  * @param annotation The survey point annotation (an `IfcAnnotation`, as returned by
  *   `addSurveyPoint`).
