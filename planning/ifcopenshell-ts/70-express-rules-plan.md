@@ -59,8 +59,25 @@ is out of scope for now.
 |---|---|---|---|---|---|
 | IFC2X3 | 8,129 | 3,588 (44%) | 4,541 | 55 | 368 |
 | IFC4 | 12,228 | 4,322 (35%) | 7,906 | 62 | 682 |
-| IFC4X3 | 14,114 | 5,189 (37%) | 8,925 | 65 | 780 |
-| **Total** | **34,471** | **13,099** | **21,372** | **182** | **1,830** |
+| IFC4X3 | 14,057 | ~5,150 (est., not re-counted) | ~8,900 (est.) | **60** | 780 (not re-verified against ADD2, see below) |
+| **Total** | ~34,414 | ~13,060 | ~21,347 | **177** | 1,830 (not re-verified) |
+
+**CORRECTION (2026-09-23, found while scoping the first IFC4X3 dispatch chunk):** the original IFC4X3
+figures above were computed against `ifcopenshell/express/rules/IFC4X3.py` — the BASE IFC4X3 schema
+revision. This port's native core actually registers and implements **`IFC4X3_ADD2`** specifically
+(`test/bootstrap.ts`'s own `SCHEMA_IDENTIFIERS` mapping — confirmed directly), a LATER, genuinely
+different revision (`ifcopenshell/express/rules/IFC4X3_ADD2.py`, 60 `calc_*` functions, not 65) — ADD2
+restructured part of the geometry model, consolidating several base-schema per-subtype DERIVE
+functions (`IfcCartesianPoint.Dim`, `IfcPointOnCurve.Dim`, `IfcPointOnSurface.Dim`,
+`IfcCompositeCurveSegment.Dim`, `IfcCurveSegment.Dim`, `IfcPointByDistanceExpression.Dim`,
+`IfcGradientCurve.RelativeElevation` — 7 total) into 2 new, more abstract supertype formulas instead
+(`IfcPoint.Dim`, `IfcSegment.Dim`) that their former per-subtype versions now inherit. **All Phase
+EX-2 IFC4X3 work must port against `IFC4X3_ADD2.py`, not the base `IFC4X3.py`** — using the wrong
+revision would silently port formulas for entities/attributes this port's own schema doesn't actually
+have, or miss the real ones it does. The `calc_*` total (177, not 182) and IFC4X3's own line-count
+breakdown above are corrected to match ADD2; the WHERE-rule class count (780) is NOT yet re-verified
+against ADD2 specifically (Phase EX-4 scope, not urgent — flagged here so whoever scopes that phase
+re-derives it from `IFC4X3_ADD2.py`, not the base file, from the start).
 
 The "boilerplate" ~38% of every file needs no manual line-by-line porting at all — it's mechanical
 and covered by a handful of small, generic, one-time TS helpers instead:
@@ -72,12 +89,13 @@ and covered by a handful of small, generic, one-time TS helpers instead:
 - Per-schema one-line `IfcXxx(*args, **kwargs)` convenience-constructor wrappers (872 in IFC4X3
   alone) — replaced by this port's own existing `file.createEntity(...)` call sites; not ported.
 
-**Cross-schema overlap** (real signal for sequencing, not just size): IFC4→IFC4X3 share 62/65
-`calc_*` names (95%), IFC2X3→IFC4 share 47/55 (85%) — but bodies are NOT mostly identical (only
-42%/21% byte-identical respectively). So porting smallest-schema-first and diffing each subsequent
-schema's same-named function against the already-ported version is a large, real time-saver, but
-every function still needs its own independent verification — this is not "port once, copy-paste
-twice."
+**Cross-schema overlap** (real signal for sequencing, not just size): IFC4→IFC4X3_ADD2 share 58/60
+`calc_*` names (97%, corrected — see the IFC4X3_ADD2 correction above), IFC2X3→IFC4 share 47/55 (85%)
+— but bodies are NOT mostly identical (only 42%/21% byte-identical respectively, confirmed by direct
+experience across all of Phase EX-2's actual IFC2X3/IFC4 chunks, not just estimated). So porting
+smallest-schema-first and diffing each subsequent schema's same-named function against the
+already-ported version is a large, real time-saver, but every function still needs its own
+independent verification — this is not "port once, copy-paste twice."
 
 ## 4. Phase order
 
@@ -110,16 +128,17 @@ this project's established convention for shim-layer code with no dedicated real
 
 ### Phase EX-2 — DERIVE (`calc_*`) function computation, closing out "Derived-attribute support"
 
-Ports all 182 `calc_*` functions (55 + 62 + 65, with the overlap-aware diffing strategy from §3) and
-wires them into `EntityInstance`'s attribute-read path so reading a DERIVED attribute actually
-computes and returns the real value — mirroring real Python's `entity_instance.__getattr__`
-DERIVE-dispatch mechanism — instead of throwing or returning nothing. **This alone fully resolves
-the "Derived-attribute support" `PROGRESS.md` row**, independent of everything in Phase EX-4.
-Sequencing: IFC2X3 first (55 functions, establishes the wiring pattern), then IFC4 (62, diff
-against IFC2X3's port for the 47 shared names), then IFC4X3 (65, diff against IFC4's port for the
-62 shared names). Chunk by function count at this project's own established per-chunk granularity
-(roughly 5-15 functions per chunk depending on formula complexity) — expect on the order of
-10-15 chunks total across the 3 schemas, not one giant chunk.
+Ports all 177 `calc_*` functions (55 + 62 + 60, with the overlap-aware diffing strategy from §3 —
+corrected 2026-09-23 from an original 182/65 estimate that was computed against the wrong IFC4X3
+schema revision, see §3's own correction note) and wires them into `EntityInstance`'s attribute-read
+path so reading a DERIVED attribute actually computes and returns the real value — mirroring real
+Python's `entity_instance.__getattr__` DERIVE-dispatch mechanism — instead of throwing or returning
+nothing. **This alone fully resolves the "Derived-attribute support" `PROGRESS.md` row**, independent
+of everything in Phase EX-4. Sequencing: IFC2X3 first (55 functions, establishes the wiring pattern
+— **complete**, 4 chunks, PRs #170/#172/#175/#177/#180), then IFC4 (62, diff against IFC2X3's port
+for the 47 shared names — **complete**, 4 chunks, PRs #182/#184/#186/#188), then IFC4X3_ADD2 (60,
+diff against IFC4's port for the 58 shared names). Chunk by function count at this project's own
+established per-chunk granularity (roughly 5-15 functions per chunk depending on formula complexity).
 
 ### Phase EX-3 — `validate.py`'s own base checks
 
@@ -133,8 +152,10 @@ chunks.
 
 ### Phase EX-4 — WHERE-rule classes + `rule_executor.py` (the large chunk)
 
-The bulk of the effort: 1,830 rule classes/functions across the 3 schemas (~16,831 lines once the
-182 already-ported `calc_*` functions from Phase EX-2 are excluded), plus porting
+The bulk of the effort: 1,830 rule classes/functions across the 3 schemas (not yet re-verified against
+`IFC4X3_ADD2.py` specifically — see §3's correction note; figure carried over from the original,
+base-`IFC4X3.py`-derived estimate) (~16,831 lines once the 177 already-ported `calc_*` functions from
+Phase EX-2 are excluded), plus porting
 `rule_executor.py` (306 lines) itself. Confirmed **zero geometry-kernel dependencies** anywhere in
 a broad cross-section of the rule files — this is a real, load-bearing finding: it means this phase
 is not expected to hit the kind of "permanently blocked, disclosed throw" pattern that `api.geometry`/
