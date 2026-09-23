@@ -142,13 +142,111 @@ established per-chunk granularity (roughly 5-15 functions per chunk depending on
 
 ### Phase EX-3 — `validate.py`'s own base checks
 
-Ports the ~800 non-`--rules` lines of `validate()` (type/cardinality/`GlobalId`-uniqueness/header
-checks). Confirmed to need only already-available primitives (`is_a`, `is_abstract`,
-`all_attributes`, `all_inverse_attributes`, `type_of_attribute`, `declaration_by_name`,
-`get_attribute_category`) plus the same derived-attribute-override mechanism from Phase EX-0. Can
-run before or after Phase EX-2 (no dependency between them beyond EX-0/EX-1); sequenced here mainly
-because it's smaller and delivers a real, usable `validate()` (minus `--rules`) sooner. Expect 1-2
-chunks.
+**Scoped 2026-09-23** (dedicated investigation, after Phase EX-2 closed): real `validate.py` is 894
+lines total, but only 616 non-blank/non-comment lines belong to the portable library surface — the
+`__main__`/`argparse`/`LogDetectionHandler` CLI block (~110 lines) is deliberately OUT OF SCOPE,
+matching this project's established precedent of never porting Python's own `if __name__ ==
+"__main__"` entry points; the TS port exposes `validate()` as a plain library function only.
+
+**Primitive-layer findings** (each investigated directly against real C++/SWIG source and this
+port's own native/TS layers, not assumed):
+
+- **`entity.derived()`** (per-attribute-position DERIVE flags) — the native C++ accessor
+  (`schema.h`) has no N-API binding, but **no new primitive is needed**: `get_attribute_category`
+  (already exposed, already used throughout Phase EX-2) was independently confirmed during Phase
+  EX-0 to reproduce the exact same per-position semantics, including subtype overrides. This answers
+  the "is this attribute derived in subtype" check `validate()` needs (line 554-565 of real source).
+- **`get_feature("use_attribute_value_derived")`/`attribute_value_derived`** (Phase EX-0's own
+  flagged open question) — confirmed to be pure SWIG-only glue with zero underlying `ifcparse` C++
+  support (`IfcParseWrapper.i:114-145`, a file-static bool + typemap substitution). Its ONLY real use
+  is distinguishing a raw `*` from `$` in parsed STEP text for one diagnostic message
+  ("Attribute is derived in subtype") — the actual pass/fail LOGIC of that check doesn't need it
+  (covered by `get_attribute_category` above). **Decision: deliberately deprioritized for v1** —
+  building new C++ + a napi shim reproducing a SWIG typemap trick, purely for one diagnostic
+  message's precision, is not worth it relative to everything else this phase needs; disclosed as a
+  known, intentional gap rather than silently worked around.
+- **`f.header` sub-entity accessors** (`file_description`/`file_name` and their fields:
+  `description`, `implementation_level`, `name`, `time_stamp`, `author`, `organization`,
+  `preprocessor_version`, `originating_system`, `authorization`) — **a real, confirmed, blocking gap**,
+  already disclosed in `file.ts`'s own header comment from an earlier chunk. `file.header(): spf_header`
+  exists natively and in TS, but `spf_header`'s own `file_description()`/`file_name()`/`file_schema()`
+  sub-accessors (returning ordinary, plain `Header_section_schema::file_description`/`file_name`
+  C++ classes with simple getter/setter methods, confirmed directly against `spf_header.h`/
+  `Header_section_schema.h` — not opaque SWIG magic) have no N-API binding at all. **This needs new,
+  but small and mechanical, wrappergen work** — the underlying C++ classes are ordinary
+  getter-based entities, the same shape wrappergen already handles for the entire IFC schema; this is
+  scoping/pointing work, not new architecture. Blocks `validate_ifc_header()` specifically.
+- **`select_type.select_list()`** — already exists and is well-used. **`entity_type.subtypes()`** —
+  native-only, no binding, BUT `util/schema.ts` already has a verified, reusable workaround
+  (`subtypesOf`, confirmed to reproduce `entity::subtypes()`'s exact relative ordering by scanning
+  `schema_definition.declarations()` and grouping by `.supertype()`) — **no new primitive needed**,
+  `get_select_members`'s entity-subtype-walk branch reuses this directly.
+- **`enumeration_type.enumeration_items()`** (forward index→name list) — native-only, no binding, and
+  `util/attribute.ts`'s existing `getEnumItems` already throws a disclosed error for it. But
+  `assert_valid`'s actual need (line 303-304 of real source) is a single-value MEMBERSHIP check
+  (`val not in attr_type.enumeration_items()`), not the full list — already-exposed
+  `enumeration_type.lookup_enum_offset(value)` (throws iff not a member) answers exactly that
+  question without needing the missing bulk accessor at all. **No new primitive needed.**
+- **`aggregation_type.type_of_aggregation_string()`** (SET/LIST/BAG/ARRAY keyword, for
+  `assert_valid_inverse`'s error-message text only, never for pass/fail logic) — confirmed missing,
+  no existing workaround (`util/element.ts`'s own prior chunk already disclosed this same gap and
+  conservatively worked around its own, unrelated need). **Decision: disclosed message-format
+  simplification** — the inverse-cardinality violation message uses a generic aggregation-kind
+  placeholder instead of the exact keyword; the check's actual pass/fail logic is unaffected. Not
+  worth new C++ for message cosmetics alone.
+- **`ifcopenshell.get_log()` / structured C++ parse-error capture** (`log_internal_cpp_errors`) —
+  confirmed genuinely unavailable: this port has no way to even CONSTRUCT a `logger` instance at all
+  (no `logger::root()` binding, no factory), let alone one wired to the module-init-time global
+  capture stream real Python's SWIG glue sets up. This function only matters when `validate()` is
+  given a raw file PATH (not an already-open file) — to attribute low-level C++ parse errors
+  (malformed attribute values, schema errors) to specific instances/lines. **Decision: TS `validate()`
+  accepts only an already-open `IfcFile`, never a raw path/string** — matching this port's own
+  established API convention (every other module operates on an already-open file, never does its
+  own file I/O). This makes the entire path-opening branch, `log_internal_cpp_errors`, and the
+  schema-error-recovery-via-raw-`.exp`-parsing branch (lines 469-480) N/A by design, not a porting
+  gap — a disclosed, deliberate simplification.
+- **`is_a`, `is_abstract`, `all_attributes`, `all_inverse_attributes`, `type_of_attribute`,
+  `declaration_by_name`, `inverse_attribute.{bound1,bound2,entity_reference,attribute_reference}`,
+  `guid.expand`** — all already confirmed present and in active use from prior phases. No new work.
+
+**API design decision (locked here, not deferred to Phase EX-5)**: `validate()` returns a structured
+list of violations rather than accepting a Python-style duck-typed `logger` object (`logger.error(...)`,
+`logger.set_state(...)`) — matching the design this plan already locked for Phase EX-4's
+`rule_executor` port. Building EX-3 with a Python-mimicking logger-object API only to redesign it when
+Phase EX-5 unifies EX-3+EX-4 into one entry point would be pure rework; locking the shape once, now,
+avoids that. `validate(file, options?)` initially supports base checks only; the `rules` option is
+added when Phase EX-4 lands (omitted from the type signature until then, not stubbed as a no-op, to
+avoid promising unimplemented behavior).
+
+**Test-fidelity resource already in hand**: real Python's own `test/test_validate.py` (67 lines) is
+a simple, fully data-driven parametrized test — glob every `.ifc` file in `test/fixtures/validate/`,
+parse its expected result from its filename (`pass-*` → 0 violations, `fail-*`/`fail-expected-N-*` →
+1/N violations, via `fixture_generate.py`'s own tiny convention), run `validate()`, assert the count.
+**All 38 real fixture files are ALREADY vendored byte-identical into this port's own
+`src/ifcopenshell-ts/test/fixtures/validate/`** (confirmed via `diff`) — zero fixture-sourcing work
+needed, and a spot-check of the fixture names found none that appear to require `--rules`/WHERE-rule
+execution (Phase EX-4), meaning Phase EX-3 can likely close with FULL fixture-based test-fidelity
+coverage immediately, not a partial subset deferred to Phase EX-5.
+
+**Revised chunk plan** (corrects the original "expect 1-2 chunks" estimate — the real primitive-layer
+findings above, plus the up-front API design decision, make 4 chunks the realistic count; tracked as a
+concrete checklist in `PROGRESS.md`'s own `validate.py port` row):
+
+1. **Primitive-fix chunk**: expose `spf_header`'s 3 sub-entity accessors and their own field getters
+   to wrappergen/TS (the one real, confirmed, blocking native gap). Small and mechanical.
+2. **Core type-checking engine**: `ValidationError`, `format`, `assert_valid` (all 6 type-kind
+   branches), `get_select_members`, `assert_valid_inverse`, the `entity_attribute_map` caching
+   pattern (mirrors `attributeCache.ts`'s own established shape). The meatiest, most self-contained
+   logic; needs no orchestration yet.
+3. **Standalone checks**: `validate_guid` (trivial, reuses `guid.ts`), `validate_ifc_header` (needs
+   chunk 1's new primitive), `validate_ifc_applications` (uniqueness-dedup pattern, reuses
+   already-established `by_type`). Independent of chunk 2's engine.
+4. **Main `validate()` orchestrator (closes Phase EX-3)**: wires chunks 2+3 together — per-instance
+   loop, file-wide `GlobalId` uniqueness, abstract-entity check, derived-in-subtype check (via
+   `get_attribute_category`), forward/inverse per-attribute checks. Ships the TS-native
+   `validate(file, options?)` entry point per the locked design above, AND wires up the
+   fixture-based test-fidelity suite immediately (not deferred to Phase EX-5), since the fixtures are
+   confirmed 100% ready and require no `--rules` support.
 
 ### Phase EX-4 — WHERE-rule classes + `rule_executor.py` (the large chunk)
 
