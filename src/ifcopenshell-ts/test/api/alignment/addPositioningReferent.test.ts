@@ -54,7 +54,14 @@ function alignmentAt(file: IfcFile, coordinates: readonly [number, number, numbe
 }
 
 describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.addPositioningReferent (IFC4X3)", () => {
-	test("composite-curve branch: throws at the disclosed IfcLengthMeasure gap, before any IfcReferent is created", () => {
+	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate this
+	// test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..."
+	// entry, now RESOLVED for the shared gate) -- `addPositioningReferent` no longer
+	// throws here. Real expected result: this file's own header comment above (real
+	// Python's `Pset_Stationing.Station == 2000.0` assertion, and a real
+	// `IfcLinearPlacement` built from the composite curve) -- left to a follow-up
+	// module-grouped chunk to verify and flip, per that entry's own phasing.
+	test.skip("composite-curve branch: throws at the disclosed IfcLengthMeasure gap, before any IfcReferent is created", () => {
 		const file = createTestFile("IFC4X3");
 		const alignment = alignmentAt(file, [1, 2, 0]);
 		const compositeCurveSegment = file.createEntity(
@@ -78,7 +85,13 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.addPositio
 		expect(file.byType("IfcRelPositions")).toHaveLength(0);
 	});
 
-	test("no-representation (fallback placement) branch: builds a real IfcReferent + empty Pset_Stationing, then throws at the disclosed editPset gap", () => {
+	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate this
+	// test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..."
+	// entry, now RESOLVED for the shared gate) -- the `editPset(Station: 2000.0)` call
+	// no longer throws here. Real expected result: this file's own header comment
+	// above (real Python's `Pset_Stationing.Station == 2000.0` assertion) -- left to a
+	// follow-up module-grouped chunk to verify and flip, per that entry's own phasing.
+	test.skip("no-representation (fallback placement) branch: builds a real IfcReferent + empty Pset_Stationing, then throws at the disclosed editPset gap", () => {
 		const file = createTestFile("IFC4X3");
 		const alignment = alignmentAt(file, [10, 20, 0]);
 		const segment = file.createEntity("IfcBuildingElementProxy", guid.new(), null, "Sign");

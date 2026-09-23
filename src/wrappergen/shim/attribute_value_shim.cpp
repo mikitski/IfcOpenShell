@@ -35,6 +35,50 @@ const ifcopenshell::attribute* attribute_declaration_at(const express::base& ins
     return entity_declaration->attribute_by_index(static_cast<size_t>(attribute_index));
 }
 
+// Resolves the declared EXPRESS argument type at `attribute_index`, for either a real
+// entity instance (delegates to `attribute_declaration_at`'s attribute-level
+// `type_of_attribute()`, as before) or a bare, standalone simple/defined-type instance
+// (`type_declaration` -- `IfcLabel`/`IfcDuration`/etc. constructed on their own, with no
+// owning entity/attribute). A `type_declaration`-declared instance only ever has a single
+// wrapped value at index 0 (see `entityInstance.ts`'s `attributeCount()`, which already
+// returns 1 for exactly this case) and `type_declaration::declared_type()` needs no
+// entity/attribute context to resolve -- `ifcopenshell::from_parameter_type` (utils.cpp)
+// already walks a bare `parameter_type*` on its own, recursing through further
+// `type_declaration`s and aggregation element types. A `select_type`/`enumeration_type`
+// -declared bare instance has no supported attribute-index target at all and falls
+// through to `entity_declaration_of`'s existing throw, unchanged -- only `type_declaration`
+// is handled here, deliberately not the other two `declaration` subtypes.
+ifcopenshell::argument_type declared_argument_type_of(const express::base& instance, int attribute_index) {
+    const auto* entity_declaration = instance.declaration().as_entity();
+    if (entity_declaration != nullptr) {
+        const auto* attribute_declaration = attribute_declaration_at(instance, attribute_index);
+        return ifcopenshell::from_parameter_type(attribute_declaration->type_of_attribute());
+    }
+
+    const auto* type_declaration = instance.declaration().as_type_declaration();
+    if (type_declaration != nullptr) {
+        if (attribute_index != 0) {
+            throw std::out_of_range("Attribute index out of range");
+        }
+        return ifcopenshell::from_parameter_type(type_declaration->declared_type());
+    }
+
+    // Neither an entity nor a simple/defined-type instance (e.g. a bare select_type/
+    // enumeration_type-declared instance) -- reuse `entity_declaration_of`'s existing
+    // throw so the message/behavior for this genuine "not a valid target at all" case is
+    // unchanged. `entity_declaration_of` always throws here (its own `as_entity()` check
+    // is the same one already established as null above), so this call never returns.
+    entity_declaration_of(instance);
+    throw std::runtime_error("Attribute access is only supported on entity instances");
+}
+
+// Still gated through `attribute_declaration_at`'s entity-only precondition, unlike
+// `declared_argument_type_of` above -- deliberately NOT extended to the
+// `type_declaration` case as part of this fix. A bare simple/defined-type instance has
+// no *named* attribute to look up an enumeration for in the first place (it only ever
+// has a single, unnamed, index-0 value), so this function's own contract doesn't apply
+// there the way `attribute_kind_of`/`get_attribute_type_name`'s did. Left as its own,
+// still entity-only, precondition rather than silently widened.
 const ifcopenshell::enumeration_type* enumeration_type_at(const express::base& instance, int attribute_index) {
     const auto* attribute_declaration = attribute_declaration_at(instance, attribute_index);
     const auto* parameter_type = attribute_declaration->type_of_attribute();
@@ -385,8 +429,7 @@ void set_attribute_value_variant(express::base& instance, int attribute_index, c
 }
 
 attribute_value_kind attribute_kind_of(const express::base& instance, int attribute_index) {
-    const auto* attribute_declaration = attribute_declaration_at(instance, attribute_index);
-    const ifcopenshell::argument_type declared_type = ifcopenshell::from_parameter_type(attribute_declaration->type_of_attribute());
+    const ifcopenshell::argument_type declared_type = declared_argument_type_of(instance, attribute_index);
     switch (declared_type) {
     case ifcopenshell::Argument_BOOL:
         return ATTRIBUTE_VALUE_KIND_BOOL;
@@ -430,13 +473,22 @@ int get_argument_index(const express::base& instance, const std::string& name) {
     return static_cast<int>(index);
 }
 
+// Still gated through `attribute_declaration_at`'s entity-only precondition, unlike
+// `get_attribute_type_name` below (which now shares `declared_argument_type_of` with
+// `attribute_kind_of`) -- deliberately NOT extended to the `type_declaration` case as
+// part of this fix. A bare simple/defined-type instance's own index-0 value has no
+// *name* to return in the first place (`ifcparse`'s `attribute` class -- what this
+// function's return type describes -- only exists on a real entity's own forward
+// attribute list); confirmed currently unreachable from the TS layer regardless
+// (`entityInstance.ts` has no caller that invokes this primitive on a non-entity
+// instance). Left as its own, still entity-only, precondition rather than silently
+// widened.
 std::string get_attribute_name(const express::base& instance, int attribute_index) {
     return attribute_declaration_at(instance, attribute_index)->name();
 }
 
 std::string get_attribute_type_name(const express::base& instance, int attribute_index) {
-    const auto* attribute_declaration = attribute_declaration_at(instance, attribute_index);
-    return ifcopenshell::argument_type_to_string(ifcopenshell::from_parameter_type(attribute_declaration->type_of_attribute()));
+    return ifcopenshell::argument_type_to_string(declared_argument_type_of(instance, attribute_index));
 }
 
 int get_attribute_category(const express::base& instance, const std::string& name) {

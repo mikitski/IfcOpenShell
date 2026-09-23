@@ -180,6 +180,56 @@ describe("Phase 1 primitive layer", () => {
 		expect(entity).not.toBeNull();
 		expect(entity.attribute_count()).toBeGreaterThan(0);
 	});
+
+	// Regression coverage, at the raw native-primitive level, for the
+	// `attribute_value_shim.cpp` fix backing `TODOS.md`'s "`EntityInstance.setByIndex`/
+	// `IfcFile.createEntity` cannot write an initial value into a freshly created
+	// simple/defined-type instance" gate. `attribute_kind_of`/`attribute_type`
+	// (`entity_instance.attribute_kind_of`/`.attribute_type` -- the exact two shim
+	// free functions `entityInstance.ts`'s `setByIndex`/`attributeType` call) used to
+	// unconditionally throw "Attribute access is only supported on entity instances"
+	// for ANY non-entity target, via `entity_declaration_of`'s hard `as_entity()`
+	// requirement -- with no fallback to `declaration().as_type_declaration()` for a
+	// bare, standalone simple/defined-type instance (constructed with no owning
+	// entity/attribute at all). This exercises the native primitives directly,
+	// bypassing `EntityInstance`/`IfcFile` entirely, so it also documents that this is
+	// a primitive-layer fix, not a TS-layer one.
+	test("attribute_kind_of()/attribute_type() resolve a bare type_declaration instance's own declared_type -- no owning entity/attribute needed", () => {
+		const file = openBlankIfc4File();
+		const schema = file.schema();
+
+		// Scalar case: IfcLabel (STRING-backed defined type).
+		const labelDeclaration: Declaration = schema.declaration_by_name_with_name("IfcLabel");
+		expect(labelDeclaration.as_entity()).toBeNull();
+		expect(labelDeclaration.as_type_declaration()).not.toBeNull();
+		const label = file.create_with_declaration_instance_id(labelDeclaration, -1);
+		expect(label.attribute_kind_of(0)).toBe(native.STRING);
+		expect(label.attribute_type(0)).toBe("STRING");
+		label.set_attribute_value(0, { kind: native.STRING, string_value: "hello" });
+		expect(label.get_attribute_value(0)).toBe("hello");
+
+		// Aggregate case: IfcLineIndex (LIST [2:?] OF IfcPositiveInteger).
+		const lineIndexDeclaration: Declaration = schema.declaration_by_name_with_name("IfcLineIndex");
+		expect(lineIndexDeclaration.as_entity()).toBeNull();
+		expect(lineIndexDeclaration.as_type_declaration()).not.toBeNull();
+		const lineIndex = file.create_with_declaration_instance_id(lineIndexDeclaration, -1);
+		expect(lineIndex.attribute_kind_of(0)).toBe(native.AGGREGATE);
+		expect(lineIndex.attribute_type(0)).toBe("AGGREGATE OF INT");
+		lineIndex.set_attribute_value(0, {
+			kind: native.AGGREGATE,
+			aggregate_value: [
+				{ kind: native.INTEGER, integer_value: 1 },
+				{ kind: native.INTEGER, integer_value: 2 },
+			],
+		});
+		expect(lineIndex.get_attribute_value(0)).toEqual([1, 2]);
+
+		// Out-of-range attribute index (1) on a bare type_declaration instance, which
+		// only ever has index 0 -- still throws exactly like an out-of-range entity
+		// attribute index does, unchanged by this fix.
+		expect(() => label.attribute_kind_of(1)).toThrow();
+		expect(() => label.attribute_type(1)).toThrow();
+	});
 });
 
 // Async primitives (planning/ifcopenshell-ts/10-architecture.md's "Async story"):
