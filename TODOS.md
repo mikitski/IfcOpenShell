@@ -1105,6 +1105,26 @@ specific schema case from that one test's own parametrization
 per-test-exclusion precedent (e.g. `assignLagTime.test.ts`'s own IFC2X3 case just above),
 with a comment citing back to this entry. No source changes needed for either.
 
+**UPDATE 2026-09-23 (Phase EX-2 chunks 3+4, EXPRESS derived-attribute porting):** a third,
+independent consequence of this exact same gate blocks 2 of IFC2X3's 55 `calc_*` DERIVE
+functions from being ported at all: `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions`
+both need to construct a fresh `IfcDimensionalExponents` (a defined type -- a 7-tuple of
+INTEGER values) *with* its 7 field values populated at construction time (real Python:
+`IfcDimensionalExponents(0, 0, 0, 0, 0, 0, 0)`, then further field mutation via
+`result.LengthExponent = ...` etc.) -- the exact same "simple/defined-type instance with an
+initial value" shape as this entry's own `IfcLabel("hello")` example, just a 7-field defined
+type instead of a single-field one. Confirmed still absent by chunk 4's own investigation (a
+fresh search of `src/` found nothing resembling a working construction/mutation primitive for
+any defined-type value). Left unfixed and unblocked -- these 2 functions are simply not yet
+ported, tracked in `planning/ifcopenshell-ts/PROGRESS.md`'s `Derived-attribute support` row --
+rather than taking on this cross-cutting `entityInstance.ts` fix inline in an EXPRESS-rules
+porting chunk, per this entry's own already-established "flag for the orchestrating session's
+review, don't fix silently" precedent. Per `70-express-rules-plan.md`'s own disclosed 85-95%
+cross-schema name-overlap, IFC4/IFC4X3 almost certainly have their own equal-named
+`calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` functions that will hit this
+identical wall when their own turn comes -- fixing this gate once, here, would unblock all of
+them at once rather than re-discovering the same block 2-3 more times.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
