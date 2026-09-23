@@ -192,6 +192,29 @@
 // file's own test file for the direct correspondence) plus one dedicated smoke test asserting
 // `addRailingRepresentation`'s own disclosed, current throw.
 //
+// --- UPDATE (Phase EX-2's IFC4 second chunk, `src/express/rules/ifc4.ts`): gap 1's
+//     OWN symptom, on IFC4 specifically, changes (the underlying total blockage does
+//     not) ---
+//
+// `calc_IfcCurve_Dim`/`calc_IfcCartesianPointList_Dim` are now ported for IFC4, so
+// `IfcCurve.Dim` itself no longer unconditionally throws "has no attribute 'Dim'" --
+// but `addRailingRepresentation` still throws on every real IFC4 invocation, via a
+// DIFFERENT still-unported dependency one step further down the same call chain:
+// `builder.circle(...)` (the support disk profile) builds an `IfcCircle`, whose own
+// `.Dim` (`IfcCurveDim`'s `IfcConic` branch) reads `Position.Dim` --
+// `IfcAxis2Placement2D`'s own `Dim` is declared DERIVE at the `IfcPlacement`
+// supertype level (`calc_IfcPlacement_Dim`), genuinely still UNPORTED for IFC4. This
+// now surfaces as `TypeError: Cannot convert a Symbol value to a string` (`.profile()`'s
+// own error-message template literal choking on `runtimeShim.INDETERMINATE`, the
+// swallowed result of that still-missing dependency), not the original "has no
+// attribute 'Dim'" -- re-verified directly against the real, built addon, not
+// assumed. See `addRailingRepresentation.test.ts`'s own updated smoke test for the
+// full citation. (Separately, gap 2's own "blocked by `IfcLineIndex`/`IfcArcIndex`
+// defined-type creation" framing above predates PR #179, which already fixed that
+// specific primitive gap -- a real, pre-existing staleness independent of this
+// update, not investigated or corrected further here, out of scope for this DERIVE-
+// porting chunk.)
+//
 // *** `ShapeBuilder` methods used, and their exact signatures verified directly against
 // `util/shapeBuilder.ts` (not assumed from the Python method names alone) ***
 //

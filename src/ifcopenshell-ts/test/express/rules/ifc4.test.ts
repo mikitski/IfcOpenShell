@@ -28,6 +28,7 @@ import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../../src/entityInstance";
 import * as ifc4 from "../../../src/express/rules/ifc4";
 import { INDETERMINATE } from "../../../src/express/runtimeShim";
+import type { IfcFile } from "../../../src/file";
 import { createTestFile } from "../../bootstrap";
 
 function ratios(direction: unknown): number[] {
@@ -416,6 +417,545 @@ describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 1)", ()
 			const placement = file.createEntity("IfcAxis1Placement", location, null);
 			const z = (placement as unknown as { Z: EntityInstance }).Z;
 			closeArray(ratios(z), [0, 0, 1]);
+		});
+	});
+});
+
+// =============================================================================
+// Original, hand-rolled coverage for Phase EX-2's IFC4 SECOND chunk
+// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): 15 more of IFC4's 62
+// `calc_*` DERIVE functions (`src/express/rules/ifc4.ts`) -- see that file's own
+// header comment (the "second chunk" section) for the full byte-identical-vs-genuinely
+// -different diffing writeup against IFC2X3, the 3 newly-disclosed bugs, and the 3
+// cascading test-fidelity fixes this chunk required elsewhere in the suite
+// (`test/express/rules/ifc2x3.test.ts`, `test/util/representation.test.ts`,
+// `test/util/shapeBuilder.test.ts`).
+// =============================================================================
+describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 2)", () => {
+	// --- calc_IfcBSplineCurveWithKnots_UpperIndexOnKnots ---
+	describe("calc_IfcBSplineCurveWithKnots_UpperIndexOnKnots", () => {
+		// Python: `sizeof(Knots)`.
+		function buildCurve(file: IfcFile, knots: number[]) {
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0]);
+			const p2 = file.createEntity("IfcCartesianPoint", [2.0, 0.0]);
+			// Degree, ControlPointsList, CurveForm, ClosedCurve, SelfIntersect,
+			// KnotMultiplicities, Knots, KnotSpec.
+			return file.createEntity(
+				"IfcBSplineCurveWithKnots",
+				2,
+				[p0, p1, p2],
+				"UNSPECIFIED",
+				false,
+				false,
+				[3, 3],
+				knots,
+				"UNSPECIFIED",
+			);
+		}
+
+		test("3 knots -> UpperIndexOnKnots = 3", () => {
+			const file = createTestFile("IFC4");
+			const curve = buildCurve(file, [0.0, 0.5, 1.0]);
+			expect(ifc4.calc_IfcBSplineCurveWithKnots_UpperIndexOnKnots(curve as EntityInstance)).toBe(3);
+		});
+
+		test("end-to-end: curve.UpperIndexOnKnots resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const curve = buildCurve(file, [0.0, 0.5, 1.0]);
+			expect((curve as unknown as { UpperIndexOnKnots: number }).UpperIndexOnKnots).toBe(3);
+		});
+	});
+
+	// --- calc_IfcBSplineSurface_UUpper / _VUpper / _ControlPoints ---
+	describe("calc_IfcBSplineSurface_UUpper / _VUpper / _ControlPoints", () => {
+		function grid(file: IfcFile, rows: number, cols: number): EntityInstance[][] {
+			const result: EntityInstance[][] = [];
+			for (let r = 0; r < rows; r++) {
+				const row: EntityInstance[] = [];
+				for (let c = 0; c < cols; c++) {
+					row.push(file.createEntity("IfcCartesianPoint", [r, c]));
+				}
+				result.push(row);
+			}
+			return result;
+		}
+
+		function buildSurface(file: IfcFile, rows: number, cols: number) {
+			// UDegree, VDegree, ControlPointsList, SurfaceForm, UClosed, VClosed, SelfIntersect.
+			return file.createEntity("IfcBSplineSurface", 3, 3, grid(file, rows, cols), "UNSPECIFIED", false, false, false);
+		}
+
+		// Python: `sizeof(ControlPointsList) - 1`. A 3-row grid -> UUpper = 2.
+		test("calc_IfcBSplineSurface_UUpper: 3 rows -> 2", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file, 3, 4);
+			expect(ifc4.calc_IfcBSplineSurface_UUpper(surface as EntityInstance)).toBe(2);
+		});
+
+		// Python: `sizeof(ControlPointsList[0]) - 1`. A 4-column grid -> VUpper = 3.
+		test("calc_IfcBSplineSurface_VUpper: 4 columns -> 3", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file, 3, 4);
+			expect(ifc4.calc_IfcBSplineSurface_VUpper(surface as EntityInstance)).toBe(3);
+		});
+
+		// **Disclosed bug 1 pin** (see `ifc4.ts`'s own header comment, second chunk):
+		// `IfcMakeArrayOfArray` (delegated to by `calc_IfcBSplineSurface_ControlPoints`)
+		// unconditionally raises a TypeError-equivalent for any structurally valid
+		// `IfcBSplineSurface` -- ported as a thrown error, not silently "fixed".
+		test("disclosed bug 1: ControlPoints always throws (real Python crashes here too)", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file, 3, 4);
+			expect(() => ifc4.calc_IfcBSplineSurface_ControlPoints(surface as EntityInstance)).toThrow(
+				/unsupported operand type/,
+			);
+		});
+
+		test("end-to-end: surface.UUpper/.VUpper resolve through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file, 3, 4);
+			expect((surface as unknown as { UUpper: number }).UUpper).toBe(2);
+			expect((surface as unknown as { VUpper: number }).VUpper).toBe(3);
+		});
+	});
+
+	// --- calc_IfcBSplineSurfaceWithKnots_KnotUUpper / _KnotVUpper ---
+	describe("calc_IfcBSplineSurfaceWithKnots_KnotUUpper / _KnotVUpper", () => {
+		function buildSurface(file: IfcFile, uKnots: number[], vKnots: number[]) {
+			const points = [
+				[file.createEntity("IfcCartesianPoint", [0, 0]), file.createEntity("IfcCartesianPoint", [0, 1])],
+				[file.createEntity("IfcCartesianPoint", [1, 0]), file.createEntity("IfcCartesianPoint", [1, 1])],
+			];
+			// UDegree, VDegree, ControlPointsList, SurfaceForm, UClosed, VClosed,
+			// SelfIntersect, UMultiplicities, VMultiplicities, UKnots, VKnots, KnotSpec.
+			return file.createEntity(
+				"IfcBSplineSurfaceWithKnots",
+				1,
+				1,
+				points,
+				"UNSPECIFIED",
+				false,
+				false,
+				false,
+				[2, 2],
+				[2, 2],
+				uKnots,
+				vKnots,
+				"UNSPECIFIED",
+			);
+		}
+
+		// Python: `sizeof(UKnots)` / `sizeof(VKnots)`.
+		test("KnotUUpper = sizeof(UKnots), KnotVUpper = sizeof(VKnots)", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file, [0.0, 1.0], [0.0, 0.5, 1.0]);
+			expect(ifc4.calc_IfcBSplineSurfaceWithKnots_KnotUUpper(surface as EntityInstance)).toBe(2);
+			expect(ifc4.calc_IfcBSplineSurfaceWithKnots_KnotVUpper(surface as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcCartesianPointList_Dim ---
+	describe("calc_IfcCartesianPointList_Dim", () => {
+		// Python: `IfcPointListDim(self)` -- dispatches on the concrete
+		// IfcCartesianPointList2D/3D subtype (genuinely IFC4-only, no IFC2X3 equivalent).
+		test("IfcCartesianPointList2D -> 2", () => {
+			const file = createTestFile("IFC4");
+			const pointList = file.createEntity("IfcCartesianPointList2D", [
+				[0.0, 0.0],
+				[1.0, 1.0],
+			]);
+			expect(ifc4.calc_IfcCartesianPointList_Dim(pointList as EntityInstance)).toBe(2);
+		});
+
+		test("IfcCartesianPointList3D -> 3", () => {
+			const file = createTestFile("IFC4");
+			const pointList = file.createEntity("IfcCartesianPointList3D", [
+				[0.0, 0.0, 0.0],
+				[1.0, 1.0, 1.0],
+			]);
+			expect(ifc4.calc_IfcCartesianPointList_Dim(pointList as EntityInstance)).toBe(3);
+		});
+
+		test("end-to-end: pointList.Dim resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const pointList = file.createEntity("IfcCartesianPointList3D", [[0.0, 0.0, 0.0]]);
+			expect((pointList as unknown as { Dim: number }).Dim).toBe(3);
+		});
+	});
+
+	// --- calc_IfcCompositeCurve_NSegments / _ClosedCurve (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcCompositeCurve_NSegments / _ClosedCurve", () => {
+		function buildComposite(file: IfcFile, transitions: string[]) {
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const segments = transitions.map((t) => file.createEntity("IfcCompositeCurveSegment", t, true, polyline));
+			return file.createEntity("IfcCompositeCurve", segments, false);
+		}
+
+		test("NSegments = sizeof(Segments)", () => {
+			const file = createTestFile("IFC4");
+			const composite = buildComposite(file, ["CONTINUOUS", "CONTINUOUS"]);
+			expect(ifc4.calc_IfcCompositeCurve_NSegments(composite as EntityInstance)).toBe(2);
+		});
+
+		// Python: `Segments[NSegments - 1].Transition != discontinuous` -- the LAST
+		// segment's own Transition decides the result.
+		test("last segment CONTINUOUS -> closed (true)", () => {
+			const file = createTestFile("IFC4");
+			const composite = buildComposite(file, ["DISCONTINUOUS", "CONTINUOUS"]);
+			expect(ifc4.calc_IfcCompositeCurve_ClosedCurve(composite as EntityInstance)).toBe(true);
+		});
+
+		test("last segment DISCONTINUOUS -> not closed (false)", () => {
+			const file = createTestFile("IFC4");
+			const composite = buildComposite(file, ["CONTINUOUS", "DISCONTINUOUS"]);
+			expect(ifc4.calc_IfcCompositeCurve_ClosedCurve(composite as EntityInstance)).toBe(false);
+		});
+
+		test("end-to-end: composite.ClosedCurve resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const composite = buildComposite(file, ["DISCONTINUOUS", "CONTINUOUS"]);
+			expect((composite as unknown as { ClosedCurve: boolean }).ClosedCurve).toBe(true);
+		});
+	});
+
+	// --- calc_IfcCompositeCurveOnSurface_BasisSurface ---
+	describe("calc_IfcCompositeCurveOnSurface_BasisSurface", () => {
+		function buildOnSurface(file: IfcFile, parentCurves: EntityInstance[]) {
+			const segments = parentCurves.map((pc) => file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, pc));
+			return file.createEntity("IfcCompositeCurveOnSurface", segments, false);
+		}
+
+		// Single segment, ParentCurve = a plain IfcPolyline (neither IfcPcurve nor
+		// IfcSurfaceCurve nor IfcCompositeCurveOnSurface) -> recursion into
+		// IfcGetBasisSurface matches none of its own branches -> [].
+		test("single segment, plain-curve ParentCurve -> [] (no basis surface concept)", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const onSurface = buildOnSurface(file, [polyline]);
+			expect(ifc4.calc_IfcCompositeCurveOnSurface_BasisSurface(onSurface as EntityInstance)).toEqual([]);
+		});
+
+		// Single segment, ParentCurve = a real IfcPcurve -> the non-buggy
+		// `'ifc4.ifcpcurve' in typeof(c)` branch: `[c.BasisSurface]`.
+		test("single segment, IfcPcurve ParentCurve -> [pcurve.BasisSurface]", () => {
+			const file = createTestFile("IFC4");
+			const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+			const plane = file.createEntity("IfcPlane", planePlacement);
+			const refCurvePnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const refCurveDir = file.createEntity("IfcVector", file.createEntity("IfcDirection", [1.0, 0.0]), 1.0);
+			const referenceCurve = file.createEntity("IfcLine", refCurvePnt, refCurveDir);
+			const pcurve = file.createEntity("IfcPcurve", plane, referenceCurve);
+			const onSurface = buildOnSurface(file, [pcurve]);
+			const result = ifc4.calc_IfcCompositeCurveOnSurface_BasisSurface(onSurface as EntityInstance) as EntityInstance[];
+			expect(result).toHaveLength(1);
+			expect(result[0].equals(plane)).toBe(true);
+		});
+
+		// **Disclosed bug 3 pin**: 2+ segments unconditionally throws (list * list).
+		test("disclosed bug 3: 2 segments -> throws (real Python crashes here too)", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const onSurface = buildOnSurface(file, [polyline, polyline]);
+			expect(() => ifc4.calc_IfcCompositeCurveOnSurface_BasisSurface(onSurface as EntityInstance)).toThrow(
+				/list \* list/,
+			);
+		});
+
+		// **Disclosed bug 2 pin**: a single segment whose ParentCurve is itself an
+		// IfcSurfaceCurve unconditionally throws (list + non-list).
+		test("disclosed bug 2: IfcSurfaceCurve ParentCurve -> throws (real Python crashes here too)", () => {
+			const file = createTestFile("IFC4");
+			const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+			const plane = file.createEntity("IfcPlane", planePlacement);
+			const refCurvePnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const refCurveDir = file.createEntity("IfcVector", file.createEntity("IfcDirection", [1.0, 0.0]), 1.0);
+			const referenceCurve = file.createEntity("IfcLine", refCurvePnt, refCurveDir);
+			const pcurve = file.createEntity("IfcPcurve", plane, referenceCurve);
+			const curve3dPnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const curve3dDir = file.createEntity("IfcVector", file.createEntity("IfcDirection", [1.0, 0.0, 0.0]), 1.0);
+			const curve3d = file.createEntity("IfcLine", curve3dPnt, curve3dDir);
+			const surfaceCurve = file.createEntity("IfcSurfaceCurve", curve3d, [pcurve], "CURVE3D");
+			const onSurface = buildOnSurface(file, [surfaceCurve]);
+			expect(() => ifc4.calc_IfcCompositeCurveOnSurface_BasisSurface(onSurface as EntityInstance)).toThrow(
+				/list \+ non-list/,
+			);
+		});
+	});
+
+	// --- calc_IfcCompositeCurveSegment_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcCompositeCurveSegment_Dim", () => {
+		test("ParentCurve.Dim resolves through calc_IfcCurve_Dim's IfcPolyline branch", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const segment = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, polyline);
+			expect(ifc4.calc_IfcCompositeCurveSegment_Dim(segment as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcCsgPrimitive3D_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcCsgPrimitive3D_Dim", () => {
+		test("always 3", () => {
+			const file = createTestFile("IFC4");
+			const csgPrimitive = file.createEntity("IfcCsgPrimitive3D");
+			expect(ifc4.calc_IfcCsgPrimitive3D_Dim(csgPrimitive as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcCurve_Dim / IfcCurveDim (all 10 dispatch branches, including the 2 new to IFC4) ---
+	describe("calc_IfcCurve_Dim", () => {
+		test("IfcLine -> Pnt.Dim", () => {
+			const file = createTestFile("IFC4");
+			const pnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const line = file.createEntity("IfcLine", pnt, null);
+			expect(ifc4.calc_IfcCurve_Dim(line as EntityInstance)).toBe(3);
+		});
+
+		// `IfcCurveDim`'s `IfcConic` branch reads `Position.Dim` -- `Position` is an
+		// `IfcAxis2Placement3D`, whose OWN `Dim` is declared DERIVE at the `IfcPlacement`
+		// supertype level (`calc_IfcPlacement_Dim`). That function is genuinely still
+		// UNPORTED for IFC4 (not one of IFC4's own first chunk's 15, nor this chunk's
+		// own 15 -- IFC2X3 ported it in ITS OWN second chunk, but the two schemas'
+		// porting chunks aren't lockstep-aligned by entity name). `expressGetAttr`'s own
+		// try/catch (`runtimeShim.ts`) swallows the resulting "has no attribute 'Dim'"
+		// into its own `INDETERMINATE` default rather than propagating the throw -- so
+		// this branch itself is verified correct (it reaches the right sub-read), while
+		// its own end result is honestly `INDETERMINATE` today, not `3`, until a future
+		// IFC4 chunk ports `calc_IfcPlacement_Dim`.
+		test("IfcCircle (IfcConic subtype) -> Position.Dim (INDETERMINATE today: IfcPlacement.Dim not yet ported for IFC4)", () => {
+			const file = createTestFile("IFC4");
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const placement = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			const circle = file.createEntity("IfcCircle", placement, 5.0);
+			expect(ifc4.calc_IfcCurve_Dim(circle as EntityInstance)).toBe(INDETERMINATE);
+		});
+
+		test("IfcPolyline -> Points[0].Dim", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			expect(ifc4.calc_IfcCurve_Dim(polyline as EntityInstance)).toBe(2);
+		});
+
+		test("IfcTrimmedCurve -> recurses into IfcCurveDim(BasisCurve)", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const trimmed = file.createEntity("IfcTrimmedCurve", polyline);
+			expect(ifc4.calc_IfcCurve_Dim(trimmed as EntityInstance)).toBe(2);
+		});
+
+		// **Disclosed fix pin** (see `ifcCurveDim`'s own doc comment in `ifc4.ts`,
+		// same fix as `ifc2x3.ts`'s own version): an `IfcTrimmedCurve` with an unset
+		// `BasisCurve` recurses into `ifcCurveDim(INDETERMINATE)`, which returns `null`
+		// via the explicit `!exists()` guard instead of throwing.
+		test("IfcTrimmedCurve with an unset BasisCurve -> null, not a crash (disclosed fix)", () => {
+			const file = createTestFile("IFC4");
+			const trimmed = file.createEntity("IfcTrimmedCurve", null);
+			expect(ifc4.calc_IfcCurve_Dim(trimmed as EntityInstance)).toBeNull();
+		});
+
+		test("IfcCompositeCurve -> Segments[0].Dim", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const parentCurve = file.createEntity("IfcPolyline", [p0, p1]);
+			const segment = file.createEntity("IfcCompositeCurveSegment", "CONTINUOUS", true, parentCurve);
+			const compositeCurve = file.createEntity("IfcCompositeCurve", [segment], false);
+			expect(ifc4.calc_IfcCurve_Dim(compositeCurve as EntityInstance)).toBe(3);
+		});
+
+		test("IfcBSplineCurve -> ControlPointsList[0].Dim", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const p2 = file.createEntity("IfcCartesianPoint", [2.0, 0.0, 0.0]);
+			const curve = file.createEntity("IfcBSplineCurve", 2, [p0, p1, p2], "UNSPECIFIED", false, false);
+			expect(ifc4.calc_IfcCurve_Dim(curve as EntityInstance)).toBe(3);
+		});
+
+		test("IfcOffsetCurve2D -> always 2", () => {
+			const file = createTestFile("IFC4");
+			const offsetCurve = file.createEntity("IfcOffsetCurve2D");
+			expect(ifc4.calc_IfcCurve_Dim(offsetCurve as EntityInstance)).toBe(2);
+		});
+
+		test("IfcOffsetCurve3D -> always 3", () => {
+			const file = createTestFile("IFC4");
+			const offsetCurve = file.createEntity("IfcOffsetCurve3D");
+			expect(ifc4.calc_IfcCurve_Dim(offsetCurve as EntityInstance)).toBe(3);
+		});
+
+		// --- the 2 branches genuinely NEW to IFC4 (not in IFC2X3's own IfcCurveDim) ---
+
+		test("IfcPcurve -> always 3 (NEW branch, IFC4-only)", () => {
+			const file = createTestFile("IFC4");
+			const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+			const plane = file.createEntity("IfcPlane", planePlacement);
+			const refCurvePnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const refCurveDir = file.createEntity("IfcVector", file.createEntity("IfcDirection", [1.0, 0.0]), 1.0);
+			const referenceCurve = file.createEntity("IfcLine", refCurvePnt, refCurveDir);
+			const pcurve = file.createEntity("IfcPcurve", plane, referenceCurve);
+			expect(ifc4.calc_IfcCurve_Dim(pcurve as EntityInstance)).toBe(3);
+		});
+
+		// IfcIndexedPolyCurve -> Points.Dim, itself dispatching through THIS chunk's
+		// own calc_IfcCartesianPointList_Dim -- a real cross-function integration.
+		test("IfcIndexedPolyCurve -> Points.Dim (NEW branch, IFC4-only, dispatches into calc_IfcCartesianPointList_Dim)", () => {
+			const file = createTestFile("IFC4");
+			const pointList = file.createEntity("IfcCartesianPointList2D", [
+				[0.0, 0.0],
+				[1.0, 1.0],
+				[2.0, 0.0],
+			]);
+			const indexedCurve = file.createEntity("IfcIndexedPolyCurve", pointList, null, null);
+			expect(ifc4.calc_IfcCurve_Dim(indexedCurve as EntityInstance)).toBe(2);
+		});
+
+		test("end-to-end: indexedCurve.Dim resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const pointList = file.createEntity("IfcCartesianPointList3D", [
+				[0.0, 0.0, 0.0],
+				[1.0, 1.0, 1.0],
+			]);
+			const indexedCurve = file.createEntity("IfcIndexedPolyCurve", pointList, null, null);
+			expect((indexedCurve as unknown as { Dim: number }).Dim).toBe(3);
+		});
+	});
+
+	// --- calc_IfcDerivedUnit_Dimensions (+ IfcDeriveDimensionalExponents, byte-identical to IFC2X3's own) ---
+	describe("calc_IfcDerivedUnit_Dimensions", () => {
+		function exponents(result: unknown): number[] {
+			const r = result as EntityInstance;
+			return [
+				"LengthExponent",
+				"MassExponent",
+				"TimeExponent",
+				"ElectricCurrentExponent",
+				"ThermodynamicTemperatureExponent",
+				"AmountOfSubstanceExponent",
+				"LuminousIntensityExponent",
+			].map((name) => r.get(name) as number);
+		}
+
+		function buildDerivedUnit(file: IfcFile, elements: unknown[]) {
+			return file.createEntity("IfcDerivedUnit", elements, "USERDEFINED", "test");
+		}
+
+		function buildElement(file: IfcFile, unit: unknown, exponent: number) {
+			return file.createEntity("IfcDerivedUnitElement", unit, exponent);
+		}
+
+		// A `IfcContextDependentUnit` has a PLAIN, directly-stored `Dimensions`
+		// attribute (not DERIVE) -- used here so these tests don't need
+		// `calc_IfcSIUnit_Dimensions` (deliberately NOT ported by this chunk, still
+		// genuinely unported for IFC4 -- see `ifc4.ts`'s own header comment).
+		function buildUnitWithDimensions(file: IfcFile, dims: number[]) {
+			const dimensions = file.createEntity("IfcDimensionalExponents", ...dims);
+			return file.createEntity("IfcContextDependentUnit", dimensions, "USERDEFINED", "test-unit");
+		}
+
+		// Empty `Elements` -- `range(loindex([]), hiindex([]) + 1)` is `range(1, 1)`, an
+		// empty range, so the loop body never runs and `result` stays the all-zero
+		// `IfcDimensionalExponents(0, 0, 0, 0, 0, 0, 0)` it was constructed with.
+		test("empty Elements -> all-zero exponents, loop body never runs", () => {
+			const file = createTestFile("IFC4");
+			const derivedUnit = buildDerivedUnit(file, []);
+			const result = ifc4.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// One element, Exponent=2, Unit dims (1,0,0,0,0,0,0) -> LengthExponent
+		// accumulates 2 * 1 = 2.
+		test("single element, Exponent=2 on a length-dimensioned unit -> LengthExponent=2", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildUnitWithDimensions(file, [1, 0, 0, 0, 0, 0, 0]);
+			const derivedUnit = buildDerivedUnit(file, [buildElement(file, unit, 2)]);
+			const result = ifc4.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([2, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// 3 elements, matching newton's own dimensions ((1,1,-2,0,0,0,0): mass^1 *
+		// length^1 * time^-2) -- hand-derived accumulation across 3 units.
+		test("3 elements (mass, length, time^-2) -> (1, 1, -2, 0, 0, 0, 0)", () => {
+			const file = createTestFile("IFC4");
+			const massUnit = buildUnitWithDimensions(file, [0, 1, 0, 0, 0, 0, 0]);
+			const lengthUnit = buildUnitWithDimensions(file, [1, 0, 0, 0, 0, 0, 0]);
+			const timeUnit = buildUnitWithDimensions(file, [0, 0, 1, 0, 0, 0, 0]);
+			const derivedUnit = buildDerivedUnit(file, [
+				buildElement(file, massUnit, 1),
+				buildElement(file, lengthUnit, 1),
+				buildElement(file, timeUnit, -2),
+			]);
+			const result = ifc4.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 1, -2, 0, 0, 0, 0]);
+		});
+
+		// Self-referential recursion: `Unit` typed `IfcDerivedUnit` -- the inner
+		// `IfcDerivedUnit`'s own `.Dimensions` resolves via `calc_IfcDerivedUnit_
+		// Dimensions` recursively (through the ordinary DERIVE-dispatch mechanism, no
+		// special-casing needed).
+		test("Unit=IfcDerivedUnit (self-referential recursion, one level deep)", () => {
+			const file = createTestFile("IFC4");
+			const lengthUnit = buildUnitWithDimensions(file, [1, 0, 0, 0, 0, 0, 0]);
+			const innerDerivedUnit = buildDerivedUnit(file, [buildElement(file, lengthUnit, 2)]);
+			// innerDerivedUnit.Dimensions (via DERIVE dispatch) = (2, 0, 0, 0, 0, 0, 0).
+			const outerElement = file.createEntity("IfcDerivedUnitElement", innerDerivedUnit, 1);
+			const outerDerivedUnit = buildDerivedUnit(file, [outerElement]);
+			const result = ifc4.calc_IfcDerivedUnit_Dimensions(outerDerivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([2, 0, 0, 0, 0, 0, 0]);
+		});
+
+		test("end-to-end: derivedUnit.Dimensions resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildUnitWithDimensions(file, [1, 0, 0, 0, 0, 0, 0]);
+			const derivedUnit = buildDerivedUnit(file, [buildElement(file, unit, 2)]);
+			const result = (derivedUnit as unknown as { Dimensions: EntityInstance }).Dimensions;
+			expect(exponents(result)).toEqual([2, 0, 0, 0, 0, 0, 0]);
+		});
+	});
+
+	// --- calc_IfcEdgeLoop_Ne (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcEdgeLoop_Ne", () => {
+		test("Ne = sizeof(EdgeList)", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const v0 = file.createEntity("IfcVertexPoint", p0);
+			const v1 = file.createEntity("IfcVertexPoint", p1);
+			const edge1 = file.createEntity("IfcEdge", v0, v1);
+			const edge2 = file.createEntity("IfcEdge", v1, v0);
+			const oe1 = file.createEntity("IfcOrientedEdge", edge1, true);
+			const oe2 = file.createEntity("IfcOrientedEdge", edge2, true);
+			const edgeLoop = file.createEntity("IfcEdgeLoop", [oe1, oe2]);
+			expect(ifc4.calc_IfcEdgeLoop_Ne(edgeLoop as EntityInstance)).toBe(2);
+		});
+
+		test("end-to-end: edgeLoop.Ne resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const v0 = file.createEntity("IfcVertexPoint", p0);
+			const v1 = file.createEntity("IfcVertexPoint", p1);
+			const edge1 = file.createEntity("IfcEdge", v0, v1);
+			const edge2 = file.createEntity("IfcEdge", v1, v0);
+			const oe1 = file.createEntity("IfcOrientedEdge", edge1, true);
+			const oe2 = file.createEntity("IfcOrientedEdge", edge2, true);
+			const edgeLoop = file.createEntity("IfcEdgeLoop", [oe1, oe2]);
+			expect((edgeLoop as unknown as { Ne: number }).Ne).toBe(2);
 		});
 	});
 });

@@ -278,7 +278,34 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 	// different schema-dependent code path on IFC2X3 vs. IFC4/IFC4X3 (only now
 	// exercised at all in CI, since IFC2X3 was never previously built there -- see
 	// `test/bootstrap.ts`'s own `AVAILABLE_SCHEMAS` comment).
-	test("a default-args call throws the disclosed, current ShapeBuilder.createSweptDiskSolid blocker", () => {
+	//
+	// **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`):
+	// re-verified directly (not assumed) against the real, built native addon before
+	// updating this test. On IFC4 specifically, this fixture's error MESSAGE changes
+	// (the underlying blockage does not -- `addRailingRepresentation` is still fully
+	// blocked on every input, just via a different symptom now): `builder.circle(...)`
+	// builds a 2D `IfcCircle`, fed into `ShapeBuilder.extrude` -> `.profile()`.
+	// `IfcCircle.Dim` (`IfcCurveDim`'s `IfcConic` branch, this chunk) reads
+	// `Position.Dim` -- `Position` is an `IfcAxis2Placement2D`, whose OWN `Dim` is
+	// declared DERIVE at the `IfcPlacement` supertype level (`calc_IfcPlacement_Dim`),
+	// which is genuinely still UNPORTED for IFC4 (not one of IFC4's own first OR
+	// second chunk's functions -- IFC2X3 ported it in ITS OWN second chunk, but the
+	// two schemas' porting chunks aren't lockstep-aligned by entity name; see
+	// `ifc4.test.ts`'s own analogous disclosure on its `IfcConic` dispatch test).
+	// `expressGetAttr`'s own try/catch (`runtimeShim.ts`) swallows that "has no
+	// attribute 'Dim'" into its own `INDETERMINATE` `Symbol` default rather than
+	// propagating the throw -- so `.profile()`'s own `outerCurve.get("Dim") !== 2`
+	// guard sees a `Symbol`, which IS `!== 2`, and its own error-message template
+	// literal (`` `...currently it has ${outerCurve.get("Dim")} dimensions.` ``) then
+	// crashes trying to stringify that `Symbol` (`TypeError: Cannot convert a Symbol
+	// value to a string`) -- a genuinely different thrown error than before on IFC4
+	// specifically, still a real, disclosed, unconditional block, just one step
+	// further down the same call chain and via a DIFFERENT still-unported dependency
+	// (`calc_IfcPlacement_Dim`) than this chunk's own 15 functions. IFC4X3 is
+	// UNCHANGED (no `rules/ifc4x3.ts` module exists yet, so `IfcIndexedPolyCurve.Dim`
+	// itself still throws "has no attribute" first, at `createSweptDiskSolid`, before
+	// ever reaching `.profile()`/`IfcCircle.Dim` at all).
+	test("a default-args call throws the disclosed, current ShapeBuilder blocker (message shape is schema-dependent)", () => {
 		const { file, body } = setupContext(schema);
 		expect(() =>
 			addRailingRepresentation(file, {
@@ -289,7 +316,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 				],
 			}),
 		).toThrow(
-			/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\./,
+			/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\.|Cannot convert a Symbol value to a string/,
 		);
 	});
 });
