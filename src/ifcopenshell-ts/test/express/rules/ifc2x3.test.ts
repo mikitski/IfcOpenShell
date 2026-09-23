@@ -65,6 +65,25 @@
 // swapped once more, this time for `IfcDerivedUnit.Dimensions` (one of the 2
 // functions confirmed still genuinely unported even after this chunk, per this
 // chunk's own finding above).
+//
+// Chunk 5 (fifth `describe` block, "Phase EX-2, chunk 5"): the LAST 2 of IFC2X3's 55
+// `calc_*` functions -- `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions`.
+// **This chunk closes out IFC2X3 at 55/55.** Chunk 4's own claim that these 2 were
+// blocked by a missing defined-type-construction primitive was WRONG -- re-verified
+// directly (both by reading the schema/generated `.d.ts` and empirically against a
+// freshly-built native addon, not merely trusted from a dispatching task brief's own
+// correction of it): `IfcDimensionalExponents` is a genuine ENTITY (7 plain INTEGER
+// attributes), not a defined type, so constructing/mutating one is ordinary entity
+// construction, already fully supported (see `../../src/express/rules/ifc2x3.ts`'s
+// own chunk-5 header comment for the full writeup). No new real-Python bugs found in
+// either of this chunk's own 2 functions or their 2 dependencies. This chunk updates
+// the same PRE-EXISTING "an unported DERIVE-shaped attribute still throws" test a
+// FOURTH time -- but since IFC2X3 itself has no remaining unported DERIVE attribute
+// left after this chunk, the example changes in KIND, not just name: it now reads the
+// same `IfcDerivedUnit.Dimensions` attribute name off an `IFC4` fixture instead of an
+// `IFC2X3` one (no `rules/ifc4.ts` module exists yet), demonstrating the dispatch
+// mechanism's own schema-scoping directly -- see that test's own updated comment for
+// the full rationale.
 
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../../src/entityInstance";
@@ -1385,6 +1404,242 @@ describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 4)", () =>
 	});
 });
 
+// Reads all 7 exponents off an `IfcDimensionalExponents` entity, in the real Python
+// class's own declared field order, matching this file's own established `ratios()`
+// helper's shape/purpose above.
+function exponents(dims: unknown): number[] {
+	const d = dims as EntityInstance & {
+		LengthExponent: number;
+		MassExponent: number;
+		TimeExponent: number;
+		ElectricCurrentExponent: number;
+		ThermodynamicTemperatureExponent: number;
+		AmountOfSubstanceExponent: number;
+		LuminousIntensityExponent: number;
+	};
+	return [
+		d.LengthExponent,
+		d.MassExponent,
+		d.TimeExponent,
+		d.ElectricCurrentExponent,
+		d.ThermodynamicTemperatureExponent,
+		d.AmountOfSubstanceExponent,
+		d.LuminousIntensityExponent,
+	];
+}
+
+describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 5)", () => {
+	// --- calc_IfcSIUnit_Dimensions (+ IfcDimensionsForSiUnit) ---
+	describe("calc_IfcSIUnit_Dimensions", () => {
+		// `IfcSIUnit` re-declares its inherited `IfcNamedUnit.Dimensions` as DERIVE,
+		// so the real, native attribute list still reserves a leading slot for it --
+		// `createEntity` needs a leading `null` placeholder before `UnitType`/
+		// `Prefix`/`Name` (confirmed against this project's own established
+		// precedent: `util/unit.ts`'s own chunk header comment, and every existing
+		// `file.createEntity("IfcSIUnit", null, ...)` call site in this repo, e.g.
+		// `test/api/unit/removeUnit.test.ts`).
+		function buildSiUnit(file: IfcFile, name: string) {
+			return file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, name);
+		}
+
+		// Base units -- `IfcDimensionsForSiUnit`'s first 9 branches, one exponent
+		// set to 1, the rest 0.
+		test("METRE -> LengthExponent=1, everything else 0", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "METRE");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+		});
+
+		test("GRAM -> MassExponent=1", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "GRAM");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 1, 0, 0, 0, 0, 0]);
+		});
+
+		// `SQUARE_METRE`/`CUBIC_METRE` -- LengthExponent 2/3, the only 2 branches
+		// with a magnitude above 1.
+		test("SQUARE_METRE -> LengthExponent=2", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "SQUARE_METRE");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([2, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// `NEWTON`/`PASCAL` -- 2 derived units with nonzero cross-terms across
+		// multiple exponent fields at once (real source: `IfcDimensionalExponents(1,
+		// 1, -2, 0, 0, 0, 0)` / `IfcDimensionalExponents(-1, 1, -2, 0, 0, 0, 0)`),
+		// the representative "interesting" branches this project's own established
+		// large-lookup-table testing convention calls for (not exhaustive coverage
+		// of all 29).
+		test("NEWTON -> (1, 1, -2, 0, 0, 0, 0)", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "NEWTON");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 1, -2, 0, 0, 0, 0]);
+		});
+
+		test("PASCAL -> (-1, 1, -2, 0, 0, 0, 0)", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "PASCAL");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([-1, 1, -2, 0, 0, 0, 0]);
+		});
+
+		// `RADIAN`/`STERADIAN` -- the 2 branches whose own explicit result is all
+		// zeros (distinct from the `else` fallback below, which also produces all
+		// zeros but via a completely different code path -- no branch matched at
+		// all, not "this branch's own answer happens to be zero").
+		test("RADIAN -> (0, 0, 0, 0, 0, 0, 0) (an explicit branch, not the else fallback)", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "RADIAN");
+			const result = ifc2x3.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// The `else` fallback (real source: `IfcDimensionalExponents(0, 0, 0, 0, 0,
+		// 0, 0)`) turns out to be UNREACHABLE via normal construction on this port --
+		// confirmed empirically, not assumed. Real `IfcSIUnitName` only has these 29
+		// legal values (re-verified directly against the schema's own
+		// enumeration-item string table, `src/ifcparse/schemas/Ifc2x3-schema.cpp`),
+		// and (unlike several OTHER already-disclosed gaps elsewhere in this port,
+		// e.g. this project's own missing ENUMERATION-domain validation notes
+		// elsewhere) this port's native layer DOES already enforce this specific
+		// domain at write time: attempting to build an `IfcSIUnit` with an
+		// out-of-domain `Name` throws `"Unable to find keyword in schema: ..."` from
+		// the native `set_attribute_value` primitive itself, before
+		// `calc_IfcSIUnit_Dimensions` is ever reached -- confirmed to match real
+		// Python's own equivalent construction-time enum validation (SWIG's typemap
+		// layer rejects an unrecognized `IfcSIUnitName` keyword identically). So the
+		// `else` branch is genuine, mutually-confirmed dead code in BOTH languages
+		// for any actually-constructible `IfcSIUnit`, not a gap in this chunk's own
+		// test coverage -- pinned here as the throw itself, the only real, observable
+		// behavior at this boundary.
+		test("an out-of-domain Name cannot even be constructed (native ENUMERATION-domain validation) -- the else branch is genuine dead code", () => {
+			const file = createTestFile("IFC2X3");
+			expect(() => buildSiUnit(file, "NOT_A_REAL_SI_UNIT_NAME")).toThrow(/Unable to find keyword in schema/);
+		});
+
+		// End-to-end: read `.Dimensions` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: unit.Dimensions resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const unit = buildSiUnit(file, "WATT");
+			const result = (unit as unknown as { Dimensions: unknown }).Dimensions;
+			expect(exponents(result)).toEqual([2, 1, -3, 0, 0, 0, 0]);
+		});
+	});
+
+	// --- calc_IfcDerivedUnit_Dimensions (+ IfcDeriveDimensionalExponents) ---
+	describe("calc_IfcDerivedUnit_Dimensions", () => {
+		function buildDerivedUnit(file: IfcFile, elements: unknown[]) {
+			return file.createEntity("IfcDerivedUnit", elements, "USERDEFINED", "test");
+		}
+
+		function buildSiUnit(file: IfcFile, name: string) {
+			return file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, name);
+		}
+
+		function buildElement(file: IfcFile, unit: unknown, exponent: number) {
+			return file.createEntity("IfcDerivedUnitElement", unit, exponent);
+		}
+
+		// Empty `Elements` -- `range(loindex([]), hiindex([]) + 1)` is `range(1, 1)`,
+		// an empty range, so the loop body never runs and `result` stays the
+		// all-zero `IfcDimensionalExponents(0, 0, 0, 0, 0, 0, 0)` it was constructed
+		// with.
+		test("empty Elements -> all-zero exponents, loop body never runs", () => {
+			const file = createTestFile("IFC2X3");
+			const derivedUnit = buildDerivedUnit(file, []);
+			const result = ifc2x3.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// One element, Exponent=2, Unit=METRE (dims (1,0,0,0,0,0,0)) -> LengthExponent
+		// accumulates 2 * 1 = 2, matching `IfcDimensionsForSiUnit(square_metre)`'s own
+		// answer by construction (not a coincidence -- this IS how a derived
+		// "square metre" unit is actually modelled as an `IfcDerivedUnit`).
+		test("single element, Exponent=2 on METRE -> LengthExponent=2", () => {
+			const file = createTestFile("IFC2X3");
+			const metre = buildSiUnit(file, "METRE");
+			const derivedUnit = buildDerivedUnit(file, [buildElement(file, metre, 2)]);
+			const result = ifc2x3.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([2, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// 3 elements (GRAM^1, METRE^1, SECOND^-2) -- hand-derived: GRAM contributes
+		// MassExponent += 1*1=1; METRE contributes LengthExponent += 1*1=1; SECOND
+		// contributes TimeExponent += -2*1=-2. Sum: (1, 1, -2, 0, 0, 0, 0) -- exactly
+		// `IfcDimensionsForSiUnit`'s own `newton` answer, confirming this formula and
+		// that lookup table are dimensionally consistent with each other (real force
+		// = mass * length / time^2).
+		test("3 elements (gram, metre, second^-2) -> (1, 1, -2, 0, 0, 0, 0), matching newton's own dimensions", () => {
+			const file = createTestFile("IFC2X3");
+			const gram = buildSiUnit(file, "GRAM");
+			const metre = buildSiUnit(file, "METRE");
+			const second = buildSiUnit(file, "SECOND");
+			const derivedUnit = buildDerivedUnit(file, [
+				buildElement(file, gram, 1),
+				buildElement(file, metre, 1),
+				buildElement(file, second, -2),
+			]);
+			const result = ifc2x3.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 1, -2, 0, 0, 0, 0]);
+		});
+
+		// `Unit` typed `IfcConversionBasedUnit` -- `IfcNamedUnit.Dimensions` is a
+		// PLAIN, directly-stored attribute at that level (not DERIVE; only
+		// `IfcSIUnit`/`IfcDerivedUnit` re-declare it as DERIVE -- confirmed directly
+		// against `generated/ifc2x3.d.ts`, see `ifc2x3.ts`'s own chunk-5 header
+		// comment). Exercises the ordinary FORWARD-attribute path for `Unit.
+		// Dimensions`, not DERIVE dispatch at all, alongside the DERIVE path the
+		// other tests in this block exercise.
+		test("Unit=IfcConversionBasedUnit (plain stored Dimensions, not DERIVE) -> reads correctly", () => {
+			const file = createTestFile("IFC2X3");
+			const dimensions = file.createEntity("IfcDimensionalExponents", 0, 0, 1, 0, 0, 0, 0);
+			const second = buildSiUnit(file, "SECOND");
+			const conversionFactor = file.createEntity("IfcMeasureWithUnit", null, second);
+			const minute = file.createEntity("IfcConversionBasedUnit", dimensions, "TIMEUNIT", "minute", conversionFactor);
+			const derivedUnit = buildDerivedUnit(file, [buildElement(file, minute, 1)]);
+			const result = ifc2x3.calc_IfcDerivedUnit_Dimensions(derivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 0, 1, 0, 0, 0, 0]);
+		});
+
+		// `Unit` typed `IfcDerivedUnit` (self-referential recursion through the same
+		// DERIVE-dispatch mechanism, one level deep) -- an "area per second" derived
+		// unit (SQUARE_METRE / SECOND) used as `Unit` for an outer element with
+		// Exponent=1: the inner `IfcDerivedUnit`'s own `.Dimensions` resolves via
+		// `calc_IfcDerivedUnit_Dimensions` recursively (SQUARE_METRE dims
+		// (2,0,0,0,0,0,0), SECOND^-1 dims (0,0,-1,0,0,0,0) -> inner sum
+		// (2,0,-1,0,0,0,0)), then the outer element multiplies that by its own
+		// Exponent=1 -- confirms recursion needs no special-casing in
+		// `ifcDeriveDimensionalExponents`.
+		test("Unit=IfcDerivedUnit (self-referential recursion, one level deep)", () => {
+			const file = createTestFile("IFC2X3");
+			const squareMetre = buildSiUnit(file, "SQUARE_METRE");
+			const second = buildSiUnit(file, "SECOND");
+			const innerDerivedUnit = buildDerivedUnit(file, [
+				buildElement(file, squareMetre, 1),
+				buildElement(file, second, -1),
+			]);
+			const outerDerivedUnit = buildDerivedUnit(file, [buildElement(file, innerDerivedUnit, 1)]);
+			const result = ifc2x3.calc_IfcDerivedUnit_Dimensions(outerDerivedUnit as EntityInstance);
+			expect(exponents(result)).toEqual([2, 0, -1, 0, 0, 0, 0]);
+		});
+
+		// End-to-end: read `.Dimensions` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: derivedUnit.Dimensions resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const metre = buildSiUnit(file, "METRE");
+			const derivedUnit = buildDerivedUnit(file, [buildElement(file, metre, 3)]);
+			const result = (derivedUnit as unknown as { Dimensions: unknown }).Dimensions;
+			expect(exponents(result)).toEqual([3, 0, 0, 0, 0, 0, 0]);
+		});
+	});
+});
+
 describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 	test("a genuinely nonexistent attribute still throws the same error as before this chunk", () => {
 		const file: IfcFile = createTestFile("IFC2X3");
@@ -1394,23 +1649,35 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 		);
 	});
 
-	test("an unported DERIVE-shaped attribute still throws (purely additive capability)", () => {
-		// `IfcDerivedUnit.Dimensions` (`calc_IfcDerivedUnit_Dimensions`, `IFC2X3.py`
-		// line 4741) is a real DERIVE attribute genuinely untouched by chunks 1-4 --
-		// it needs `IfcDeriveDimensionalExponents`, which constructs/mutates an
-		// `IfcDimensionalExponents` DEFINED TYPE value, a primitive this port doesn't
-		// have yet (see `../../../src/express/rules/ifc2x3.ts`'s own chunk-4 header
-		// comment for the full citation) -- confirms dispatch stays additive, not a
-		// general claim that every DERIVE-shaped attribute now resolves.
-		// (`IfcOrientedEdge.EdgeStart` was this test's example in chunk 3, but chunk 4
-		// ports exactly that function -- see this file's own top-of-file header
-		// comment for why this test was updated instead of silently starting to
-		// assert the opposite of what it's named for. Chunk 4 is also the point at
-		// which this test's example had to change kind, not just name: after chunk 4,
-		// only 2 of IFC2X3's 55 real `calc_*` functions remain unported at all, both
-		// for this same defined-type-construction reason, so this is now the only
-		// kind of example left to use.)
-		const file: IfcFile = createTestFile("IFC2X3");
+	test("an unported-for-THIS-SCHEMA DERIVE-shaped attribute still throws (purely additive, schema-scoped capability)", () => {
+		// Chunk 5 (planning/ifcopenshell-ts/70-express-rules-plan.md §4) ports the
+		// last 2 of IFC2X3's 55 `calc_*` functions -- `IfcDerivedUnit.Dimensions`
+		// (this test's own example in chunks 3/4) is no longer usable here: after
+		// chunk 5, EVERY IFC2X3 DERIVE attribute this dispatch mechanism knows about
+		// resolves, so there is no remaining genuinely-unported IFC2X3 attribute left
+		// to demonstrate a dispatch MISS with. (Chunk 4's own version of this test
+		// asserted `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` were
+		// blocked by a missing defined-type-construction primitive -- re-verified
+		// directly by this chunk and found WRONG: `IfcDimensionalExponents` is a
+		// genuine ENTITY, not a defined type, and both functions are ordinary
+		// entity construction/mutation, already fully supported. See
+		// `../../../src/express/rules/ifc2x3.ts`'s own chunk-5 header comment for the
+		// full correction.)
+		//
+		// So this test's example changes in KIND, not just name: it reads the exact
+		// same `IfcDerivedUnit.Dimensions` attribute NAME chunks 3/4 already used, but
+		// off an `IFC4` fixture instead of an `IFC2X3` one. `calc_IfcDerivedUnit_
+		// Dimensions` exists in `IFC4.py` too (confirmed directly, `IFC4.py` line
+		// 6418) -- but no `rules/ifc4.ts` module exists in this port yet, so
+		// `dispatch.ts`'s per-schema registry (`express/dispatch.ts`) has zero
+		// entries for the `"IFC4"` schema identifier, and this read still throws "has
+		// no attribute", exactly as before any Phase EX-2 chunk landed. This
+		// demonstrates the dispatch mechanism's own SCHEMA-SCOPING directly (see
+		// `dispatch.ts`'s own header comment) -- the same attribute name that now
+		// fully resolves on IFC2X3 is still a dispatch miss on a schema this port
+		// hasn't ported `calc_*` functions for yet -- rather than merely re-asserting
+		// "some IFC2X3 attribute somewhere is still unported" (no longer true).
+		const file: IfcFile = createTestFile("IFC4");
 		const derivedUnit = file.createEntity("IfcDerivedUnit", [], "MASSDENSITYUNIT", null);
 		expect(() => (derivedUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(
 			/has no attribute 'Dimensions'/,

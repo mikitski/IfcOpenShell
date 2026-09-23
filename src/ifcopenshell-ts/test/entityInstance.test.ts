@@ -154,16 +154,47 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 		expect(() => wall.get("NoSuchAttribute")).toThrow();
 	});
 
-	test(".get() throws for a DERIVED attribute (EXPRESS rule execution is out of scope)", () => {
-		// IfcSIUnit.Dimensions is redeclared DERIVE in every schema version (category 3)
-		// -- must not be read as an ordinary forward attribute (it has no stored value
-		// at that positional slot; Python falls through to EXPRESS rule execution
-		// instead, which this chunk deliberately doesn't implement, see EntityInstance's
-		// own header comment).
-		const file = newFile();
-		const unit = file.createEntity("IfcSIUnit");
-		expect(() => unit.get("Dimensions")).toThrow();
-	});
+	// IfcSIUnit.Dimensions is redeclared DERIVE in every schema version (category 3)
+	// -- must not be read as an ordinary forward attribute (it has no stored value at
+	// that positional slot). **Updated by Phase EX-2's IFC2X3 chunk 5
+	// (planning/ifcopenshell-ts/70-express-rules-plan.md §4,
+	// `src/express/rules/ifc2x3.ts`), which closes out IFC2X3 at 55/55 ported
+	// `calc_*` functions, `calc_IfcSIUnit_Dimensions` included**: this test's own
+	// original claim ("EXPRESS rule execution is out of scope") is no longer true for
+	// IFC2X3 specifically, so `.get("Dimensions")` now genuinely resolves there
+	// instead of throwing -- split into 2 schema-scoped cases (matching this
+	// project's own established `test.skipIf(schema === ...)` precedent, e.g.
+	// `test/api/project/appendAsset.test.ts`) rather than silently keeping a
+	// now-false assertion for IFC2X3.
+	test.skipIf(schema === "IFC2X3")(
+		".get() throws for a DERIVED attribute on a schema with no ported EXPRESS calc_* rules yet",
+		() => {
+			// IFC4/IFC4X3 have no `rules/ifc4.ts`/`rules/ifc4x3.ts` module yet (Phase
+			// EX-2 has so far only ported IFC2X3) -- `dispatch.ts`'s per-schema
+			// registry has zero entries for either, so this still throws exactly as
+			// it always has.
+			const file = newFile();
+			const unit = file.createEntity("IfcSIUnit");
+			expect(() => unit.get("Dimensions")).toThrow();
+		},
+	);
+
+	test.skipIf(schema !== "IFC2X3")(
+		".get() resolves a DERIVED attribute via ported EXPRESS calc_* dispatch (IFC2X3, Phase EX-2)",
+		() => {
+			// Leading `null` placeholder for the derived `Dimensions` slot -- see
+			// `getInfo()`'s own interleaved-DERIVE-attribute test below for the full
+			// citation. `calc_IfcSIUnit_Dimensions("METRE")` ->
+			// `IfcDimensionsForSiUnit("METRE")` -> `IfcDimensionalExponents(1, 0, 0,
+			// 0, 0, 0, 0)` (`src/express/rules/ifc2x3.ts`'s own chunk-5 header
+			// comment).
+			const file = newFile();
+			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
+			const dimensions = unit.get("Dimensions") as EntityInstance;
+			expect(dimensions.isA()).toBe("IfcDimensionalExponents");
+			expect(dimensions.get("LengthExponent")).toBe(1);
+		},
+	);
 
 	test("getByIndex()/setByIndex() index-based access", () => {
 		const file = newFile();
