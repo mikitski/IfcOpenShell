@@ -215,6 +215,36 @@
 // update, not investigated or corrected further here, out of scope for this DERIVE-
 // porting chunk.)
 //
+// --- UPDATE 2 (Phase EX-2's IFC4 THIRD chunk, `src/express/rules/ifc4.ts`):
+//     `addRailingRepresentation` is now GENUINELY, FULLY UNBLOCKED on IFC4 -- the
+//     "100% blocked, on every input, on every schema" framing above (and UPDATE 1's
+//     own "still throws on every real IFC4 invocation") is SUPERSEDED for IFC4 ---
+//
+// This chunk ports `calc_IfcPlacement_Dim` -- the exact dependency UPDATE 1 identified
+// as the then-remaining blocker (`IfcAxis2Placement2D.Dim`, DERIVE at the
+// `IfcPlacement` supertype level, reached via `builder.circle(...)`'s own
+// `IfcCircle.Dim` -> `Position.Dim`). With it ported, that call no longer swallows
+// into `INDETERMINATE`/throws -- and, re-verified directly and exhaustively against
+// the real, built addon (not assumed from the single dependency alone): the ENTIRE
+// `addRailingRepresentation` call now succeeds end-to-end on IFC4, for every
+// combination actually probed -- the documented 2-point default straight path, an
+// L-shaped path under all 6 `TerminalType`s (`"180"`/`"TO_END_POST"`/`"TO_WALL"`/
+// `"TO_FLOOR"`/`"TO_END_POST_AND_FLOOR"`/`"NONE"`), and a looped path with
+// `useManualSupports=true` -- each producing a real `IfcShapeRepresentation` whose
+// last item `isA("IfcSweptDiskSolid")`, matching real Python's own end-to-end
+// assertion (`test_default_railing_returns_shape_representation`) exactly. This makes
+// sense in hindsight: gap 2 (`IfcLineIndex`/`IfcArcIndex` defined-type construction)
+// was ALREADY fixed by PR #179 (UPDATE 1 already noted this framing was stale, but
+// left it un-investigated, out of that chunk's own scope) -- so `calc_IfcPlacement_Dim`
+// was, in fact, the LAST genuinely-missing dependency in the entire chain for IFC4.
+// `addRailingRepresentation.test.ts`'s own end-to-end smoke test is updated
+// accordingly for IFC4 (asserts success, mirroring real Python's own test, instead of
+// a disclosed throw) -- IFC2X3 (still throws "Arcs are not supported for IFC2X3.",
+// `ShapeBuilder`'s own separate, pre-existing, unrelated-to-DERIVE-porting arc gap) and
+// IFC4X3 (still throws "has no attribute 'Dim'": no `rules/ifc4x3.ts` module exists
+// yet, so NONE of `IfcCurve.Dim`/`IfcPlacement.Dim`/etc. resolve there at all) are
+// UNCHANGED, confirmed by direct re-run, not assumed unaffected.
+//
 // *** `ShapeBuilder` methods used, and their exact signatures verified directly against
 // `util/shapeBuilder.ts` (not assumed from the Python method names alone) ***
 //

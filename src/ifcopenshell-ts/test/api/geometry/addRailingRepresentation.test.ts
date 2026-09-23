@@ -35,6 +35,7 @@ import {
 import { createEntity } from "../../../src/api/root/createEntity";
 import { addSiUnit } from "../../../src/api/unit/addSiUnit";
 import { assignUnit } from "../../../src/api/unit/assignUnit";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 // ---------------------------------------------------------------------------
@@ -247,11 +248,14 @@ test("FilletDegenerateError is exported so callers embedding this module can rec
 });
 
 // ---------------------------------------------------------------------------
-// End-to-end IFC smoke test -- confirms `addRailingRepresentation`'s own disclosed, current
-// throw (see `addRailingRepresentation.ts`'s own header comment, finding 3): this function is
-// blocked on every input, on every schema, by a pre-existing `entityInstance.ts` primitive-layer
-// gap (`ShapeBuilder.createSweptDiskSolid`'s own unconditional `.get("Dim")` check), unlike
-// `computeWallMountedHandrailGeometry` above, which is genuinely unblocked.
+// End-to-end IFC smoke test -- schema-dependent (see `addRailingRepresentation.ts`'s own
+// header comment, finding 3, and its "UPDATE"/"UPDATE 2" sections for the full history):
+// IFC4 is now GENUINELY UNBLOCKED (Phase EX-2's IFC4 THIRD chunk ports `calc_IfcPlacement_Dim`,
+// the last missing dependency in the chain) and asserts success, matching real Python's own
+// `test_default_railing_returns_shape_representation`; IFC2X3/IFC4X3 remain blocked by their
+// own separate, pre-existing, unrelated-to-DERIVE-porting gaps and keep the disclosed-throw
+// assertion -- same schema-conditional-branch shape `editSurveyPoint.test.ts` already
+// establishes for this exact kind of partial, per-schema resolution.
 // ---------------------------------------------------------------------------
 
 describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (schema) => {
@@ -270,53 +274,55 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 		return { file, body };
 	}
 
-	// On IFC2X3, `shapeBuilder.ts`'s own arc-building path throws "Arcs are not
-	// supported for IFC2X3." (`TODOS.md`'s "`IfcLineIndex`/`IfcArcIndex` defined-type
-	// creation" entry, its own "on IFC2X3 ... arcs not supported" branch) BEFORE the
-	// `Dim`/"Attribute access" blocker below is ever reached -- both are the same
-	// disclosed, pre-existing, unrelated-to-this-PR gap, just surfacing via a
-	// different schema-dependent code path on IFC2X3 vs. IFC4/IFC4X3 (only now
-	// exercised at all in CI, since IFC2X3 was never previously built there -- see
-	// `test/bootstrap.ts`'s own `AVAILABLE_SCHEMAS` comment).
-	//
-	// **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`):
-	// re-verified directly (not assumed) against the real, built native addon before
-	// updating this test. On IFC4 specifically, this fixture's error MESSAGE changes
-	// (the underlying blockage does not -- `addRailingRepresentation` is still fully
-	// blocked on every input, just via a different symptom now): `builder.circle(...)`
-	// builds a 2D `IfcCircle`, fed into `ShapeBuilder.extrude` -> `.profile()`.
-	// `IfcCircle.Dim` (`IfcCurveDim`'s `IfcConic` branch, this chunk) reads
-	// `Position.Dim` -- `Position` is an `IfcAxis2Placement2D`, whose OWN `Dim` is
-	// declared DERIVE at the `IfcPlacement` supertype level (`calc_IfcPlacement_Dim`),
-	// which is genuinely still UNPORTED for IFC4 (not one of IFC4's own first OR
-	// second chunk's functions -- IFC2X3 ported it in ITS OWN second chunk, but the
-	// two schemas' porting chunks aren't lockstep-aligned by entity name; see
-	// `ifc4.test.ts`'s own analogous disclosure on its `IfcConic` dispatch test).
-	// `expressGetAttr`'s own try/catch (`runtimeShim.ts`) swallows that "has no
-	// attribute 'Dim'" into its own `INDETERMINATE` `Symbol` default rather than
-	// propagating the throw -- so `.profile()`'s own `outerCurve.get("Dim") !== 2`
-	// guard sees a `Symbol`, which IS `!== 2`, and its own error-message template
-	// literal (`` `...currently it has ${outerCurve.get("Dim")} dimensions.` ``) then
-	// crashes trying to stringify that `Symbol` (`TypeError: Cannot convert a Symbol
-	// value to a string`) -- a genuinely different thrown error than before on IFC4
-	// specifically, still a real, disclosed, unconditional block, just one step
-	// further down the same call chain and via a DIFFERENT still-unported dependency
-	// (`calc_IfcPlacement_Dim`) than this chunk's own 15 functions. IFC4X3 is
-	// UNCHANGED (no `rules/ifc4x3.ts` module exists yet, so `IfcIndexedPolyCurve.Dim`
-	// itself still throws "has no attribute" first, at `createSweptDiskSolid`, before
-	// ever reaching `.profile()`/`IfcCircle.Dim` at all).
-	test("a default-args call throws the disclosed, current ShapeBuilder blocker (message shape is schema-dependent)", () => {
-		const { file, body } = setupContext(schema);
-		expect(() =>
-			addRailingRepresentation(file, {
+	if (schema === "IFC4") {
+		// `calc_IfcPlacement_Dim` (Phase EX-2's IFC4 THIRD chunk) was the last
+		// genuinely-missing dependency in `addRailingRepresentation`'s own call chain
+		// for IFC4 (gap 2 -- `IfcLineIndex`/`IfcArcIndex` defined-type construction --
+		// was already fixed by PR #179; gap 1's own `IfcCurve.Dim`/`IfcCartesianPointList.Dim`
+		// were ported by this file's own IFC4 second chunk). Re-verified directly and
+		// exhaustively against the real, built addon (not assumed from the single
+		// dependency alone): the default 2-point straight path, an L-shaped path under
+		// all 6 `TerminalType`s, and a looped path with `useManualSupports=true` all
+		// now succeed end-to-end, matching real Python's own end-to-end assertion.
+		test("a default-args call returns a valid shape representation (now genuinely unblocked for IFC4)", () => {
+			const { file, body } = setupContext(schema);
+			const representation = addRailingRepresentation(file, {
 				context: body,
 				railingPath: [
 					[0.0, 0.0, 1.0],
 					[2.0, 0.0, 1.0],
 				],
-			}),
-		).toThrow(
-			/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\.|Cannot convert a Symbol value to a string/,
-		);
-	});
+			});
+			expect(representation.isA("IfcShapeRepresentation")).toBe(true);
+			// Items: 2 per support (arc swept-disk + floor disk extrusion) + 1 handrail swept disk.
+			const items = (representation as unknown as { Items: unknown[] }).Items;
+			expect(items.length).toBeGreaterThanOrEqual(3);
+			// Final item must be the handrail itself (a swept-disk solid).
+			expect((items[items.length - 1] as EntityInstance).isA("IfcSweptDiskSolid")).toBe(true);
+		});
+	} else {
+		// IFC2X3: `shapeBuilder.ts`'s own arc-building path throws "Arcs are not
+		// supported for IFC2X3." (`TODOS.md`'s "`IfcLineIndex`/`IfcArcIndex` defined-type
+		// creation" entry, its own "on IFC2X3 ... arcs not supported" branch) -- a
+		// disclosed, pre-existing gap unrelated to DERIVE-attribute porting.
+		//
+		// IFC4X3: no `rules/ifc4x3.ts` module exists yet, so `IfcIndexedPolyCurve.Dim`
+		// (reached first, inside `createSweptDiskSolid`) still throws "has no attribute
+		// 'Dim'" -- unaffected by this chunk, re-verified directly against the real
+		// built addon, not assumed unaffected.
+		test("a default-args call throws the disclosed, current ShapeBuilder blocker (message shape is schema-dependent)", () => {
+			const { file, body } = setupContext(schema);
+			expect(() =>
+				addRailingRepresentation(file, {
+					context: body,
+					railingPath: [
+						[0.0, 0.0, 1.0],
+						[2.0, 0.0, 1.0],
+					],
+				}),
+			).toThrow(
+				/has no attribute 'Dim'|Attribute access is only supported on entity instances|Arcs are not supported for IFC2X3\./,
+			);
+		});
+	}
 });

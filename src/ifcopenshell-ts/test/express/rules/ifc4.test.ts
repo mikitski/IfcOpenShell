@@ -723,21 +723,18 @@ describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 2)", ()
 
 		// `IfcCurveDim`'s `IfcConic` branch reads `Position.Dim` -- `Position` is an
 		// `IfcAxis2Placement3D`, whose OWN `Dim` is declared DERIVE at the `IfcPlacement`
-		// supertype level (`calc_IfcPlacement_Dim`). That function is genuinely still
-		// UNPORTED for IFC4 (not one of IFC4's own first chunk's 15, nor this chunk's
-		// own 15 -- IFC2X3 ported it in ITS OWN second chunk, but the two schemas'
-		// porting chunks aren't lockstep-aligned by entity name). `expressGetAttr`'s own
-		// try/catch (`runtimeShim.ts`) swallows the resulting "has no attribute 'Dim'"
-		// into its own `INDETERMINATE` default rather than propagating the throw -- so
-		// this branch itself is verified correct (it reaches the right sub-read), while
-		// its own end result is honestly `INDETERMINATE` today, not `3`, until a future
-		// IFC4 chunk ports `calc_IfcPlacement_Dim`.
-		test("IfcCircle (IfcConic subtype) -> Position.Dim (INDETERMINATE today: IfcPlacement.Dim not yet ported for IFC4)", () => {
+		// supertype level (`calc_IfcPlacement_Dim`). **Updated by this file's own THIRD
+		// chunk**, which now ports exactly that function: `Position.Dim` resolves to
+		// `Location.Dim` = 3 (a 3D `IfcCartesianPoint`), so this branch's own end
+		// result is now the real, resolved `3`, not `INDETERMINATE` (re-verified
+		// directly against the real built addon, not assumed from the dependency chain
+		// alone).
+		test("IfcCircle (IfcConic subtype) -> Position.Dim (now resolves: IfcPlacement.Dim ported by this file's own third chunk)", () => {
 			const file = createTestFile("IFC4");
 			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
 			const placement = file.createEntity("IfcAxis2Placement3D", location, null, null);
 			const circle = file.createEntity("IfcCircle", placement, 5.0);
-			expect(ifc4.calc_IfcCurve_Dim(circle as EntityInstance)).toBe(INDETERMINATE);
+			expect(ifc4.calc_IfcCurve_Dim(circle as EntityInstance)).toBe(3);
 		});
 
 		test("IfcPolyline -> Points[0].Dim", () => {
@@ -956,6 +953,444 @@ describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 2)", ()
 			const oe2 = file.createEntity("IfcOrientedEdge", edge2, true);
 			const edgeLoop = file.createEntity("IfcEdgeLoop", [oe1, oe2]);
 			expect((edgeLoop as unknown as { Ne: number }).Ne).toBe(2);
+		});
+	});
+});
+
+// =============================================================================
+// Original, hand-rolled coverage for Phase EX-2's IFC4 THIRD chunk
+// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): 15 more of IFC4's 62
+// `calc_*` DERIVE functions (`src/express/rules/ifc4.ts`) -- see that file's own
+// header comment (the "third chunk" section) for the full byte-identical-vs-
+// genuinely-different diffing writeup against IFC2X3, the empirically-verified
+// `IfcGeometricRepresentationSubContext`/`IfcOrientedEdge`/`IfcMirroredProfileDef`
+// positional-attribute-order findings, and the cascading test-fidelity fixes this
+// chunk required elsewhere in the suite (`test/express/rules/ifc4.test.ts`'s own
+// chunk-2 `calc_IfcCurve_Dim` test, `src/api/geometry/addRailingRepresentation.ts` +
+// its own test file).
+// =============================================================================
+describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 3)", () => {
+	// --- calc_IfcFaceBasedSurfaceModel_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcFaceBasedSurfaceModel_Dim", () => {
+		// Python: `return 3` (unconditional constant).
+		test("always 3", () => {
+			const file = createTestFile("IFC4");
+			const model = file.createEntity("IfcFaceBasedSurfaceModel");
+			expect(ifc4.calc_IfcFaceBasedSurfaceModel_Dim(model as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcGeometricRepresentationSubContext_* (4 functions) ---
+	//
+	// Fixture note: `IfcGeometricRepresentationSubContext`'s real, native attribute
+	// order (`declaration().as_entity().all_attributes()`, confirmed EMPIRICALLY
+	// against the real built addon, per this chunk's own task brief -- NOT assumed to
+	// carry over from IFC2X3 just because the entity name matches) is
+	// `['ContextIdentifier', 'ContextType', 'CoordinateSpaceDimension', 'Precision',
+	// 'WorldCoordinateSystem', 'TrueNorth', 'ParentContext', 'TargetScale',
+	// 'TargetView', 'UserDefinedTargetView']` -- 10 positional slots, the SAME SHAPE as
+	// IFC2X3's own (the 4 DERIVE-overridden attributes inherited from
+	// `IfcGeometricRepresentationContext` still occupy real positional slots 3-6).
+	// Schema evolution between IFC2X3 and IFC4 did NOT change this entity's own
+	// inherited attribute ordering.
+	describe("calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem / _CoordinateSpaceDimension / _TrueNorth / _Precision", () => {
+		function buildSubContext(file: IfcFile, parentTrueNorth: EntityInstance | null, parentPrecision: number | null) {
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const wcs = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			const parentContext = file.createEntity(
+				"IfcGeometricRepresentationContext",
+				null,
+				"Model",
+				3,
+				parentPrecision,
+				wcs,
+				parentTrueNorth,
+			);
+			const subContext = file.createEntity(
+				"IfcGeometricRepresentationSubContext",
+				null,
+				"Model",
+				null,
+				null,
+				null,
+				null,
+				parentContext,
+				null,
+				"MODEL_VIEW",
+				null,
+			);
+			return { wcs, parentContext, subContext };
+		}
+
+		// Python: `express_getattr(ParentContext, 'WorldCoordinateSystem', INDETERMINATE)`.
+		test("WorldCoordinateSystem delegates to ParentContext.WorldCoordinateSystem", () => {
+			const file = createTestFile("IFC4");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { wcs, subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			const result = ifc4.calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem(
+				subContext as EntityInstance,
+			) as EntityInstance;
+			expect(result.id()).toBe((wcs as EntityInstance).id());
+		});
+
+		// Python: `express_getattr(ParentContext, 'CoordinateSpaceDimension', INDETERMINATE)`.
+		test("CoordinateSpaceDimension delegates to ParentContext.CoordinateSpaceDimension", () => {
+			const file = createTestFile("IFC4");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			expect(
+				ifc4.calc_IfcGeometricRepresentationSubContext_CoordinateSpaceDimension(subContext as EntityInstance),
+			).toBe(3);
+		});
+
+		// Python: `nvl(express_getattr(ParentContext, 'TrueNorth', INDETERMINATE), ...)`.
+		// ParentContext.TrueNorth is set -> returned directly (the
+		// `IfcConvertDirectionInto2D` fallback path below is never reached, so this
+		// branch behaves identically to IFC2X3's own version).
+		test("TrueNorth: ParentContext.TrueNorth set -> returned directly", () => {
+			const file = createTestFile("IFC4");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			const result = ifc4.calc_IfcGeometricRepresentationSubContext_TrueNorth(
+				subContext as EntityInstance,
+			) as EntityInstance;
+			expect(result.id()).toBe((trueNorth as EntityInstance).id());
+		});
+
+		// **Genuinely different from IFC2X3** (see `ifc4.ts`'s own header comment, third
+		// chunk): ParentContext.TrueNorth unset -> falls back to
+		// `IfcConvertDirectionInto2D(self.WorldCoordinateSystem.P[2 - ONE_BASED])`, NOT
+		// a raw pass-through of `P[1]` the way IFC2X3's own version does.
+		// `self.WorldCoordinateSystem` = ParentContext.WorldCoordinateSystem = `wcs`, a
+		// default (`Axis=null`, `RefDirection=null`) `IfcAxis2Placement3D` -> `P` =
+		// `ifcBuildAxes(null, null)` = `[[1,0,0], [0,1,0], [0,0,1]]` (X axis, Y axis, Z
+		// axis, hand-derived from `IfcFirstProjAxis`'s own disclosed always-true-branch
+		// bug: `d1`=[0,0,1] default, `d2`=`IfcFirstProjAxis(d1, null)`=[1,0,0] (the
+		// no-arg branch, bug 1, always takes the `[1,0,0]` sub-branch), Y axis =
+		// `normalise(cross(d1,d2))` = `normalise(cross([0,0,1],[1,0,0]))` = [0,1,0]).
+		// `P[2 - ONE_BASED]` (0-based index 1) = the Y axis = `[0,1,0]`, a 3-component
+		// `IfcDirection`. `IfcConvertDirectionInto2D` copies only its first 2
+		// components into a FRESH, genuinely-2D `IfcDirection` (`Dim` = 2 via
+		// `calc_IfcDirection_Dim`, chunk 1) -- IFC2X3's own version would instead
+		// return that exact 3-component `P[1]` instance unwrapped (`Dim` = 3).
+		test("TrueNorth: ParentContext.TrueNorth unset -> IfcConvertDirectionInto2D(WCS.P[1]), a NEW 2D direction (genuinely different from IFC2X3's raw pass-through)", () => {
+			const file = createTestFile("IFC4");
+			const { subContext } = buildSubContext(file, null, 1.0e-5);
+			const result = ifc4.calc_IfcGeometricRepresentationSubContext_TrueNorth(
+				subContext as EntityInstance,
+			) as EntityInstance;
+			expect((result as unknown as { Dim: number }).Dim).toBe(2);
+			closeArray(ratios(result), [0.0, 1.0]);
+		});
+
+		// Python: `nvl(express_getattr(ParentContext, 'Precision', INDETERMINATE), 1)`.
+		test("Precision delegates to ParentContext.Precision when set", () => {
+			const file = createTestFile("IFC4");
+			const { subContext } = buildSubContext(file, null, 1.0e-5);
+			expect(ifc4.calc_IfcGeometricRepresentationSubContext_Precision(subContext as EntityInstance)).toBeCloseTo(
+				1.0e-5,
+				10,
+			);
+		});
+
+		test("Precision falls back to 1 when ParentContext.Precision is unset", () => {
+			const file = createTestFile("IFC4");
+			const { subContext } = buildSubContext(file, null, null);
+			expect(ifc4.calc_IfcGeometricRepresentationSubContext_Precision(subContext as EntityInstance)).toBe(1);
+		});
+
+		// End-to-end: read `.CoordinateSpaceDimension` through the normal
+		// `EntityInstance` attribute-read path.
+		test("end-to-end: subContext.CoordinateSpaceDimension resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const trueNorth = file.createEntity("IfcDirection", [0.0, 1.0, 0.0]);
+			const { subContext } = buildSubContext(file, trueNorth as EntityInstance, 1.0e-5);
+			expect((subContext as unknown as { CoordinateSpaceDimension: number }).CoordinateSpaceDimension).toBe(3);
+		});
+	});
+
+	// --- calc_IfcGeometricSet_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcGeometricSet_Dim", () => {
+		// Python: `express_getattr(express_getitem(Elements, 0, INDETERMINATE), 'Dim',
+		// INDETERMINATE)` -- the FIRST element's own Dim. A 2D IfcCartesianPoint's own
+		// Dim (`calc_IfcCartesianPoint_Dim`, chunk 1) is 2.
+		test("Elements[0].Dim resolves via calc_IfcCartesianPoint_Dim", () => {
+			const file = createTestFile("IFC4");
+			const point = file.createEntity("IfcCartesianPoint", [1.0, 2.0]);
+			const geometricSet = file.createEntity("IfcGeometricSet", [point]);
+			expect(ifc4.calc_IfcGeometricSet_Dim(geometricSet as EntityInstance)).toBe(2);
+		});
+	});
+
+	// --- calc_IfcHalfSpaceSolid_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcHalfSpaceSolid_Dim", () => {
+		// Python: `return 3` (unconditional constant).
+		test("always 3", () => {
+			const file = createTestFile("IFC4");
+			const halfSpace = file.createEntity("IfcHalfSpaceSolid");
+			expect(ifc4.calc_IfcHalfSpaceSolid_Dim(halfSpace as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcMaterialLayerSet_TotalThickness (+ its IfcMlsTotalThickness helper, byte-identical to IFC2X3's own) ---
+	describe("calc_IfcMaterialLayerSet_TotalThickness", () => {
+		// Python: `IfcMlsTotalThickness` sums every `MaterialLayers[].LayerThickness`
+		// (real Python's own local variable is confusingly named `max`, but it is a
+		// running SUM, not a maximum). 10.0 + 20.0 + 5.0 = 35.0.
+		test("sums every MaterialLayers[].LayerThickness (not a maximum, despite real Python's own `max` variable name)", () => {
+			const file = createTestFile("IFC4");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 10.0, null, null, null, null, null);
+			const layer2 = file.createEntity("IfcMaterialLayer", null, 20.0, null, null, null, null, null);
+			const layer3 = file.createEntity("IfcMaterialLayer", null, 5.0, null, null, null, null, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1, layer2, layer3], null, null);
+			expect(ifc4.calc_IfcMaterialLayerSet_TotalThickness(layerSet as EntityInstance)).toBeCloseTo(35.0, 10);
+		});
+
+		// Single-layer set: the `sizeof(MaterialLayers) > 1` loop guard is never
+		// entered, `total` stays at its initial value (`MaterialLayers[0].LayerThickness`).
+		test("single-layer set: total is just that one layer's own thickness", () => {
+			const file = createTestFile("IFC4");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 42.0, null, null, null, null, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1], null, null);
+			expect(ifc4.calc_IfcMaterialLayerSet_TotalThickness(layerSet as EntityInstance)).toBeCloseTo(42.0, 10);
+		});
+
+		// End-to-end: read `.TotalThickness` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: layerSet.TotalThickness resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const layer1 = file.createEntity("IfcMaterialLayer", null, 10.0, null, null, null, null, null);
+			const layer2 = file.createEntity("IfcMaterialLayer", null, 20.0, null, null, null, null, null);
+			const layerSet = file.createEntity("IfcMaterialLayerSet", [layer1, layer2], null, null);
+			expect((layerSet as unknown as { TotalThickness: number }).TotalThickness).toBeCloseTo(30.0, 10);
+		});
+	});
+
+	// --- calc_IfcMirroredProfileDef_Operator (genuinely IFC4-only, no IFC2X3 equivalent) ---
+	describe("calc_IfcMirroredProfileDef_Operator", () => {
+		// Python: `IfcCartesianTransformationOperator2D(Axis1=IfcDirection(
+		// DirectionRatios=[-1.0, 0.0]), Axis2=IfcDirection(DirectionRatios=[0.0, 1.0]),
+		// LocalOrigin=IfcCartesianPoint(Coordinates=[0.0, 0.0]), Scale=1.0)` -- a FIXED
+		// value that does not read `self` at all (confirmed directly: `self` is unused
+		// in the entire real Python body). Called here with an unrelated dummy entity
+		// to confirm exactly that.
+		test("returns a fixed X-axis-mirroring 2D transformation operator, ignoring self entirely", () => {
+			const file = createTestFile("IFC4");
+			const dummy = file.createEntity("IfcCsgPrimitive3D");
+			const operator = ifc4.calc_IfcMirroredProfileDef_Operator(dummy as EntityInstance) as EntityInstance;
+			expect(operator.isA("IfcCartesianTransformationOperator2D")).toBe(true);
+			const axis1 = (operator as unknown as { Axis1: EntityInstance }).Axis1;
+			closeArray(ratios(axis1), [-1.0, 0.0]);
+			const axis2 = (operator as unknown as { Axis2: EntityInstance }).Axis2;
+			closeArray(ratios(axis2), [0.0, 1.0]);
+			const localOrigin = (operator as unknown as { LocalOrigin: EntityInstance }).LocalOrigin;
+			expect((localOrigin as unknown as { Coordinates: number[] }).Coordinates).toEqual([0.0, 0.0]);
+			expect((operator as unknown as { Scale: number }).Scale).toBe(1.0);
+		});
+
+		// Fixture note (same shape as `IfcGeometricRepresentationSubContext`/
+		// `IfcOrientedEdge` above): `IfcMirroredProfileDef`'s real, native attribute
+		// order, confirmed EMPIRICALLY against the real built addon, is
+		// `['ProfileType', 'ProfileName', 'ParentProfile', 'Operator', 'Label']` -- 5
+		// positional slots, including `Operator` itself (DERIVE-overriding
+		// `IfcDerivedProfileDef`'s own stored `Operator`) at slot 4 --
+		// `generated/ifc4.d.ts`'s own `IfcMirroredProfileDef` interface omits it (4
+		// fields only), matching this file's own "`.d.ts` is accurate for reading, not
+		// for `createEntity`'s positional convention" precedent.
+		test("end-to-end: mirroredProfile.Operator resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const parentProfile = file.createEntity("IfcCircleProfileDef", "AREA", null, null, 5.0);
+			const mirroredProfile = file.createEntity("IfcMirroredProfileDef", "AREA", null, parentProfile, null, null);
+			const operator = (mirroredProfile as unknown as { Operator: EntityInstance }).Operator;
+			expect(operator.isA("IfcCartesianTransformationOperator2D")).toBe(true);
+			closeArray(ratios((operator as unknown as { Axis1: EntityInstance }).Axis1), [-1.0, 0.0]);
+		});
+	});
+
+	// --- calc_IfcOrientedEdge_EdgeStart / calc_IfcOrientedEdge_EdgeEnd (+ IfcBooleanChoose, byte-identical to IFC2X3's own) ---
+	describe("calc_IfcOrientedEdge_EdgeStart / calc_IfcOrientedEdge_EdgeEnd", () => {
+		// Fixture note (same shape as `IfcGeometricRepresentationSubContext` above):
+		// `IfcOrientedEdge`'s real, native attribute order, confirmed EMPIRICALLY
+		// against the real built addon, is `[EdgeStart, EdgeEnd, EdgeElement,
+		// Orientation]` -- the SAME SHAPE as IFC2X3's own -- `createEntity` needs all 4
+		// positional slots, not just the 2 genuinely-storable ones
+		// `generated/ifc4.d.ts` documents (`EdgeElement`, `Orientation`).
+		function buildOrientedEdge(file: IfcFile, orientation: boolean | null) {
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const v0 = file.createEntity("IfcVertexPoint", p0);
+			const v1 = file.createEntity("IfcVertexPoint", p1);
+			const edge = file.createEntity("IfcEdge", v0, v1);
+			const orientedEdge = file.createEntity("IfcOrientedEdge", null, null, edge, orientation);
+			return { v0, v1, orientedEdge };
+		}
+
+		// Python: `IfcBooleanChoose(orientation, EdgeElement.EdgeStart, EdgeElement.EdgeEnd)`.
+		test("Orientation=true -> EdgeStart is EdgeElement.EdgeStart", () => {
+			const file = createTestFile("IFC4");
+			const { v0, orientedEdge } = buildOrientedEdge(file, true);
+			const result = ifc4.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v0 as EntityInstance).id());
+		});
+
+		test("Orientation=false -> EdgeStart is EdgeElement.EdgeEnd", () => {
+			const file = createTestFile("IFC4");
+			const { v1, orientedEdge } = buildOrientedEdge(file, false);
+			const result = ifc4.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		// `calc_IfcOrientedEdge_EdgeEnd` swaps choice1/choice2.
+		test("Orientation=true -> EdgeEnd is EdgeElement.EdgeEnd", () => {
+			const file = createTestFile("IFC4");
+			const { v1, orientedEdge } = buildOrientedEdge(file, true);
+			const result = ifc4.calc_IfcOrientedEdge_EdgeEnd(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		test("Orientation=false -> EdgeEnd is EdgeElement.EdgeStart", () => {
+			const file = createTestFile("IFC4");
+			const { v0, orientedEdge } = buildOrientedEdge(file, false);
+			const result = ifc4.calc_IfcOrientedEdge_EdgeEnd(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v0 as EntityInstance).id());
+		});
+
+		// `IfcBooleanChoose`'s own disclosed careful-truthiness handling: `Orientation`
+		// unset (`$`) resolves to `runtimeShim.INDETERMINATE`, which real Python's own
+		// `indeterminate_type.__bool__` treats as falsy.
+		test("Orientation unset (INDETERMINATE) -> treated as falsy, matching real Python's indeterminate_type.__bool__", () => {
+			const file = createTestFile("IFC4");
+			const { v1, orientedEdge } = buildOrientedEdge(file, null);
+			const result = ifc4.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		// End-to-end: read `.EdgeStart` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: orientedEdge.EdgeStart resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const { v0, orientedEdge } = buildOrientedEdge(file, true);
+			expect((orientedEdge as unknown as { EdgeStart: EntityInstance }).EdgeStart.id()).toBe(
+				(v0 as EntityInstance).id(),
+			);
+		});
+	});
+
+	// --- calc_IfcPlacement_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcPlacement_Dim", () => {
+		// Python: `express_getattr(Location, 'Dim', INDETERMINATE)`. Location is a 3D
+		// IfcCartesianPoint -> Dim = 3.
+		test("Location.Dim resolves via calc_IfcCartesianPoint_Dim", () => {
+			const file = createTestFile("IFC4");
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const placement = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			expect(ifc4.calc_IfcPlacement_Dim(placement as EntityInstance)).toBe(3);
+		});
+
+		// End-to-end: read `.Dim` on a real `IfcAxis2Placement3D` through the normal
+		// `EntityInstance` attribute-read path -- `IfcAxis2Placement3D` has no own
+		// `Dim` function, so dispatch must walk its supertype chain up to
+		// `IfcPlacement.Dim` to resolve it.
+		test("end-to-end: placement.Dim resolves through the normal attribute-read path via supertype dispatch", () => {
+			const file = createTestFile("IFC4");
+			const location = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const placement = file.createEntity("IfcAxis2Placement3D", location, null, null);
+			expect((placement as unknown as { Dim: number }).Dim).toBe(3);
+		});
+	});
+
+	// --- calc_IfcPointOnCurve_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcPointOnCurve_Dim", () => {
+		// Python: `express_getattr(BasisCurve, 'Dim', INDETERMINATE)`. BasisCurve is a
+		// 2D IfcPolyline -> Dim = 2 (via `calc_IfcCurve_Dim`, IFC4 chunk 2).
+		test("BasisCurve.Dim resolves via calc_IfcCurve_Dim", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const pointOnCurve = file.createEntity("IfcPointOnCurve", polyline, 0.5);
+			expect(ifc4.calc_IfcPointOnCurve_Dim(pointOnCurve as EntityInstance)).toBe(2);
+		});
+
+		// End-to-end: read `.Dim` through the normal `EntityInstance` attribute-read path.
+		test("end-to-end: pointOnCurve.Dim resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const polyline = file.createEntity("IfcPolyline", [p0, p1]);
+			const pointOnCurve = file.createEntity("IfcPointOnCurve", polyline, 0.5);
+			expect((pointOnCurve as unknown as { Dim: number }).Dim).toBe(2);
+		});
+	});
+
+	// --- calc_IfcPointOnSurface_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcPointOnSurface_Dim", () => {
+		// Python: `express_getattr(BasisSurface, 'Dim', INDETERMINATE)` -- a pure
+		// delegation, agnostic to the actual real-Python-schema type of `BasisSurface`.
+		// **Disclosed fixture note**: no `IfcXxxSurface.Dim` function is ported for
+		// IFC4 yet by this chunk or chunks 1-2 (`IfcElementarySurface`/`IfcSweptSurface`
+		// are out of this chunk's own assigned scope), so there is no real `IfcSurface`
+		// subtype available yet whose own `.Dim` resolves to a concrete number for
+		// IFC4. `IfcCsgPrimitive3D` (a SOLID, not a surface -- but the only
+		// already-ported-for-IFC4 entity type whose own `.Dim` is a plain,
+		// unconditional constant, chunk 2) is used here purely as a schema-
+		// nonconformant stand-in to exercise `calc_IfcPointOnSurface_Dim`'s own pure
+		// delegation logic in isolation -- this port's `createEntity`/`.get()`
+		// primitive layer performs no SELECT-type conformance check, so the fixture is
+		// functionally sufficient despite not being a real, valid `IfcSurface`.
+		test("BasisSurface.Dim resolves via delegation (IfcCsgPrimitive3D stand-in, see disclosed fixture note)", () => {
+			const file = createTestFile("IFC4");
+			const basisSurface = file.createEntity("IfcCsgPrimitive3D");
+			const pointOnSurface = file.createEntity("IfcPointOnSurface", basisSurface, 0.5, 0.5);
+			expect(ifc4.calc_IfcPointOnSurface_Dim(pointOnSurface as EntityInstance)).toBe(3);
+		});
+
+		// End-to-end: read `.Dim` through the normal `EntityInstance` attribute-read path.
+		test("end-to-end: pointOnSurface.Dim resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const basisSurface = file.createEntity("IfcCsgPrimitive3D");
+			const pointOnSurface = file.createEntity("IfcPointOnSurface", basisSurface, 0.5, 0.5);
+			expect((pointOnSurface as unknown as { Dim: number }).Dim).toBe(3);
+		});
+	});
+
+	// --- calc_IfcRevolvedAreaSolid_AxisLine (+ IfcLine, byte-identical to IFC2X3's own) ---
+	describe("calc_IfcRevolvedAreaSolid_AxisLine", () => {
+		// Python: `IfcLine(Pnt=Axis.Location, Dir=IfcVector(Orientation=Axis.Z,
+		// Magnitude=1.0))`. `Axis.Z` is `IfcAxis1Placement`'s own DERIVE attribute
+		// (`calc_IfcAxis1Placement_Z`, IFC4 chunk 1): `nvl(IfcNormalise(Axis), default)`
+		// -- exercised here with an UNNORMALIZED `Axis` ([0,0,2]) to confirm the full
+		// chain normalizes it (-> [0,0,1]), not just passes it through.
+		test("AxisLine.Pnt is Axis.Location, AxisLine.Dir is a unit vector along (normalised) Axis.Z", () => {
+			const file = createTestFile("IFC4");
+			const profile = file.createEntity("IfcRectangleProfileDef", "AREA", null, null, 2.0, 3.0);
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [1.0, 2.0, 3.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 2.0]);
+			const axis = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolvedSolid = file.createEntity("IfcRevolvedAreaSolid", profile, position, axis, Math.PI / 2);
+			const axisLine = ifc4.calc_IfcRevolvedAreaSolid_AxisLine(revolvedSolid as EntityInstance) as EntityInstance;
+			const pnt = (axisLine as unknown as { Pnt: EntityInstance }).Pnt;
+			expect(pnt.id()).toBe((axisLocation as EntityInstance).id());
+			const dir = (axisLine as unknown as { Dir: EntityInstance }).Dir;
+			expect((dir as unknown as { Magnitude: number }).Magnitude).toBe(1.0);
+			closeArray(ratios((dir as unknown as { Orientation: unknown }).Orientation), [0, 0, 1]);
+		});
+
+		// End-to-end: read `.AxisLine` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: revolvedSolid.AxisLine resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const profile = file.createEntity("IfcRectangleProfileDef", "AREA", null, null, 2.0, 3.0);
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [1.0, 2.0, 3.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 2.0]);
+			const axis = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolvedSolid = file.createEntity("IfcRevolvedAreaSolid", profile, position, axis, Math.PI / 2);
+			const axisLine = (revolvedSolid as unknown as { AxisLine: EntityInstance }).AxisLine;
+			expect((axisLine as unknown as { Pnt: EntityInstance }).Pnt.id()).toBe((axisLocation as EntityInstance).id());
 		});
 	});
 });
