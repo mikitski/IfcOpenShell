@@ -1631,6 +1631,19 @@ separately-unported `calc_IfcSegment_Dim`), and `Surface2D`/`Surface3D` remain b
 (`calc_IfcSurface_Dim` not yet ported for that schema). Point 2 (geometric-fidelity verification)
 is UNCHANGED, still a real, disclosed, scoped-out follow-up.
 
+**UPDATE 2 (Phase EX-2, IFC4X3's own FOURTH and LAST `calc_*`-porting chunk, `src/express/rules/
+ifc4x3.ts`): the last 2 gaps named directly above are now BOTH closed.** That chunk ports
+`calc_IfcSegment_Dim` (closing `IfcCompositeCurve`'s own `Segments[0].Dim`, the one remaining
+`Curve2D`/`Curve3D` gap) and `calc_IfcSurface_Dim` (a bare `return 3`, same shape as IFC4's own) --
+see `src/util/representation.ts`'s own header comment (UPDATE 5) for the full, re-verified
+per-branch writeup. `Curve2D`/`Curve3D` are now resolvable for EVERY concrete `IfcCurve` subtype on
+IFC4X3, and `Surface3D` is now reachable too, with `Surface2D` permanently unreachable dead code
+(same shape as IFC4's own already-disclosed finding) -- IFC4X3 is now as fully resolved as IFC4 for
+this entire family. **This also brings IFC4X3 to the full 60/60 `calc_*` DERIVE functions, closing
+Phase EX-2 ("Derived-attribute support (EXPRESS rules)") ENTIRELY, across all 3 schemas
+(IFC2X3 55/55, IFC4 62/62, IFC4X3 60/60).** Point 2 (geometric-fidelity verification) remains
+UNCHANGED, still a real, disclosed, scoped-out follow-up.
+
 ---
 
 ### `util.date.stringToDate` doesn't reproduce `dateutil.parser.parse(..., fuzzy=True)`'s free-text date extraction

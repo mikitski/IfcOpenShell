@@ -254,6 +254,30 @@
 // exists purely so a future reader doesn't assume `IfcCompositeCurve` is the only
 // remaining gap without checking it's genuinely the ONLY one left, not one of several.
 //
+// --- UPDATE 5 (Phase EX-2, IFC4X3's own FOURTH and LAST `calc_*`-porting chunk,
+//     `src/express/rules/ifc4x3.ts`): BOTH remaining halves of this gap close for
+//     IFC4X3 -- `Curve2D`/`Curve3D` fully, `Surface2D`/`Surface3D` the same way IFC4's
+//     own UPDATE 2 already resolved them ---
+//
+// That chunk ports `calc_IfcSegment_Dim` (ADD2's own consolidated supertype formula
+// `IfcCompositeCurveSegment.Dim`/`IfcCurveSegment.Dim` dispatch through, symmetric to
+// `calc_IfcPoint_Dim`'s own consolidation) and `calc_IfcSurface_Dim` (a bare `return
+// 3`, same shape as IFC4's own) together -- re-verified directly against the real
+// built addon (not assumed from the dependency chain alone): `IfcCompositeCurve`'s
+// own `Segments[0].Dim` (the ONE remaining `INDETERMINATE` branch UPDATE 4 above
+// named) now resolves to a real number, so **`Curve2D`/`Curve3D` are now resolvable
+// for EVERY concrete `IfcCurve` subtype on IFC4X3**, matching IFC4's own full
+// resolution exactly. `IfcSurface.Dim` now resolves too (always `3`, no `IfcSurface`
+// subtype re-declares its own `Dim` as DERIVE anywhere in `IFC4X3_ADD2.py`, confirmed
+// directly, same as IFC4's own already-disclosed finding) -- `guessType`'s `Surface3D`
+// branch is therefore now genuinely reachable and correct for IFC4X3 too, but
+// `Surface2D` becomes PERMANENTLY UNREACHABLE dead code for IFC4X3 as a direct
+// consequence (the exact same shape of finding this file's own UPDATE 2 section
+// already documents for IFC4). No existing test in this file exercises IFC4X3 at all
+// (still true), so no test-fidelity fix is required here either -- this paragraph
+// exists purely so a future reader knows IFC4X3 is now as fully resolved as IFC4 for
+// BOTH `Curve*`/`Surface*` branches, not just `Curve*`.
+//
 // *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be
 // independently reachable): `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"` are dead
