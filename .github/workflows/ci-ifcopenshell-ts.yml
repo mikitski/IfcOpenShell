@@ -133,15 +133,12 @@ jobs:
           brew install boost eigen
           echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
 
-      # vcpkg's native GitHub Actions Cache binary source ("x-gha"): lets a
-      # manually-invoked `vcpkg install` below fetch prebuilt Boost/Eigen
-      # packages from the GHA cache instead of compiling Boost from source
-      # every run (the single slowest leg observed in Phase 0's CI bring-up,
-      # 30+ minutes alone). ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN aren't
-      # exposed as plain job env vars; exporting them via actions/github-script
-      # is the mechanism vcpkg's own binary-caching docs and lukka/run-vcpkg
-      # (whose x-gha wiring this mirrors, since this workflow calls vcpkg.exe
-      # directly instead of using that action) both use.
+      # These exported vars are consumed by sccache further below (its own GHA cache
+      # backend needs them) - NOT by vcpkg anymore, see the vcpkg cache step's own
+      # comment for why. ACTIONS_CACHE_URL/ACTIONS_RUNTIME_TOKEN aren't exposed as plain
+      # job env vars; exporting them via actions/github-script is the standard mechanism
+      # for consuming the Actions Cache service directly (what sccache's GHA backend
+      # does internally).
       - name: Export GitHub Actions cache environment variables (Windows)
         if: matrix.os == 'windows'
         uses: actions/github-script@v7
@@ -150,11 +147,46 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # vcpkg's own experimental "x-gha" binary-caching backend (previously used here to
+      # fetch prebuilt Boost/Eigen instead of compiling Boost from source every run - the
+      # single slowest leg observed anywhere in this workflow, 25-30+ minutes alone) was
+      # REMOVED upstream (microsoft/vcpkg-tool#1662): it consumed GitHub's internal Actions
+      # Cache API in a way the Actions team never intended to support externally, and that
+      # API changed in a way that broke it. Confirmed happening for real, silently: every
+      # Windows `vcpkg install` in this workflow's history has been logging `warning: The
+      # 'x-gha' binary caching backend has been removed` and falling back to a full
+      # from-source Boost build every single time (`Total install time: ~26-31 min`,
+      # confirmed via real job logs) - `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` was
+      # a silent no-op this whole time, independent of and unaffected by every other cache
+      # fix in this workflow (the C++ core prefix cache, sccache, ...).
+      #
+      # Fixed per vcpkg's own migration guidance (same PR's discussion): vcpkg's `files`
+      # binary-cache provider writes/reads plain per-package archive files in an ordinary
+      # local directory, which `actions/cache` can then cache like any other directory -
+      # the officially GitHub-Actions-team-endorsed replacement (the alternative, a
+      # NuGet-backed feed via GitHub Packages, preserves finer per-port cache granularity
+      # but needs its own authentication/feed setup; not worth the added complexity here).
+      # Combined restore+save (unlike the C++ core prefix's split restore/save below) is
+      # fine for this cache: vcpkg's `files` provider writes one complete, atomic archive
+      # file per successfully-built package, so a mid-run failure can't leave a partially-
+      # written archive that corrupts a LATER restore the way an interrupted single-tree
+      # copy could - there's no equivalent "poisoned cache" risk to gate the save on.
+      - name: Restore/save cached vcpkg binary archives (Windows)
+        if: matrix.os == 'windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg-archives
+          key: ifcopenshell-ts-vcpkg-archives-${{ matrix.vcpkgTriplet }}-${{ hashFiles('.github/workflows/ci-ifcopenshell-ts.yml') }}
+
       - name: Install build dependencies (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
         env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          # Single-quoted, not double-quoted: YAML double-quoted scalars process `\v` as
+          # an escape sequence (vertical tab), which would corrupt this path's literal
+          # Windows backslash before `vcpkg-archives`. Single-quoted YAML has no escape
+          # processing at all, so the backslash survives as-is.
+          VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}\vcpkg-archives,readwrite'
         run: |
           # apt/brew install boost's full header tree regardless of which
           # libraries were requested; vcpkg installs only exactly what's
@@ -204,8 +236,9 @@ jobs:
       #
       # sccache (Mozilla's compiler cache) supports MSVC, unlike ccache. Uses its GHA cache
       # backend rather than a separate actions/cache step - sccache talks to the Actions
-      # Cache service directly, the same mechanism vcpkg's own `x-gha` binary source above
-      # uses, via the `ACTIONS_CACHE_URL`/`ACTIONS_RUNTIME_TOKEN` env vars the "Export GitHub
+      # Cache service directly (via its own dedicated action, not vcpkg's now-removed
+      # `x-gha` approach - see the vcpkg cache step above for why that one had to change),
+      # using the `ACTIONS_CACHE_URL`/`ACTIONS_RUNTIME_TOKEN` env vars the "Export GitHub
       # Actions cache environment variables (Windows)" step above already exports for this
       # job - no separate cache-directory path/key bookkeeping needed, unlike the manual
       # actions/cache/restore+save pair used for the C++ core prefix below (which caches a
