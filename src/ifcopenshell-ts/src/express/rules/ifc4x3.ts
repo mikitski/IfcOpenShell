@@ -722,14 +722,14 @@ registerSchemaCalcFunctions("IFC4X3_ADD2", {
 // `IFC4.py`'s own version (10 branches: Line/Conic/Polyline/TrimmedCurve/
 // CompositeCurve/BSplineCurve/OffsetCurve2D/OffsetCurve3D/Pcurve/IndexedPolyCurve)
 // AND `IFC2X3.py`'s own (8 branches, no Pcurve/IndexedPolyCurve at all).** ADD2
-// adds 7 MORE branches on top of IFC4's own 10, for curve types that postdate IFC4
+// adds 6 MORE branches on top of IFC4's own 10, for curve types that postdate IFC4
 // entirely: `IfcGradientCurve`/`IfcSegmentedReferenceCurve` (both constant `3`),
 // `IfcOffsetCurveByDistances` (constant `3`), `IfcCurveSegment2D` (constant `2` --
 // see its own dedicated finding below), `IfcPolynomialCurve` (a 2-vs-3 branch on
 // `CoefficientsZ`/`Position.Dim`), and `IfcSpiral` (`Position.Dim`, an ABSTRACT
 // entity -- confirmed via a real built addon, `IfcSpiral.is_abstract() === True`,
 // so this branch matches any of its real concrete subtypes, e.g. `IfcClothoid`).
-// Ported fresh below as a completely new, IFC4X3_ADD2-scoped `ifcCurveDim`, all 17
+// Ported fresh below as a completely new, IFC4X3_ADD2-scoped `ifcCurveDim`, all 16
 // branches, not reusing or extending `rules/ifc4.ts`'s own 10-branch copy. Same
 // disclosed `!exists(curve)` upstream guard fix `rules/ifc2x3.ts`'s/`rules/ifc4.ts`'s
 // own versions already establish (this port's `INDETERMINATE` sentinel is a plain,
@@ -1011,7 +1011,7 @@ function ifcBaseAxis(dim: number, axis1: unknown, axis2: unknown, axis3: unknown
  * Python: `IfcCurveDim` (`IFC4X3_ADD2.py` line 13471) -- the shared dispatch helper
  * `calc_IfcCurve_Dim` (below) delegates to; not itself a `calc_*` function. GENUINELY
  * DIFFERENT from both `rules/ifc2x3.ts`'s own (8 branches) and `rules/ifc4.ts`'s own
- * (10 branches) -- see this section's own header comment for the full 17-branch diff
+ * (10 branches) -- see this section's own header comment for the full 16-branch diff
  * writeup, including the permanently-dead `IfcCurveSegment2D` branch (genuinely new
  * disclosed finding, not a bug shared with any other schema's port).
  *
