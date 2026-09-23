@@ -8,20 +8,30 @@
 // and already-landed `api.aggregate.assignObject` (`../aggregate/assignObject.ts`) --
 // both verified against their real exported name/signature before use.
 //
-// --- Real logic runs BEFORE hitting the already-disclosed `.Dim` blocker ---
+// --- Real logic runs BEFORE hitting the (formerly) disclosed `.Dim` blocker ---
 //
 // Real Python creates the `IfcAlignment` entity (a real `guid.new()`, a real
 // `IfcAlignment` in the file) BEFORE calling `_create_offset_curve_representation` --
-// so a real `IfcAlignment` genuinely exists in the file by the time
-// `_createOffsetCurveRepresentation`'s own already-disclosed `basisCurve.get("Dim")`
-// throw (see that file's own header comment; the SAME pre-existing `entityInstance.ts`
-// EXPRESS DERIVED-attribute gap `TODOS.md`'s very first entry in this family already
-// tracks) is reached. `_createOffsetCurveRepresentation`'s own real, portable
-// `offsets[i].isA()` type-checking loop ALSO runs for real before that throw -- an
-// `offsets` element that isn't an `IfcPointByDistanceExpression` throws a real,
+// so a real `IfcAlignment` genuinely exists in the file regardless of whatever
+// `_createOffsetCurveRepresentation` itself goes on to do. `_createOffsetCurveRepresentation`'s
+// own real, portable `offsets[i].isA()` type-checking loop ALSO runs for real first --
+// an `offsets` element that isn't an `IfcPointByDistanceExpression` throws a real,
 // fully-portable `TypeError` from INSIDE that already-landed dependency, with the
 // `IfcAlignment` already created (but not yet aggregated to the project) -- ported
 // everything faithfully, no proactive guard added here.
+//
+// **UPDATE (Phase EX-2, IFC4X3's own SECOND `calc_*`-porting chunk): the
+// `basisCurve.get("Dim")` read inside `_createOffsetCurveRepresentation` no longer
+// throws for IFC4X3** (`calc_IfcCurve_Dim` is now ported there) -- so
+// `createAsOffsetCurve` itself now completes successfully end-to-end for a valid
+// `offsets` list, returning a real `IfcAlignment` (aggregated to the project, if one
+// exists), matching real Python's own success path. See
+// `_createOffsetCurveRepresentation.ts`'s own header comment for the still-real,
+// disclosed latent gap this now surfaces instead of a crash (a realistic basis curve's
+// `.Dim` currently always resolves to `runtimeShim.INDETERMINATE`, via the
+// still-unported `calc_IfcPoint_Dim`, so the representation this function builds is
+// always the 2D-shaped one, regardless of the real curve's dimensionality) -- not
+// this file's own concern to fix, just to disclose.
 //
 // --- Real, CONFIRMED Python quirk: `start_station` is accepted but NEVER used ---
 //
@@ -70,9 +80,6 @@ import { _createOffsetCurveRepresentation } from "./_createOffsetCurveRepresenta
  * @returns The new `IfcAlignment`.
  * @throws {TypeError} If any `offsets` element is not an `IfcPointByDistanceExpression`
  *   (from the already-landed `_createOffsetCurveRepresentation`).
- * @throws {Error} At the exact point real Python's own `basis_curve.Dim` read would need
- *   the (not-yet-implemented) EXPRESS DERIVED-attribute machinery -- see
- *   `_createOffsetCurveRepresentation.ts`'s own header comment.
  */
 export function createAsOffsetCurve(
 	file: IfcFile,

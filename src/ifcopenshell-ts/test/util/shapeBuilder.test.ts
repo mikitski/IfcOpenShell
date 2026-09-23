@@ -85,8 +85,6 @@ import type { IfcFile } from "../../src/file";
 import * as subject from "../../src/util/shapeBuilder";
 import { ShapeBuilder } from "../../src/util/shapeBuilder";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../bootstrap";
-
-const DIM_ERROR = /has no attribute 'Dim'/;
 const DEFINED_TYPE_ERROR = /Attribute access is only supported on entity instances/;
 
 // --- local fixture helpers (bypass `ShapeBuilder.profile()`'s disclosed `Dim` gap to
@@ -877,39 +875,25 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	// **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`,
-	// `planning/ifcopenshell-ts/70-express-rules-plan.md` §4): a straight
-	// (`closed=false`, no `arcPoints`) `polyline()` on a non-IFC2X3 schema builds a
-	// real `IfcIndexedPolyCurve` over an `IfcCartesianPointList2D` (`shapeBuilder.ts`'s
-	// own `polyline()`) -- `calc_IfcCurve_Dim`'s new `IfcIndexedPolyCurve` branch
-	// (dispatching into `calc_IfcCartesianPointList_Dim`, both this chunk) now
-	// resolves `.Dim` for IFC4, so `profile()`'s own leading `Dim` guard no longer
-	// throws there: `profile()` now completes successfully end to end on IFC4 (verified
-	// directly against the real built addon). IFC4X3 is UNCHANGED -- no `rules/
-	// ifc4x3.ts` module exists yet, so this still throws `DIM_ERROR` there. Split into
-	// schema-conditional branches, matching `editSurveyPoint.test.ts`'s own established
-	// precedent for this exact shape of partial, schema-scoped resolution.
-	test.skipIf(schema !== "IFC4")(
-		"profile: now genuinely unblocked on IFC4 (Dim resolves via calc_IfcCurve_Dim)",
-		() => {
-			const file = createTestFile(schema);
-			const builder = new ShapeBuilder(file);
-			const curve = builder.polyline(
-				[
-					[0, 0],
-					[1, 0],
-					[1, 1],
-				],
-				false,
-			);
-			const profileDef = builder.profile(curve);
-			expect(profileDef.isA()).toBe("IfcArbitraryClosedProfileDef");
-			expect((profileDef.get("OuterCurve") as EntityInstance).equals(curve)).toBe(true);
-			file.dispose();
-		},
-	);
-
-	test.skipIf(schema === "IFC4")("profile: still DISCLOSED BLOCKED on IFC4X3 (Dim derived-attribute gap)", () => {
+	// **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`) AND
+	// (`planning/ifcopenshell-ts/70-express-rules-plan.md` §4) **IFC4X3's own second
+	// chunk** (`src/express/rules/ifc4x3.ts`): a straight (`closed=false`, no
+	// `arcPoints`) `polyline()` on a non-IFC2X3 schema builds a real
+	// `IfcIndexedPolyCurve` over an `IfcCartesianPointList2D` (`shapeBuilder.ts`'s own
+	// `polyline()`) -- `calc_IfcCurve_Dim`'s `IfcIndexedPolyCurve` branch (dispatching
+	// into `calc_IfcCartesianPointList_Dim`, ported for IFC4 in its own second chunk
+	// and for IFC4X3 across this file's own first two chunks) now resolves `.Dim` for
+	// BOTH remaining schemas in this `describe.each` (IFC4 AND IFC4X3), so `profile()`'s
+	// own leading `Dim` guard no longer throws for either: `profile()` now completes
+	// successfully end to end on both (re-verified directly against the real built
+	// addon for IFC4X3 specifically, not assumed from the IFC4 precedent alone --
+	// `calc_IfcCurve_Dim`'s own `ifcCurveDim` implementation is a completely fresh,
+	// IFC4X3_ADD2-scoped function, not a shared/reused one, so this needed its own
+	// direct confirmation). No longer schema-conditional -- both previously-split
+	// "now genuinely unblocked on IFC4" / "still DISCLOSED BLOCKED on IFC4X3" tests
+	// are merged into one unconditional test covering this `describe.each`'s only 2
+	// remaining schemas.
+	test("profile: now genuinely unblocked on IFC4 and IFC4X3 (Dim resolves via calc_IfcCurve_Dim)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
 		const curve = builder.polyline(
@@ -920,48 +904,30 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 			],
 			false,
 		);
-		expect(() => builder.profile(curve)).toThrow(DIM_ERROR);
+		const profileDef = builder.profile(curve);
+		expect(profileDef.isA()).toBe("IfcArbitraryClosedProfileDef");
+		expect((profileDef.get("OuterCurve") as EntityInstance).equals(curve)).toBe(true);
 		file.dispose();
 	});
 
 	// Same update as `profile` above -- `createSweptDiskSolid`'s own leading `Dim`
-	// guard (`pathCurve.get("Dim") !== 3`) now resolves for IFC4 too.
-	test.skipIf(schema !== "IFC4")(
-		"createSweptDiskSolid: now genuinely unblocked on IFC4 (Dim resolves via calc_IfcCurve_Dim)",
-		() => {
-			const file = createTestFile(schema);
-			const builder = new ShapeBuilder(file);
-			const curve = builder.polyline(
-				[
-					[0, 0, 0],
-					[1, 0, 0],
-					[1, 1, 0],
-				],
-				false,
-			);
-			const solid = builder.createSweptDiskSolid(curve, 0.5);
-			expect(solid.isA()).toBe("IfcSweptDiskSolid");
-			file.dispose();
-		},
-	);
-
-	test.skipIf(schema === "IFC4")(
-		"createSweptDiskSolid: still DISCLOSED BLOCKED on IFC4X3 (Dim derived-attribute gap)",
-		() => {
-			const file = createTestFile(schema);
-			const builder = new ShapeBuilder(file);
-			const curve = builder.polyline(
-				[
-					[0, 0, 0],
-					[1, 0, 0],
-					[1, 1, 0],
-				],
-				false,
-			);
-			expect(() => builder.createSweptDiskSolid(curve, 0.5)).toThrow(DIM_ERROR);
-			file.dispose();
-		},
-	);
+	// guard (`pathCurve.get("Dim") !== 3`) now resolves for IFC4 AND IFC4X3 (see that
+	// test's own comment for the full, re-verified-per-schema citation).
+	test("createSweptDiskSolid: now genuinely unblocked on IFC4 and IFC4X3 (Dim resolves via calc_IfcCurve_Dim)", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
+		const curve = builder.polyline(
+			[
+				[0, 0, 0],
+				[1, 0, 0],
+				[1, 1, 0],
+			],
+			false,
+		);
+		const solid = builder.createSweptDiskSolid(curve, 0.5);
+		expect(solid.isA()).toBe("IfcSweptDiskSolid");
+		file.dispose();
+	});
 
 	test("extrude / translate / rotate / mirror on a manually-built IfcExtrudedAreaSolid " +
 		"(isolated from the disclosed profile()/Dim gap via a local fixture helper)", () => {

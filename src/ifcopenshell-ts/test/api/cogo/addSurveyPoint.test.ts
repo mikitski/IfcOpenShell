@@ -6,19 +6,25 @@
 // `RepresentationType`/`Coordinates`) -- this succeeds in real Python because
 // `IfcGeometricRepresentationSubContext.WorldCoordinateSystem` (a real EXPRESS
 // DERIVED attribute, derived from `ParentContext.WorldCoordinateSystem`) resolves
-// there. This port's `EntityInstance.get()` has no DERIVED-attribute fallback at all
-// (the SAME pre-existing, already-disclosed, cross-cutting `entityInstance.ts` gap
-// `editSurveyPoint.ts`'s own header comment already documents for a DIFFERENT
-// derived attribute, `IfcCartesianPoint.Dim`) -- so `addSurveyPoint` throws on every
-// real invocation that finds a matching context (the common, intended case) --
-// confirmed EMPIRICALLY by actually running this exact test against a locally-built
-// multi-schema native addon, not just reasoned about. Pinned here as "throws the
-// disclosed error" instead of the real Python success assertion, matching this
-// project's established precedent for a currently-blocked function
-// (`addWindowRepresentation.test.ts`/`addRailingRepresentation.test.ts`, etc.) -- the
-// real assertions this test would restore once the gap is fixed are recorded in the
-// comment below, not silently dropped. See `addSurveyPoint.ts`'s own header comment
-// for the full writeup.
+// there.
+//
+// **UPDATE (Phase EX-2, IFC4X3's own SECOND chunk,
+// planning/ifcopenshell-ts/70-express-rules-plan.md §4): this gap is now closed.**
+// `calc_IfcGeometricRepresentationSubContext_WorldCoordinateSystem` is one of that
+// chunk's own 15 ported functions (`src/express/rules/ifc4x3.ts`) -- `context
+// .get("WorldCoordinateSystem")` now resolves instead of throwing, for the ONLY
+// schema this function is ever exercised on (`IfcAnnotation.PredefinedType` is
+// IFC4X3-only, see below), so `addSurveyPoint` now succeeds end to end, restoring
+// real Python's own success assertion verbatim -- re-verified directly against a
+// locally-built multi-schema native addon (not assumed from the dependency chain
+// alone): `PredefinedType === "SURVEY"`, `RepresentationIdentifier === "Annotation"`,
+// `RepresentationType === "Point"`, `Items[0].Coordinates === [50, 10]`. The
+// previously-disclosed-blocked `ObjectPlacement=context.WorldCoordinateSystem`
+// "wrong type" quirk (`addSurveyPoint.ts`'s own header comment, still there) is real
+// but harmless here since neither real Python's own test nor this one inspects
+// `ObjectPlacement` -- confirmed it resolves to a real `IfcAxis2Placement3D` (the
+// context's own `WorldCoordinateSystem`), not an actual `IfcLocalPlacement`, matching
+// the disclosed quirk exactly, not silently worked around.
 //
 // Real Python's fixture is a bare `ifcopenshell.file(schema="IFC4X3")` (NOT
 // `test.bootstrap`'s richer template fixture) -- this port matches that exactly via
@@ -49,7 +55,7 @@ import * as guid from "../../../src/guid";
 import { AVAILABLE_SCHEMAS } from "../../bootstrap";
 
 describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.cogo.addSurveyPoint (IFC4X3)", () => {
-	test('adding a survey point -- BLOCKED by the entityInstance.ts `.get("WorldCoordinateSystem")` DERIVED-attribute gap', () => {
+	test("adding a survey point (now genuinely unblocked: WorldCoordinateSystem resolves via Phase EX-2's IFC4X3 second chunk)", () => {
 		const file = createFile(undefined, { version: "IFC4X3" });
 		const project = file.createEntity("IfcProject", null, null, "Test");
 		const site = file.createEntity("IfcSite", guid.new(), null, "MySite");
@@ -66,9 +72,13 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.cogo.addSurveyPoint 
 		// 10.0)))`, then asserts `annotation.PredefinedType == "SURVEY"`,
 		// `Representation.Representations[0].RepresentationIdentifier == "Annotation"`,
 		// `.RepresentationType == "Point"`, `.Items[0].Coordinates == pytest.approx((50.0,
-		// 10.0))`. This port throws instead -- see this file's own header comment.
-		expect(() => addSurveyPoint(file, file.createEntity("IfcCartesianPoint", [50.0, 10.0]))).toThrow(
-			/has no attribute 'WorldCoordinateSystem'/,
-		);
+		// 10.0))` -- restored verbatim, see this file's own header comment.
+		const annotation = addSurveyPoint(file, file.createEntity("IfcCartesianPoint", [50.0, 10.0]));
+		expect(annotation).toBeTruthy();
+		expect(annotation.get("PredefinedType")).toBe("SURVEY");
+		const representation = annotation.get("Representation").get("Representations")[0];
+		expect(representation.get("RepresentationIdentifier")).toBe("Annotation");
+		expect(representation.get("RepresentationType")).toBe("Point");
+		expect(representation.get("Items")[0].get("Coordinates")).toEqual([50.0, 10.0]);
 	});
 });

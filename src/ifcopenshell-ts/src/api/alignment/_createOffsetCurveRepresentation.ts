@@ -10,26 +10,45 @@
 // Real Python's leading underscore marks this as module-private (absent from
 // `__init__.py`'s own `__all__`) -- NOT re-exported from `./index.ts`'s public barrel.
 //
-// --- INDEPENDENTLY BLOCKED by the pre-existing, already-disclosed `entityInstance.ts`
-// EXPRESS DERIVED-attribute gap (`.get()` has no DERIVED-category fallback at all) --
-// a genuinely NEW occurrence, for THIS module, of an ALREADY-tracked gap ---
+// --- WAS independently blocked by the pre-existing `entityInstance.ts` EXPRESS
+// DERIVED-attribute gap (`.get()` had no DERIVED-category fallback at all); NOW
+// GENUINELY UNBLOCKED for IFC4X3 (the only schema `IfcOffsetCurveByDistances`/
+// `IfcPointByDistanceExpression`/`IfcAlignment` even exist on), but with a real,
+// disclosed LATENT CORRECTNESS gap in its place, not a crash ---
 //
 // Line 49, `basis_curve.Dim == 3` (`basis_curve` is `offsets[0].BasisCurve`, schema-
-// typed `IfcCurve`). `IfcCurve.Dim` is the SAME real EXPRESS DERIVED attribute
-// (`DERIVE Dim := IfcCurveDim(SELF)`) already tracked by `TODOS.md`'s very first entry
-// in this family (`util.representation.guessType`'s `Curve2D`/`Curve3D`/`Surface2D`/
-// `Surface3D` branches, confirmed absent from `IfcCurve`'s own generated interface --
-// `ifc4x3.d.ts`'s `IfcCurve` is an empty marker interface, no attributes of its own on
-// any subtype either) -- NOT a new, separately-tracked entry (already generically
-// covered by that entry's own title, which names `IfcCurve.Dim` explicitly).
+// typed `IfcCurve`). `IfcCurve.Dim` was the SAME real EXPRESS DERIVED attribute
+// (`DERIVE Dim := IfcCurveDim(SELF)`) `TODOS.md`'s very first entry in this family
+// (`util.representation.guessType`'s `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`
+// branches) already tracked as unconditionally throwing "has no attribute 'Dim'".
 //
-// Ported everything BEFORE this line completely and faithfully -- both type checks
-// (the `alignment`/`offsets` loop), matching real Python's own `EntityInstance.get()`
-// natural throw at the exact point `.Dim` would actually be read (no proactive guard,
-// matching `../cogo/editSurveyPoint.ts`'s own established "just write the real
-// attribute read, let the pre-existing gap throw naturally" precedent). The
-// `offsets[i].isA()` type-checking loop and everything up to (and not including) the
-// `.Dim` read are real, fully portable, and independently tested.
+// **UPDATE (Phase EX-2, IFC4X3's own SECOND `calc_*`-porting chunk,
+// `src/express/rules/ifc4x3.ts`): `calc_IfcCurve_Dim` is now ported for IFC4X3, so
+// `basisCurve.get("Dim")` no longer throws at all.** But this module's own realistic
+// `basisCurve` values (a plain `IfcLine`/`IfcPolyline`, per this file's own test
+// fixtures and every real caller) bottom out on `IfcCurveDim`'s `Pnt.Dim`/
+// `Points[0].Dim` branches, which read a plain `IfcCartesianPoint`'s own `.Dim` --
+// STILL genuinely unported for IFC4X3 (ADD2 consolidated it into an abstract-
+// supertype `calc_IfcPoint_Dim`, not one of either of this port's own 2 IFC4X3
+// chunks so far -- `rules/ifc4x3.ts`'s own header comment has the full writeup).
+// `expressGetAttr`'s own try/catch (`runtimeShim.ts`) silently swallows that
+// still-missing dependency's own throw and substitutes `runtimeShim.INDETERMINATE`
+// -- so `basisCurve.get("Dim")` resolves to that sentinel, `INDETERMINATE === 3` is
+// `false` (a `Symbol` is never `===` a number), and this function now ALWAYS takes
+// the 2D (`else`) branch below, REGARDLESS of the real curve's actual
+// dimensionality -- confirmed empirically against the real built addon (a 3D
+// `IfcLine` basis curve still produces a `"Curve2D"` representation). This is a
+// real, disclosed, CURRENT-STATE latent correctness gap (silently wrong branch, not
+// a crash) -- not fixed here (fixing it means porting `calc_IfcPoint_Dim` for
+// IFC4X3, a separate, future `calc_*`-porting chunk's own scope, not this file's)
+// -- pinned by a dedicated regression test asserting today's real, empirically-
+// confirmed (if structurally wrong) `"Curve2D"` outcome, matching this project's
+// "assert what this port actually does today, not what it will do once more chunks
+// land" precedent.
+//
+// Ported everything faithfully either way -- both type checks (the
+// `alignment`/`offsets` loop) and the branch below are real, fully portable,
+// verbatim-translated control flow.
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { assignRepresentation } from "../geometry/assignRepresentation";
@@ -45,9 +64,11 @@ import { getAxisSubcontext } from "./getAxisSubcontext";
  * @param offsets The `IfcPointByDistanceExpression`s defining the offset curve.
  * @throws {TypeError} If `alignment` is not an `IfcAlignment`, or any `offsets`
  *   element is not an `IfcPointByDistanceExpression`.
- * @throws {Error} At the exact point real Python's own `basis_curve.Dim` read would
- *   need the (not-yet-implemented) EXPRESS DERIVED-attribute machinery -- see this
- *   file's own header comment.
+ * @remarks See this file's own header comment: `basisCurve.get("Dim")` currently
+ *   always resolves to `runtimeShim.INDETERMINATE` for a realistic basis curve on
+ *   IFC4X3 (a still-unported transitive dependency), so this function currently
+ *   ALWAYS takes the 2D branch below, regardless of the real curve's dimensionality
+ *   -- a disclosed, current-state latent correctness gap, not a crash.
  */
 export function _createOffsetCurveRepresentation(
 	file: IfcFile,
@@ -72,9 +93,11 @@ export function _createOffsetCurveRepresentation(
 
 	let placement: EntityInstance;
 	let representationType: string;
-	// *** BLOCKED HERE -- see this file's own header comment. `basisCurve.get("Dim")`
-	// throws the pre-existing `entityInstance.ts` DERIVED-attribute error
-	// unconditionally (`IfcCurve.Dim` is never a stored attribute on any schema). ***
+	// *** See this file's own header comment: `basisCurve.get("Dim")` no longer
+	// throws (Phase EX-2, IFC4X3's own second chunk), but for every realistic basis
+	// curve today it resolves to `runtimeShim.INDETERMINATE`, not a real number, so
+	// this always takes the 2D (`else`) branch below regardless of the real curve's
+	// dimensionality -- a disclosed latent correctness gap, not a crash. ***
 	if ((basisCurve.get("Dim") as number) === 3) {
 		placement = file.createEntity(
 			"IfcLocalPlacement",

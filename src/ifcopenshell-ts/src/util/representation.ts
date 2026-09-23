@@ -208,6 +208,34 @@
 // resolved `Surface3D` behavior, plus this unreachability finding, instead of the
 // old disclosed-throw regression test).
 //
+// --- UPDATE 3 (Phase EX-2, IFC4X3's own SECOND `calc_*`-porting chunk,
+//     `src/express/rules/ifc4x3.ts`): the `Curve2D`/`Curve3D` HALF of this gap is now
+//     PARTIALLY closed for IFC4X3 too -- genuinely narrower than IFC4's own UPDATE
+//     above, disclosed precisely rather than overclaimed ---
+//
+// That chunk ports `calc_IfcCurve_Dim` for IFC4X3 (a completely fresh, ADD2-scoped
+// `ifcCurveDim`, not shared with IFC4's own -- 7 more dispatch branches than IFC4's
+// own 10). `i.get("Dim")` on a real `IfcCurve` now resolves for IFC4X3 too, but only
+// for SOME concrete subtypes: the constant branches (`IfcGradientCurve`/
+// `IfcSegmentedReferenceCurve`/`IfcOffsetCurve2D`/`3D`/`ByDistances`/`IfcPcurve`) and
+// `IfcIndexedPolyCurve` (dispatches into the already-ported `calc_
+// IfcCartesianPointList_Dim`) resolve to real numbers -- but the classic
+// `IfcLine`/`IfcPolyline`/`IfcTrimmedCurve`/`IfcCompositeCurve`/`IfcBSplineCurve`
+// branches all still resolve to `runtimeShim.INDETERMINATE`, NOT a real number, for
+// IFC4X3 specifically (they transitively depend on `IfcCartesianPoint.Dim`/
+// `calc_IfcPoint_Dim`, consolidated away and still genuinely unported for IFC4X3, or
+// -- for `IfcCompositeCurve` -- `calc_IfcCompositeCurveSegment_Dim`, never ported for
+// IFC4X3 at all; see `rules/ifc4x3.ts`'s own second-chunk header comment and
+// `test/express/rules/ifc4x3.test.ts`'s own `calc_IfcCurve_Dim` tests for the full,
+// empirically-verified per-branch breakdown). Since `i.get("Dim") === 2/3` is a plain
+// comparison (`INDETERMINATE === 2` is simply `false`, no crash), `guessType`'s
+// `Curve2D`/`Curve3D` branches correctly fail to match for those still-blocked
+// subtypes and fall through further down the `elif` chain, exactly reproducing
+// Python's own control flow -- not a new divergence. No existing test in this file
+// exercises IFC4X3 at all (confirmed by the ORIGINAL UPDATE paragraph above, still
+// true), so no test-fidelity fix is required here; this paragraph exists purely so a
+// future reader doesn't assume IFC4X3 is now as fully resolved as IFC4.
+//
 // *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be
 // independently reachable): `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"` are dead
