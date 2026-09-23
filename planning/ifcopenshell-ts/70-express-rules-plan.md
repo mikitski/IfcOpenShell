@@ -57,10 +57,10 @@ is out of scope for now.
 
 | Schema | Total lines | Boilerplate (skip, see below) | Real rule content | `calc_*` (DERIVE) fns | WHERE-rule classes |
 |---|---|---|---|---|---|
-| IFC2X3 | 8,129 | 3,588 (44%) | 4,541 | 55 | 368 |
-| IFC4 | 12,228 | 4,322 (35%) | 7,906 | 62 | 682 |
-| IFC4X3 | 14,057 | ~5,150 (est., not re-counted) | ~8,900 (est.) | **60** | 780 (not re-verified against ADD2, see below) |
-| **Total** | ~34,414 | ~13,060 | ~21,347 | **177** | 1,830 (not re-verified) |
+| IFC2X3 | 8,129 | 3,588 (44%) | 4,541 | 55 | 365 |
+| IFC4 | 12,228 | 4,322 (35%) | 7,906 | 62 | 679 |
+| IFC4X3 | 14,057 | ~5,150 (est., not re-counted) | ~8,900 (est.) | **60** | **779** (re-verified against ADD2, 2026-09-23 — see §4 Phase EX-4) |
+| **Total** | ~34,414 | ~13,060 | ~21,347 | **177** | **1,823** (re-verified 2026-09-23, corrected from 1,830 — see §4 Phase EX-4) |
 
 **CORRECTION (2026-09-23, found while scoping the first IFC4X3 dispatch chunk):** the original IFC4X3
 figures above were computed against `ifcopenshell/express/rules/IFC4X3.py` — the BASE IFC4X3 schema
@@ -75,9 +75,9 @@ functions (`IfcCartesianPoint.Dim`, `IfcPointOnCurve.Dim`, `IfcPointOnSurface.Di
 EX-2 IFC4X3 work must port against `IFC4X3_ADD2.py`, not the base `IFC4X3.py`** — using the wrong
 revision would silently port formulas for entities/attributes this port's own schema doesn't actually
 have, or miss the real ones it does. The `calc_*` total (177, not 182) and IFC4X3's own line-count
-breakdown above are corrected to match ADD2; the WHERE-rule class count (780) is NOT yet re-verified
-against ADD2 specifically (Phase EX-4 scope, not urgent — flagged here so whoever scopes that phase
-re-derives it from `IFC4X3_ADD2.py`, not the base file, from the start).
+breakdown above are corrected to match ADD2; the WHERE-rule class count was re-verified against
+`IFC4X3_ADD2.py` specifically during Phase EX-4's own scoping (2026-09-23) — see §4 Phase EX-4 for
+the corrected, independently-verified 365/679/779 (1,823 total) breakdown.
 
 The "boilerplate" ~38% of every file needs no manual line-by-line porting at all — it's mechanical
 and covered by a handful of small, generic, one-time TS helpers instead:
@@ -250,31 +250,119 @@ concrete checklist in `PROGRESS.md`'s own `validate.py port` row):
 
 ### Phase EX-4 — WHERE-rule classes + `rule_executor.py` (the large chunk)
 
-The bulk of the effort: 1,830 rule classes/functions across the 3 schemas (not yet re-verified against
-`IFC4X3_ADD2.py` specifically — see §3's correction note; figure carried over from the original,
-base-`IFC4X3.py`-derived estimate) (~16,831 lines once the 177 already-ported `calc_*` functions from
-Phase EX-2 are excluded), plus porting
-`rule_executor.py` (306 lines) itself. Confirmed **zero geometry-kernel dependencies** anywhere in
-a broad cross-section of the rule files — this is a real, load-bearing finding: it means this phase
-is not expected to hit the kind of "permanently blocked, disclosed throw" pattern that `api.geometry`/
-parts of `api.alignment` did. `rule_executor.py`'s one genuinely Python-specific piece (`_pytest.
-assertion` used at runtime for nicer bare-`assert` failure messages) has no TS equivalent and needs
-none — design a TS-native violation-collection API instead (return a structured list of violations
-from `validate(file, {rules: true})` rather than reproducing real Python's side-effecting
-`logger.error()` calls), matching this project's established "adapt an awkward Python-only idiom
-into an idiomatic TS shape, disclose the difference" convention (e.g. `Profiler`'s
-`[Symbol.dispose]` alias for Python's context-manager protocol).
+**Scoped 2026-09-23** (dedicated investigation, mirroring the Phase EX-0/EX-3 precedent, after Phase
+EX-3 closed). This is the single largest work item in this port's history — but the investigation below
+found it more tractable than the original honest-scale estimate feared, and found **zero new native
+primitives needed** (unlike Phase EX-3, which needed one primitive-fix chunk before real work could
+start, Phase EX-4 can begin porting rules immediately).
 
-Sequencing: same smallest-schema-first, diff-against-previous strategy as Phase EX-2 — IFC2X3 (368
-classes) → IFC4 (682) → IFC4X3 (780). **Be honest about scale**: at this project's own established
-chunk granularity, this phase alone is realistically 40-60+ individual chunks, likely the single
-largest work item in this port's history — larger than the entire `api.alignment` module (56/59
-files) and its own 4-chunk, ~5,850-line test-fidelity backfill combined. This is expected to be a
-long-running, many-cycle effort, not something that finishes in a handful of dispatches. Chunk
-count and exact per-chunk grouping (e.g. by entity-name alphabetical range, or by however the real
-source file's own class ordering groups related rules) should be decided when Phase EX-4 actually
-starts, informed by whatever grouping pattern the real source files turn out to have — not
-pre-enumerated exhaustively in this planning doc.
+**Corrected rule counts** (the original 368/682/780 figures each counted 3 non-rule boilerplate
+classes too — `express_set`/`indeterminate_type`/`enum_namespace`, already ported in Phase EX-1 — and
+the IFC4X3 figure was never re-verified against `IFC4X3_ADD2.py` specifically until now):
+
+| Schema | `SCOPE='entity'` | `SCOPE='type'` | `SCOPE='file'` | **Total** |
+|---|---|---|---|---|
+| IFC2X3 | 339 | 24 | 2 | **365** |
+| IFC4 | 652 | 25 | 2 | **679** |
+| IFC4X3_ADD2 | 752 | 25 | 2 | **779** |
+| **Grand total** | | | | **1,823** |
+
+(Corrected from 1,830; independently re-verified via direct `grep -c "SCOPE = '<kind>'"` against all 3
+real files, not just the sampling agent's own count.)
+
+**`rule_executor.py`'s real execution model is genuinely richer than "iterate instances, run their own
+rules"** — read in full directly, not assumed. Three distinct rule scopes, each with its own dispatch
+mechanism real Python's `run()` (lines 70-281) implements:
+
+- **`SCOPE = 'file'`** (2 per schema, byte-identical across all 3): run once each, called as `R()(f)`
+  against the whole file. The ONLY genuinely complex tier — both examples use `by_type`/loops/other
+  rule-file-local helper functions (e.g. `IfcSameValidPrecision`, `IfcSameAxis2Placement`), not a bare
+  `assert`. Everything else (99.7% of all rules) is 2-6 lines: 0-2 local variable extractions then one
+  final `assert (...) is not False` — structurally simpler and shorter than Phase EX-2's own `calc_*`
+  functions, which had genuine multi-branch dispatchers.
+- **`SCOPE = 'type'`** (24-25 per schema): attached to an EXPRESS defined-type name (e.g.
+  `IfcBoxAlignment`, `IfcCardinalPointReference`), not an entity — real Python walks the ENTIRE
+  instance-value graph of the file (every instance's every non-derived forward attribute, recursively
+  into aggregates) looking for any value whose declared type matches, ACCOUNTING FOR THE DEFINED
+  TYPE'S OWN SUBTYPE CHAIN (e.g. a rule on `IfcLengthMeasure` also fires for `IfcPositiveLengthMeasure`
+  values, since the latter is declared as a type-alias subtype of the former) — built via a `subtypes`
+  map real Python constructs by scanning `schema.declarations()` for every `type_declaration` and
+  checking whether its own `declared_type()` wraps another type-declaration's name (lines 149-166).
+  This port's own `entity_type.subtypes()` workaround (`util/schema.ts`'s `directSubtypesOf`, already
+  established for Phase EX-3) is the exact same shape of workaround needed here, just for
+  `type_declaration` instead of `entity` — `type_declaration.declared_type()` is already exposed
+  (used throughout Phase EX-2/EX-3), so **no new primitive needed**, just a new, analogous schema-scan
+  helper.
+- **`SCOPE = 'entity'`** (the overwhelming majority: 339/652/752): attached to an entity `TYPE_NAME`,
+  run once per matching instance via `f.by_type(TYPE_NAME)` — the straightforward case this phase's
+  own name suggested from the start.
+
+**Two global settings toggles real Python's `run()` sets for the duration of rule execution, both
+already fully implemented in this port with zero new work needed** (independently verified directly
+against `src/settings.ts`/`src/entityInstance.ts`, not assumed from the investigation alone):
+`unpack_non_aggregate_inverses` (a single-cardinality inverse attribute unpacks to the bare object
+instead of a 1-element array — already implemented as `settings.unpackNonAggregateInverses`, wired
+into both `EntityInstance.get()` and its dot-property Proxy handler) and `compare_instances_by_value`
+(compiled rules use Python's native `==`/`!=` for EXPRESS's own `=`/`<>` operators, whose semantics on
+entity-typed values is deep value equality, not reference identity — already implemented as
+`settings.compareInstancesByValue`, consumed by `EntityInstance.equals()`'s already-existing deep
+`structurallyEqual` comparison). Phase EX-4's own rule-execution entry point just needs to toggle both
+`true` for its duration and restore them after, exactly mirroring real Python's own
+`try/finally`-equivalent shape (real source lines 90-97, 280-281) — ported rule bodies use `.get()`
+for inverse access and a to-be-established `.equals()`/`.notEquals()` runtime-shim wrapper for `==`/
+`<>` against entity-typed values, and get correct semantics automatically.
+
+**`rule_executor.py`'s one genuinely Python-specific piece — pytest's `assertion.rewrite` AST rewriting
+(line 117), which turns a bare `assert expr` into one producing a rich, decompiled-looking failure
+message via a companion `reverse_compile()` text-reversal hack (lines 11-33) that turns the *compiled
+Python source line itself* back into pseudo-EXPRESS syntax for the error text** — has no TS equivalent
+and needs none: it is purely a message-formatting nicety, verified to never affect pass/fail logic
+(the `assert` either raises `AssertionError` or it doesn't, independent of how nicely the failure
+gets described). **Decision**: each ported rule's own TS implementation throws a structured violation
+carrying `ruleName`, the entity/type name, and a HAND-WRITTEN, human-readable description of the
+constraint (not a decompiled string) — the porting agent already has to understand what the rule
+checks to translate it faithfully, so capturing that understanding as the violation's own message
+text is nearly free and produces clearer text than a decompiled pseudo-EXPRESS string would. Reuses
+`validate.ts`'s own `ValidationError` class (or a close variant) for eventual Phase EX-5 unification
+into one violation list alongside Phase EX-3's own checks.
+
+**Test-fidelity resource already in hand, exactly like Phase EX-3's own**: real Python's
+`test/fixtures/rules/` has **138 real `.ifc` fixtures** (plus 28 `generate_*.py` scripts that produced
+them, not needed) — **already vendored byte-identical into this port's own
+`src/ifcopenshell-ts/test/fixtures/rules/`** (confirmed via `diff`), spanning geometry/profile
+constraints, placement/axis constraints, unit conversion, and enum/`USERDEFINED` constraints across
+multiple schemas. Real Python's own `test/test_rules.py` (54 lines) is a direct, dedicated unit test
+calling `rule_executor.run()` directly (not through `validate()`) — same parametrized
+glob-and-assert-count pattern as `test_validate.py`. Zero fixture-sourcing work needed whenever the
+test-fidelity backfill for this phase happens (Phase EX-5, or pulled forward per-chunk the same way
+Phase EX-3's own chunk 4 did, TBD when that phase starts).
+
+**Sequencing**: same smallest-schema-first, diff-against-previous strategy as Phase EX-2/EX-3 — IFC2X3
+(365) → IFC4 (679) → IFC4X3_ADD2 (779). Ordinary, expected chunk-by-chunk work, not a blocker: many
+rules call into rule-file-local EXPRESS-library helper functions (e.g. `IfcSameValidPrecision`,
+`IfcSameAxis2Placement`) that Phase EX-2 never had reason to port (it only handled `calc_*` DERIVE
+functions) — each chunk that first touches a rule needing an unported helper ports that helper too,
+mirroring exactly how Phase EX-2 itself incrementally added new shared helpers as needed
+(`IfcMlsTotalThickness`, `IfcGetBasisSurface`, etc.).
+
+**Revised chunk-count estimate**: given ~99.7% of all 1,823 rules are trivially small (2-6 lines) —
+genuinely simpler per-item than Phase EX-2's own `calc_*` functions — a materially higher rules-per-
+chunk density than Phase EX-2's own ~15-per-chunk convention is both possible and desirable (per-chunk
+dispatch/review/CI/merge overhead is roughly constant regardless of how many trivial rules ride along,
+so batching more of them amortizes that overhead better). **Revises the original "40-60+ chunks"
+estimate down to roughly 30-40**, targeting on the order of 50-80 rules per "typical" entity/type-scope
+chunk (tuned in practice starting from chunk 1, the same way Phase EX-2 itself adjusted its own
+per-chunk function count as real complexity was encountered), sequenced by real source file order
+within each schema (which naturally clusters a WHERE-rule class near its own entity's `calc_*`
+functions, when one exists) — with the 6 total `file`-scope rules (2 per schema) each handled with
+individual care in whichever chunk their file-order position falls into, being the only genuinely
+complex tier. Still a long-running, many-cycle effort — not something that finishes in a handful of
+dispatches — but a real, evidence-based correction from the original estimate, not just an optimistic
+guess.
+
+**No Phase-EX-0-style native-primitive-fix prerequisite chunk needed** (unlike Phase EX-3): the
+`type_declaration`-subtype-chain workaround, both settings toggles, and every other primitive Phase
+EX-4 needs are already fully available. The first real dispatch can be an ordinary rule-porting chunk.
 
 ### Phase EX-5 — final integration + test-fidelity backfill
 
