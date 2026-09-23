@@ -306,10 +306,11 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addRailingRepresentation (%s)", (
 		// creation" entry, its own "on IFC2X3 ... arcs not supported" branch) -- a
 		// disclosed, pre-existing gap unrelated to DERIVE-attribute porting.
 		//
-		// IFC4X3: no `rules/ifc4x3.ts` module exists yet, so `IfcIndexedPolyCurve.Dim`
-		// (reached first, inside `createSweptDiskSolid`) still throws "has no attribute
-		// 'Dim'" -- unaffected by this chunk, re-verified directly against the real
-		// built addon, not assumed unaffected.
+		// IFC4X3: `IfcIndexedPolyCurve.Dim` (reached first, inside `createSweptDiskSolid`)
+		// dispatches to `calc_IfcCurve_Dim`, which is not one of the 15 functions Phase
+		// EX-2's IFC4X3 first chunk ported (`rules/ifc4x3.ts`'s own header comment), so it
+		// still throws "has no attribute 'Dim'" -- unaffected by that chunk, re-verified
+		// directly against the real built addon, not assumed unaffected.
 		test("a default-args call throws the disclosed, current ShapeBuilder blocker (message shape is schema-dependent)", () => {
 			const { file, body } = setupContext(schema);
 			expect(() =>

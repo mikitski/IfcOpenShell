@@ -1688,21 +1688,29 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 			// attribute at all to demonstrate a dispatch MISS with, the exact same
 			// situation chunk 5 itself hit for IFC2X3 above. Swapped again, this time to
 			// an `IFC4X3` fixture instead of an `IFC4` one -- same attribute name
-			// (`IfcSIUnit.Dimensions`; `calc_IfcSIUnit_Dimensions` exists in `IFC4X3.py`
-			// too, confirmed directly), but no `rules/ifc4x3.ts` module exists in this
-			// port at all yet, so `dispatch.ts`'s per-schema registry has zero entries
-			// for `"IFC4X3"` and the read still throws "has no attribute" -- the exact
-			// same "move to the next, still fully empty schema" pattern this test's own
-			// chunk-5 update already used once before (IFC2X3 -> IFC4), applied a second
+			// (`IfcSIUnit.Dimensions`; `calc_IfcSIUnit_Dimensions` exists in `IFC4X3_ADD2.py`
+			// too, confirmed directly), and the read still throws "has no attribute" -- the
+			// exact same "move to the next, still fully empty schema" pattern this test's
+			// own chunk-5 update already used once before (IFC2X3 -> IFC4), applied a second
 			// time (IFC4 -> IFC4X3). Gated with `skipIf` (not hardcoded) since, unlike
 			// IFC4, IFC4X3's own availability is not guaranteed in every environment
 			// this suite runs in (`bootstrap.ts`'s own `AVAILABLE_SCHEMAS` disclosure).
 			// Still demonstrates the dispatch mechanism's own SCHEMA-SCOPING directly
 			// (see `dispatch.ts`'s own header comment): `IfcSIUnit.Dimensions` is a real
-			// DERIVE attribute (`calc_IfcSIUnit_Dimensions` exists in `IFC4X3.py`), yet
-			// still a dispatch miss on IFC4X3 because this port simply hasn't ported
-			// ANY `calc_*` function for that schema yet -- the same shape of
-			// demonstration as before, just with a genuinely still-unported schema.
+			// DERIVE attribute (`calc_IfcSIUnit_Dimensions` exists in `IFC4X3_ADD2.py`), yet
+			// still a dispatch miss on IFC4X3.
+			//
+			// **UPDATE (Phase EX-2, IFC4X3's own first chunk, `src/express/rules/ifc4x3.ts`):**
+			// `rules/ifc4x3.ts` now exists (registered under the schema's own real,
+			// C++-core-registered identifier, `"IFC4X3_ADD2"` -- see that file's own header
+			// comment) and `dispatch.ts`'s per-schema registry now DOES have entries for
+			// it -- but NOT for `IfcSIUnit.Dimensions` specifically (`calc_IfcSIUnit_Dimensions`
+			// is not one of that chunk's own 15 assigned functions), so this test's own
+			// asserted behavior below is UNCHANGED, re-verified directly against the real
+			// built addon, not assumed. Only the "no `rules/ifc4x3.ts` module exists" framing
+			// above is now stale prose (left as historical narrative, not rewritten, matching
+			// this test's own established append-only update convention) -- the demonstrated
+			// FACT (a genuine dispatch miss for this specific attribute) still holds.
 			const file: IfcFile = createTestFile("IFC4X3");
 			const siUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
 			expect(() => (siUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(/has no attribute 'Dimensions'/);

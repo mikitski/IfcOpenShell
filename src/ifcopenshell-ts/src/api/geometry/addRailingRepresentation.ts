@@ -241,9 +241,10 @@
 // accordingly for IFC4 (asserts success, mirroring real Python's own test, instead of
 // a disclosed throw) -- IFC2X3 (still throws "Arcs are not supported for IFC2X3.",
 // `ShapeBuilder`'s own separate, pre-existing, unrelated-to-DERIVE-porting arc gap) and
-// IFC4X3 (still throws "has no attribute 'Dim'": no `rules/ifc4x3.ts` module exists
-// yet, so NONE of `IfcCurve.Dim`/`IfcPlacement.Dim`/etc. resolve there at all) are
-// UNCHANGED, confirmed by direct re-run, not assumed unaffected.
+// IFC4X3 (still throws "has no attribute 'Dim'": `IfcCurve.Dim`/`IfcPlacement.Dim` are
+// not among the 15 functions Phase EX-2's IFC4X3 first chunk ported, `rules/ifc4x3.ts`'s
+// own header comment -- so neither resolves there yet) are UNCHANGED, confirmed by
+// direct re-run, not assumed unaffected.
 //
 // *** `ShapeBuilder` methods used, and their exact signatures verified directly against
 // `util/shapeBuilder.ts` (not assumed from the Python method names alone) ***

@@ -101,8 +101,12 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions
 	// IFC4 to the full 62/62 `calc_*` functions), so IFC4 now behaves exactly like
 	// IFC2X3 here (DERIVE dispatch resolves `.Dimensions` to a foreign, disposable
 	// scratch instance) -- re-verified directly against the real built addon, not
-	// assumed. Only IFC4X3 (no `rules/ifc4x3.ts` module exists at all yet) remains
-	// genuinely blocked.
+	// assumed. Only IFC4X3 remains genuinely blocked.
+	//
+	// **UPDATE (Phase EX-2, IFC4X3's own first chunk, `src/express/rules/ifc4x3.ts`):**
+	// `rules/ifc4x3.ts` now exists, but `calc_IfcSIUnit_Dimensions` is not one of that
+	// chunk's own 15 assigned functions, so IFC4X3 remains genuinely blocked here --
+	// re-verified directly against the real built addon, not assumed.
 	test.skipIf(schema === "IFC4X3")(
 		"IFC2X3/IFC4: silently a no-op through the real attribute-read path (DERIVE dispatch now resolves .Dimensions to a foreign, disposable scratch instance)",
 		() => {
@@ -124,7 +128,7 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.editNamedUnit -- IfcSIUnit.Dimensions
 	);
 
 	test.skipIf(schema !== "IFC4X3")(
-		"IFC4X3: still throws (no rules/ifc4x3.ts module -- no ported calc_IfcSIUnit_Dimensions for this schema yet)",
+		"IFC4X3: still throws (rules/ifc4x3.ts exists, but calc_IfcSIUnit_Dimensions is not ported for this schema yet)",
 		() => {
 			const file = createTestFile(schema);
 			const unit = file.createEntity("IfcSIUnit");

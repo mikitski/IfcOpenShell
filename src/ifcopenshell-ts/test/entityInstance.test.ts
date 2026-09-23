@@ -171,13 +171,19 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 	// (`src/express/rules/ifc4.ts`), which closes out IFC4 at 62/62 ported `calc_*`
 	// functions, `calc_IfcSIUnit_Dimensions` included: `.get("Dimensions")` now
 	// genuinely resolves for IFC4 too, so the "still throws" branch below now applies
-	// to IFC4X3 only (no `rules/ifc4x3.ts` module exists yet).
+	// to IFC4X3 only.
+	//
+	// **Updated by Phase EX-2's IFC4X3 first chunk** (`src/express/rules/ifc4x3.ts`):
+	// that chunk ports IFC4X3_ADD2's own first 15 `calc_*` functions, but
+	// `calc_IfcSIUnit_Dimensions` is not one of them, so this still throws exactly as
+	// before -- re-verified directly against the real built addon, not assumed.
 	test.skipIf(schema !== "IFC4X3")(
-		".get() throws for a DERIVED attribute on a schema with no ported EXPRESS calc_* rules yet",
+		".get() throws for a DERIVED attribute on a schema with no ported EXPRESS calc_* rules for this attribute yet",
 		() => {
-			// IFC4X3 has no `rules/ifc4x3.ts` module yet (Phase EX-2 has so far ported
-			// IFC2X3 and IFC4 in full) -- `dispatch.ts`'s per-schema registry has zero
-			// entries for it, so this still throws exactly as it always has.
+			// `calc_IfcSIUnit_Dimensions` is not one of the 15 functions Phase EX-2's IFC4X3
+			// first chunk ported (`rules/ifc4x3.ts`'s own header comment) -- `dispatch.ts`'s
+			// per-schema registry has no entry for this specific attribute, so this still
+			// throws exactly as it always has.
 			const file = newFile();
 			const unit = file.createEntity("IfcSIUnit");
 			expect(() => unit.get("Dimensions")).toThrow();
