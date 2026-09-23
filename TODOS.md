@@ -1105,6 +1105,91 @@ specific schema case from that one test's own parametrization
 per-test-exclusion precedent (e.g. `assignLagTime.test.ts`'s own IFC2X3 case just above),
 with a comment citing back to this entry. No source changes needed for either.
 
+**UPDATE 2026-09-23 (Phase EX-2 chunk 4, EXPRESS derived-attribute porting) -- CORRECTED same
+day, see the next UPDATE:** chunk 4 initially assumed (without attempting construction) that
+`calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` were blocked by this gate, since
+both construct a fresh `IfcDimensionalExponents` and this looked structurally similar to
+`IfcLineIndex`/`IfcArcIndex` below. This assumption was flagged by chunk 4 itself as an
+unverified "secondhand observation," and turned out to be wrong -- see the dedicated
+investigation below.
+
+**UPDATE 2026-09-23 (dedicated investigation, no PR -- investigation only, requested by the
+orchestrating session after noticing this gate is referenced by 34 files, far more than
+previously tracked in this entry's own history):**
+
+**Correction to the update above:** `IfcDimensionalExponents` is a real ENTITY (7 plain
+non-optional INTEGER attributes), not a defined type -- confirmed directly against the compiled
+schema data (`src/ifcparse/schemas/Ifc2x3-schema.cpp:355` declares it via `new entity(...)`;
+line 1171 sets its 7 `simple_type::integer_type` attributes) and independently re-confirmed by
+the orchestrating session via live execution against a real installed `ifcopenshell` 0.8.4
+interpreter (`f.create_entity("IfcDimensionalExponents", 0,0,0,0,0,0,0)` then
+`.LengthExponent = 5` both succeed with zero special handling). Real Python's own generated
+rule file constructing it (`IFC2X3.py`'s `IfcDeriveDimensionalExponents`) is therefore just
+ordinary entity construction + attribute mutation -- ALREADY fully supported by this port's
+existing `createEntity`/`.set()` path, the same as `IfcCartesianPoint` or any other entity. This
+gate does NOT block `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` after all --
+they were simply left unported on a mistaken assumption, not a real primitive gap. (Defined
+types never get their own generated `.d.ts` interface -- confirmed neither `IfcLabel` nor
+`IfcLineIndex`/`IfcArcIndex` appear anywhere in `ifc2x3.d.ts`/`ifc4.d.ts`/`ifc4x3.d.ts`, they're
+inlined as `string`/`number`/arrays on the attributes that use them -- `IfcDimensionalExponents`
+getting a real `export interface` in `generated/ifc2x3.d.ts:1411` was itself the tell.)
+
+**The real, much bigger finding from this investigation: the actual fix is small, needs no new
+native primitive, and the true blast radius is 34 files across 10+ modules, not a handful.**
+
+- **Fix mechanism (confirmed, not just theorized):** `src/ifcparse/schema.h`'s `declaration`
+  base class already has a `type_declaration` subclass (line 181) with a `declared_type()`
+  accessor requiring zero entity/attribute context, and `src/ifcparse/utils.cpp:204`
+  (`ifcopenshell::from_parameter_type`) is a free function -- already used by this exact gate's
+  own `attribute_kind_of` today, just fed `attribute->type_of_attribute()` -- that resolves a
+  bare `parameter_type*` straight to the right `argument_type` (BOOL/INT/DOUBLE/STRING/
+  ENUMERATION/AGGREGATE_OF_*) with no entity involved at all. The fix: in
+  `attribute_value_shim.cpp`'s `entity_declaration_of`/`attribute_declaration_at` (lines 22-36),
+  when `instance.declaration().as_entity() == nullptr`, check `.as_type_declaration()` instead;
+  if non-null, call `from_parameter_type(type_decl->declared_type())` directly (a bare
+  simple/defined-type instance only ever has attribute index 0, matching
+  `entityInstance.ts:260-263`'s existing `attributeCount()` convention). Everything else
+  (a bare `select_type`/`enumeration_type` instance, which no disclosed consequence below
+  actually needs) keeps throwing as today. Estimated size: ~15-25 lines, one file, no
+  N-API signature changes (so no wrappergen regeneration needed).
+- **Scope confirmed shim-only** by tracing 3 real disclosed consequences end-to-end
+  (`util.migrator`, `util.shapeBuilder`'s `IfcLineIndex`/`IfcArcIndex`, `api.pset.editPset`'s
+  `cast_value_to_primary_measure_type`) -- all three read back to this identical single gate
+  with no additional layered blocker; construction itself (`file.ts:484-513`) and the read path
+  (`getByIndex`/`get_attribute_value_variant`) are both already ungated.
+- **Real blast radius: 34 files** (9 source + 25 test, `grep -rl` count) across `util.migrator`,
+  `util.shapeBuilder`, `util.unit`, `api.pset`, `api.style`, `api.structural`, `api.geometry`
+  (`clipSolid`, `clipSolidBounded`, `addDoorRepresentation`, `addWindowRepresentation`,
+  `regenerateWallRepresentation`, `validateType`, `addRailingRepresentation`), `api.sequence`
+  (`editLagTime`, `assignLagTime`), `api.unit` (`addConversionBasedUnit`, `removeUnit`,
+  `assignUnit`), `api.owner.addApplication`, `api.georeference` (`addGeoreferencing`,
+  `editGeoreferencing`), `api.alignment` (several), `api.root.removeProduct`,
+  `api.project.appendAsset` -- at least 31 literal occurrences of the disclosed-throw assertion
+  across those test files (likely somewhat higher; a few TODOS-disclosed consequences assert on
+  a substring/pattern rather than the exact string and didn't show up in a literal grep). This is
+  materially bigger than the EX-2 `Dim`-gap unblocking precedent (PRs #170/#172, 44 test updates,
+  one schema's derived-attribute rules) both in file count and module breadth.
+- **Risk**: low-to-moderate. The new branch only fires where the code unconditionally throws
+  today (no existing passing behavior to regress); the main residual risk is `from_parameter_type`
+  being reused in a genuinely new calling context for the first time, worth dedicated native-layer
+  regression tests (fresh `IfcLabel`/`IfcLineIndex`/`IfcDuration` instances) rather than relying
+  solely on the 30+ TS-level test flips to catch a regression. Needs a real native addon rebuild +
+  this project's normal native-addon CI verification, not a TS-only change.
+- **Recommended phasing** (two kinds of chunk, not one): Chunk 1 = the ~20-line native shim fix +
+  new native-layer regression tests + full addon rebuild + verification, reviewed on its own since
+  it's foundational `entityInstance.ts`/native-shim surface touched by dozens of already-shipped
+  modules (matches this entry's own long-standing "flag for the orchestrating session's review,
+  don't fix silently" instruction). Chunks 2+ = module-grouped follow-ups (plausibly 3-5 chunks
+  given 25+ test files across 9+ modules) flipping each disclosed "pins the current blocked
+  behavior" assertion to the real, working one most files already record in a comment for exactly
+  this purpose.
+
+Key file/line references: `src/ifcparse/schema.h:141-195`; `src/ifcparse/utils.cpp:204-249`;
+`src/wrappergen/shim/attribute_value_shim.cpp:22-36,387-422,437-440`;
+`src/ifcopenshell-ts/src/entityInstance.ts:260-263,301-307,475-513`;
+`src/ifcopenshell-ts/src/file.ts:484-513`;
+`src/ifcparse/schemas/Ifc2x3-schema.cpp:355,1171` and `Ifc4-schema.cpp:503,510`.
+
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
 **What:** Python's `entity_instance.wrappedValue` (and any unwrapped scalar attribute read generally)
