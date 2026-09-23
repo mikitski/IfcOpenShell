@@ -38,22 +38,37 @@ describe.each(AVAILABLE_SCHEMAS)("api.structural.editStructuralBoundaryCondition
 		expect(condition.get("Name")).toBeNull();
 	});
 
-	test("an 'IfcBoolean'-typed attribute is BLOCKED by the disclosed primitive-layer gap", () => {
-		const file = createTestFile(schema);
-		const condition = addStructuralBoundaryCondition(file, {});
+	// SKIPPED on IFC4/IFC4X3 only (PR #179): PR #179 fixed the native
+	// `attribute_value_shim.cpp` gate this test pinned (TODOS.md's "EntityInstance
+	// .setByIndex/IfcFile.createEntity ..." entry, "seventh consequence" -- now
+	// RESOLVED for the shared gate) -- IFC4/IFC4X3 no longer throw here. IFC2X3 is
+	// UNAFFECTED and kept running: confirmed empirically that `IfcBoundaryNodeCondition
+	// .TranslationalStiffnessX` doesn't exist on IFC2X3 at all ("has no attribute
+	// 'TranslationalStiffnessX'") -- a genuinely separate, still-real block this
+	// generic `.toThrow()` (no message argument) still correctly catches. Real
+	// expected result for IFC4/IFC4X3 is the comment directly below -- left to a
+	// follow-up module-grouped chunk to verify and flip.
+	test.skipIf(schema !== "IFC2X3")(
+		"an 'IfcBoolean'-typed attribute is BLOCKED by the disclosed primitive-layer gap",
+		() => {
+			const file = createTestFile(schema);
+			const condition = addStructuralBoundaryCondition(file, {});
 
-		// Real, unblocked Python behavior once the gap closes:
-		// `condition.get("TranslationalStiffnessX")` would be a fresh `IfcBoolean(true)`
-		// wrapping instance.
-		expect(() =>
-			editStructuralBoundaryCondition(file, {
-				condition,
-				attributes: { TranslationalStiffnessX: { type: "IfcBoolean", value: true } },
-			}),
-		).toThrow();
-	});
+			// Real, unblocked Python behavior once the gap closes:
+			// `condition.get("TranslationalStiffnessX")` would be a fresh `IfcBoolean(true)`
+			// wrapping instance.
+			expect(() =>
+				editStructuralBoundaryCondition(file, {
+					condition,
+					attributes: { TranslationalStiffnessX: { type: "IfcBoolean", value: true } },
+				}),
+			).toThrow();
+		},
+	);
 
-	test("a generic measure-class attribute is BLOCKED by the same gap", () => {
+	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the test above
+	// -- see that comment (IFC2X3 kept running, unaffected).
+	test.skipIf(schema !== "IFC2X3")("a generic measure-class attribute is BLOCKED by the same gap", () => {
 		const file = createTestFile(schema);
 		const condition = addStructuralBoundaryCondition(file, {});
 

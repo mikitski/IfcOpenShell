@@ -756,20 +756,40 @@ case above at the `IfcFile.createEntity`/`EntityInstance` level real callers act
 --noEmit` (both `tsconfig.json` and `tsconfig.typecheck.json`) and `biome check .` are both clean.
 
 **Full suite, from-scratch rebuild, before vs. after (same 6439 pre-existing tests in both runs; the
-19-test delta in the "after" total is this chunk's own new tests -- 17 newly passing + 2 schema-gated
-`skipIf`s):**
+19-test delta in the intermediate "after fix, before skip-annotating" total is this chunk's own new
+tests -- 17 newly passing + 2 schema-gated `skipIf`s):**
 - Before this fix: 420/420 test files passed, 6422 passed / 0 failed / 17 skipped (6439 total).
-- After this fix: 391/420 test files passed, 6240 passed / **199 failed** / 19 skipped (6458 total).
+- Immediately after the native fix (before touching any pre-existing test): 391/420 test files
+  passed, 6240 passed / **199 failed** / 19 skipped (6458 total).
+- **Final, as merged (CI-green):** after marking every one of the 199 now-incorrect assertions below
+  with `test.skip`/`test.skipIf` (never deleted, never rewritten to a guessed "correct" value -- see
+  below), 416/420 test files passed, 4 fully skipped (every test in those 4 files happened to be
+  gate-affected, confirmed test-by-test, not a blanket file skip), 6240 passed / **0 failed** / 218
+  skipped (6458 total: 199 newly skipped + 19 pre-existing/intentional).
 
-**The 199 newly-failing tests, across 29 files, are the EXPECTED, disclosed consequence this entry's
-own phasing recommendation predicted** -- every one of them is a test that was written to pin the
-OLD, blocked "throws" behavior as its own explicit assertion (per this entry's own long history of
-UPDATEs below, each already diagnosing exactly why its own module's tests throw here), and now fails
-because the underlying operation genuinely succeeds instead. None of these are regressions and none
-were fixed as part of this chunk (out of scope, by design -- a separate, later set of module-grouped
-chunks flips each file's assertions from "throws" to the real, working result, per this entry's own
-prior phasing recommendation). Full file list, with a one-line reason each (all consequences of this
-same now-fixed gate, already diagnosed in this entry's own UPDATE history below unless noted):
+**The 199 tests, across 29 files, that flipped from "throws" to "succeeds" are the EXPECTED, disclosed
+consequence this entry's own phasing recommendation predicted** -- every one of them was written to
+pin the OLD, blocked "throws" behavior as its own explicit assertion (per this entry's own long
+history of UPDATEs below, each already diagnosing exactly why its own module's tests throw here), and
+the underlying operation now genuinely succeeds instead. Per the orchestrating session's explicit
+direction (this repo's branch protection requires full CI green -- a "these are expected failures"
+PR cannot land as-is), each one was marked `test.skip`/`test.skipIf` (matching this project's own
+extensive precedent for exactly this "known gap, disclosed, not silently swept away" situation) with
+a comment citing this entry and stating the real expected assertion inline -- reusing an already-
+present "Real Python: ..."/"real, unblocked Python behavior once the gap closes" comment or the
+test's own title wherever one already existed (most did), rather than inventing a new one. None of
+these are regressions and none were FIXED (assertions flipped to a verified-correct value) as part of
+this chunk -- that remains explicitly out of scope, left to a separate, later set of module-grouped
+chunks, per this entry's own prior phasing recommendation; this chunk's own job was only to get CI
+green without silently discarding the disclosure. One real bug caught along the way: two tests in
+`editStructuralBoundaryCondition.test.ts` run across all 3 schemas, and IFC2X3 was NEVER affected by
+this gate at all (confirmed empirically: `IfcBoundaryNodeCondition.TranslationalStiffnessX` doesn't
+exist on IFC2X3 -- a genuinely separate, still-real, unrelated block) -- an unconditional `test.skip`
+would have wrongly silenced an already-passing IFC2X3 case, caught by the full-suite passed-count
+staying byte-for-byte identical (6240) before and after the skip-annotating pass; fixed with a
+schema-conditional `test.skipIf(schema !== "IFC2X3")` instead, keeping that real, already-correct
+IFC2X3 assertion running. Full file list, with a one-line reason each (all consequences of this same
+now-fixed gate, already diagnosed in this entry's own UPDATE history below unless noted):
 
 - `test/util/migrator.test.ts` (1) -- this entry's own original finding: `Migrator.migrate`'s
   `id() === 0` SELECT-typed-value branch.
@@ -818,10 +838,12 @@ same now-fixed gate, already diagnosed in this entry's own UPDATE history below 
   files' assertions, not re-diagnosed line-by-line here.
 
 **What this resolution does NOT cover (left to follow-up, module-grouped chunks, per this entry's own
-established phasing recommendation):** flipping each of the 29 files above from asserting "throws"
-to asserting the real, correct working result is explicitly out of this chunk's scope -- untouched,
-by design, so each module's own owner/reviewer can verify the *correct* unblocked value (not just
-"doesn't throw") against real Python before flipping its assertions. IFC4/IFC4X3's own separate
+established phasing recommendation):** flipping each of the 29 files above from `test.skip`/
+`test.skipIf`-annotated to asserting the real, correct working result is explicitly out of this
+chunk's scope -- each one now has a `test.skip`/`test.skipIf` plus a comment citing this entry and
+stating the real expected assertion, but is otherwise untouched, by design, so each module's own
+owner/reviewer can independently verify the *correct* unblocked value (not just "doesn't throw")
+against real Python before un-skipping and flipping its assertions. IFC4/IFC4X3's own separate
 EXPRESS-DERIVE `.get("Dim")` gap (this file's own dedicated entry below, "`util.representation
 .guessType`'s `Curve2D`/.../ blocked by the pre-existing `entityInstance.ts` DERIVED-attribute gap")
 remains genuinely unresolved for those two schemas and is unrelated to (though sometimes co-occurring

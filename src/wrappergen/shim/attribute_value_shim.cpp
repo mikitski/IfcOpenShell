@@ -72,6 +72,13 @@ ifcopenshell::argument_type declared_argument_type_of(const express::base& insta
     throw std::runtime_error("Attribute access is only supported on entity instances");
 }
 
+// Still gated through `attribute_declaration_at`'s entity-only precondition, unlike
+// `declared_argument_type_of` above -- deliberately NOT extended to the
+// `type_declaration` case as part of this fix. A bare simple/defined-type instance has
+// no *named* attribute to look up an enumeration for in the first place (it only ever
+// has a single, unnamed, index-0 value), so this function's own contract doesn't apply
+// there the way `attribute_kind_of`/`get_attribute_type_name`'s did. Left as its own,
+// still entity-only, precondition rather than silently widened.
 const ifcopenshell::enumeration_type* enumeration_type_at(const express::base& instance, int attribute_index) {
     const auto* attribute_declaration = attribute_declaration_at(instance, attribute_index);
     const auto* parameter_type = attribute_declaration->type_of_attribute();
@@ -466,6 +473,16 @@ int get_argument_index(const express::base& instance, const std::string& name) {
     return static_cast<int>(index);
 }
 
+// Still gated through `attribute_declaration_at`'s entity-only precondition, unlike
+// `get_attribute_type_name` below (which now shares `declared_argument_type_of` with
+// `attribute_kind_of`) -- deliberately NOT extended to the `type_declaration` case as
+// part of this fix. A bare simple/defined-type instance's own index-0 value has no
+// *name* to return in the first place (`ifcparse`'s `attribute` class -- what this
+// function's return type describes -- only exists on a real entity's own forward
+// attribute list); confirmed currently unreachable from the TS layer regardless
+// (`entityInstance.ts` has no caller that invokes this primitive on a non-entity
+// instance). Left as its own, still entity-only, precondition rather than silently
+// widened.
 std::string get_attribute_name(const express::base& instance, int attribute_index) {
     return attribute_declaration_at(instance, attribute_index)->name();
 }
