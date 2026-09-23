@@ -27,9 +27,38 @@
 // - `IfcObjectDefinition.Decomposes` : an aggregate-bounded (`bound1=0, bound2=1`)
 //   inverse to `IfcRelAggregates.RelatedObjects`.
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, test } from "vitest";
+import { expand as guidExpand } from "../src/guid";
+import { open } from "../src/open";
 import * as subject from "../src/validate";
-import { AVAILABLE_SCHEMAS, createTestFile } from "./bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile, stripOwnerBootstrap } from "./bootstrap";
+
+const FIXTURES_DIR = path.join(__dirname, "fixtures", "validate");
+
+function openFixture(name: string) {
+	return open(path.join(FIXTURES_DIR, name));
+}
+
+/**
+ * Builds a throwaway `.ifc` file with a hand-crafted header, for header edge cases no
+ * already-vendored fixture covers (e.g. a syntactically-present-but-empty aggregate).
+ */
+function openWithHeader(headerLines: readonly string[]) {
+	const content = `ISO-10303-21;
+HEADER;
+${headerLines.join("\n")}
+ENDSEC;
+DATA;
+ENDSEC;
+END-ISO-10303-21;
+`;
+	const p = path.join(os.tmpdir(), `validate-header-probe-${Math.random().toString(36).slice(2)}.ifc`);
+	fs.writeFileSync(p, content);
+	return open(p);
+}
 
 /**
  * `.find(...)`/`.as_entity()`/`.as_select_type()` return `T | undefined`/`T | null` --
@@ -389,5 +418,180 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4"))("validate.ts getEntityAttri
 
 		// IfcLabel is a real declaration but not an entity.
 		expect(() => subject.getEntityAttributes(schema, "IfcLabel")).toThrow(/not an entity declaration/);
+	});
+});
+
+// Phase EX-3 chunk 3: `validateGuid`/`validateIfcHeader`/`validateIfcApplications`.
+
+describe("validate.ts validateGuid", () => {
+	test("rejects a guid that isn't 22 characters", () => {
+		expect(subject.validateGuid("short")).toBe("Guid length should be 22 characters.");
+		expect(subject.validateGuid("01234567890123456789012")).toBe("Guid length should be 22 characters.");
+	});
+
+	test("rejects a guid whose first character isn't 0/1/2/3", () => {
+		expect(subject.validateGuid("4iBd2lkrX61vZxF9AnXLa0")).toBe("Guid first character must be either a 0, 1, 2, or 3.");
+	});
+
+	test("accepts a real, valid guid", () => {
+		expect(subject.validateGuid("1iBd2lkrX61vZxF9AnXLa0")).toBeNull();
+	});
+
+	test("rejects a 22-character, correct-first-character guid containing characters outside the IFC base64 alphabet -- see this file's header comment, finding 11, for why this needs an unconditional check rather than relying on `expand()` to throw", () => {
+		const guid = `0${"!".repeat(21)}`;
+		expect(guid.length).toBe(22);
+		const message = subject.validateGuid(guid);
+		expect(message).toContain("Guid contains invalid characters");
+	});
+
+	test("finding 11 is empirically real: this port's own expand() does not throw for the same garbage guid", () => {
+		expect(() => guidExpand(`0${"!".repeat(21)}`)).not.toThrow();
+	});
+});
+
+describe("validate.ts validateIfcHeader", () => {
+	test("a real, fully-populated, valid header produces zero violations", () => {
+		const file = openFixture("pass-header-valid.ifc");
+		expect(subject.validateIfcHeader(file)).toEqual([]);
+	});
+
+	test("/code-review-found defensive fix: a null header() result is reported as one clear violation, not 9 raw null-dereference messages", () => {
+		const file = createTestFile("IFC4");
+		// `NativeFile.header()`'s own generated wrapper can return `null` (mirrors
+		// `schema()`'s null-handling shape) -- not proven reachable via any real
+		// construction path this port exercises (see header comment, finding 14), so this
+		// stubs the native method directly to exercise the defensive guard.
+		file.nativeFile.header = () => null as unknown as ReturnType<typeof file.nativeFile.header>;
+
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0]).toBeInstanceOf(subject.ValidationError);
+		expect(violations[0].message).toBe("File has no header.");
+	});
+
+	test("a freshly-created template file's default header produces zero violations", () => {
+		const file = createTestFile("IFC4");
+		expect(subject.validateIfcHeader(file)).toEqual([]);
+	});
+
+	test("FILE_NAME.time_stamp set to $ (fail-header-wrong-type-instead-of-str.ifc) is reported against 'time_stamp' only", () => {
+		const file = openFixture("fail-header-wrong-type-instead-of-str.ifc");
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("time_stamp");
+		expect(violations[0]).toBeInstanceOf(subject.ValidationError);
+	});
+
+	test("FILE_NAME.author holding a list of non-strings (fail-header-wrong-type-list.ifc) is reported against 'author' only", () => {
+		const file = openFixture("fail-header-wrong-type-list.ifc");
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("author");
+	});
+
+	test("FILE_NAME.author set to $ instead of a list (fail-header-wrong-type-instead-of-list-str.ifc) is reported against 'author' only", () => {
+		const file = openFixture("fail-header-wrong-type-instead-of-list-str.ifc");
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("author");
+	});
+
+	test("FILE_NAME missing its trailing authorization argument (fail-expected-2-header-attr-too-few.ifc) is reported against 'authorization' only", () => {
+		const file = openFixture("fail-expected-2-header-attr-too-few.ifc");
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("authorization");
+	});
+
+	test("disclosed test-fidelity gap (header comment, finding 10): FILE_NAME with extra trailing arguments (fail-header-attr-too-many.ifc) produces zero violations in this port", () => {
+		const file = openFixture("fail-header-attr-too-many.ifc");
+		expect(subject.validateIfcHeader(file)).toEqual([]);
+	});
+
+	test("a present-but-empty aggregate field (FILE_DESCRIPTION.description = ()) is reported as an empty list, not silently accepted", () => {
+		const file = openWithHeader([
+			"FILE_DESCRIPTION((),'2;1');",
+			"FILE_NAME('n','t',('a'),('o'),'p','s','auth');",
+			"FILE_SCHEMA(('IFC4'));",
+		]);
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("description");
+		expect(violations[0].message).toContain("empty list");
+	});
+
+	test("a scalar in place of an aggregate field (FILE_DESCRIPTION.description = 'desc') is reported against 'description'", () => {
+		const file = openWithHeader([
+			"FILE_DESCRIPTION('desc','2;1');",
+			"FILE_NAME('n','t',('a'),('o'),'p','s','auth');",
+			"FILE_SCHEMA(('IFC4'));",
+		]);
+		const violations = subject.validateIfcHeader(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("description");
+	});
+});
+
+describe("validate.ts validateIfcApplications", () => {
+	test("a file with no IfcApplication instances produces zero violations", () => {
+		const file = createTestFile("IFC4");
+		stripOwnerBootstrap(file);
+		expect(file.byType("IfcApplication")).toHaveLength(0);
+		expect(subject.validateIfcApplications(file)).toEqual([]);
+	});
+
+	test("two IfcApplications with all-null identifying attributes produce zero violations (Python's own 'is not None' guard)", () => {
+		const file = createTestFile("IFC4");
+		stripOwnerBootstrap(file);
+		file.createEntity("IfcApplication");
+		file.createEntity("IfcApplication");
+
+		expect(subject.validateIfcApplications(file)).toEqual([]);
+	});
+
+	test("two IfcApplications sharing (ApplicationFullName, Version) violate Rule IfcApplication.UR2", () => {
+		const file = createTestFile("IFC4");
+		stripOwnerBootstrap(file);
+		const org = file.createEntity("IfcOrganization", null, "Org", null, null, null);
+		const first = file.createEntity("IfcApplication", org, "1.0", "My App", "myapp.id");
+		const second = file.createEntity("IfcApplication", org, "1.0", "My App", "other.id");
+
+		const violations = subject.validateIfcApplications(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("ApplicationFullName");
+		expect(violations[0].message).toContain("Rule IfcApplication.UR2");
+		expect(violations[0].message).toContain(second.toString());
+		expect(violations[0].message).toContain(first.toString());
+	});
+
+	test("two IfcApplications sharing ApplicationIdentifier violate Rule IfcApplication.UR1", () => {
+		const file = createTestFile("IFC4");
+		stripOwnerBootstrap(file);
+		const org = file.createEntity("IfcOrganization", null, "Org", null, null, null);
+		const first = file.createEntity("IfcApplication", org, "1.0", "App One", "shared.id");
+		const second = file.createEntity("IfcApplication", org, "2.0", "App Two", "shared.id");
+
+		const violations = subject.validateIfcApplications(file);
+		expect(violations).toHaveLength(1);
+		expect(violations[0].attribute).toBe("ApplicationIdentifier");
+		expect(violations[0].message).toContain("Rule IfcApplication.UR1");
+		expect(violations[0].message).toContain(second.toString());
+		expect(violations[0].message).toContain(first.toString());
+	});
+
+	test("a third duplicate is still reported against the FIRST instance that claimed the pair, not the second (real Python's own 'first claimant wins' dict semantics)", () => {
+		const file = createTestFile("IFC4");
+		stripOwnerBootstrap(file);
+		const org = file.createEntity("IfcOrganization", null, "Org", null, null, null);
+		const first = file.createEntity("IfcApplication", org, "1.0", "My App", "id-1");
+		file.createEntity("IfcApplication", org, "1.0", "My App", "id-2");
+		const third = file.createEntity("IfcApplication", org, "1.0", "My App", "id-3");
+
+		const violations = subject.validateIfcApplications(file);
+		expect(violations).toHaveLength(2);
+		for (const violation of violations) {
+			expect(violation.message).toContain(first.toString());
+		}
+		expect(violations[1].message).toContain(third.toString());
 	});
 });
