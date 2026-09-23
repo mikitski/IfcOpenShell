@@ -153,8 +153,158 @@
 //    (and its own header comment) is now stale and could be revisited in a future chunk
 //    to return the real forward list instead of throwing. Not fixed here: out of this
 //    chunk's own declared scope, and not needed by anything ported in this file.
+//
+// *** Phase EX-3 chunk 3 (planning/ifcopenshell-ts/70-express-rules-plan.md): adds the 3
+// remaining standalone, independent leaf checks -- `validateGuid` (Python: `validate_guid`,
+// real source lines 632-651), `validateIfcHeader` (Python: `validate_ifc_header`, lines
+// 667-739 -- `to_string_header_entity`, lines 654-665, is deliberately NOT ported, see
+// finding 12 below) and `validateIfcApplications` (Python: `validate_ifc_applications`,
+// lines 741-782). None of these three depend on anything above in this file (chunk 2's
+// `assertValid`/`assertValidInverse`/`getSelectMembers`/`getEntityAttributes`); they are
+// independent leaves chunk 4's `validate()` orchestrator will call directly, exactly as
+// the phase plan anticipated. Design recap (locked in the task brief, not re-litigated
+// here): `validateGuid` keeps real Python's own single-message `string | null` return
+// shape (only ever one thing to say about one guid); `validateIfcHeader`/
+// `validateIfcApplications` return `ValidationError[]` instead -- collecting every
+// violation found in one call rather than throwing on the first -- reusing chunk 2's own
+// `ValidationError` class unchanged (message + optional `attribute`) rather than inventing
+// a parallel violation type, so chunk 4 can concatenate everything (these two functions'
+// return arrays, plus anything caught from `assertValid`/`assertValidInverse`'s thrown
+// `ValidationError`s) into one final list with no shape mismatch.
+//
+// *** Additional real, disclosed findings from this chunk's own investigation, beyond
+// what the task brief and `70-express-rules-plan.md` already anticipated -- each verified
+// directly (native probes against the real built addon and real Python source), not
+// assumed: ***
+//
+// 9. **`validateIfcHeader`'s per-field checks are driven entirely by the native
+//    `spf_header` accessors' own thrown exceptions, and this turns out to line up with
+//    real Python's own `except RuntimeError` branch almost exactly** -- empirically
+//    confirmed (throwaway probes against every one of the 5 already-vendored malformed
+//    header fixtures, `test/fixtures/validate/fail-header-*.ifc`/
+//    `fail-expected-2-header-attr-too-few.ifc`, plus two hand-built edge cases) that
+//    `spf_header_file_*_*()` throws whenever the underlying STEP value's shape doesn't
+//    match what the accessor expects: a `$` (explicit null) or an entirely missing
+//    trailing argument both throw "does not match actual type <null>"; a scalar where a
+//    list is expected, or a list of non-strings where a list of strings is expected, both
+//    throw a similarly-shaped type-mismatch message. A *present, syntactically valid, but
+//    empty* list (`FILE_DESCRIPTION((), ...)`) does NOT throw -- confirmed separately --
+//    so `validateIfcHeader`'s own aggregate-field helper still needs its own explicit
+//    "list is empty" check after a successful call, mirroring real Python's own separate
+//    `if not value:` branch. Net effect: this port's version doesn't need real Python's
+//    own per-element `isinstance(v, str)` loop at all (the native accessor's own
+//    marshaling already enforces "every element is a string" before ever returning
+//    successfully) -- exactly the "noticeably simpler than real Python" shape the task
+//    brief anticipated, and for a slightly different, now-confirmed reason (the native
+//    layer's own type-checked marshaling, not just the absence of caret-annotation
+//    machinery). Each field's violation message embeds the native exception's own message
+//    text (already a real, useful diagnostic, e.g. "Requested type <string> does not match
+//    actual type <int> at index 1") rather than reconstructing Python's separate
+//    `type(value).__name__` -- an intentional, disclosed adaptation: this port never has
+//    the raw pre-marshaled value in hand to name its type the way Python's `getattr` does
+//    (a failed accessor call throws before producing anything), so the native layer's own
+//    diagnostic is substituted rather than fabricated.
+//
+// 10. **A genuine, disclosed test-fidelity gap for one already-vendored fixture**:
+//    `test/fixtures/validate/fail-header-attr-too-many.ifc` (a `FILE_NAME` with 2 extra
+//    trailing arguments beyond the schema's 7) produces **zero** violations from
+//    `validateIfcHeader` in this port -- confirmed empirically: none of the 9 field
+//    accessors throw or report anything unusual for it, since the shim only reads the
+//    fixed set of named fields and silently ignores anything beyond them. Real Python's
+//    own `validate_ifc_header` has an identical structural blind spot (its own
+//    `validate_attribute` helper only ever reads the 9 named fields too) -- the "too many
+//    args" case is actually caught, in real Python, by a *different* mechanism entirely:
+//    a raw C++/SWIG parse-time error surfaced through `log_internal_cpp_errors`, which
+//    only runs when `validate()` is given a raw file PATH (not an already-open file).
+//    `70-express-rules-plan.md`'s own Phase EX-3 findings already disclosed that this
+//    port's `validate()` will only ever accept an already-open `IfcFile` -- making that
+//    whole code path N/A by design, not a porting gap -- but this chunk is the first to
+//    trace that decision through to a *specific, named, already-vendored fixture* it
+//    affects: `fail-header-attr-too-many.ifc` (named `fail-...` with no `expected-N-`
+//    prefix, i.e. real Python's own test convention expects exactly 1 violation from it)
+//    will very likely report 0 violations from this port's eventual `validate()`, once
+//    chunk 4 wires up the fixture suite, unless some other still-to-be-ported check
+//    (chunk 4's own per-instance loop, or Phase EX-4's WHERE-rules) happens to also flag
+//    something in it. Flagged here, now, for chunk 4 to account for explicitly (e.g. an
+//    accepted, disclosed known-divergence skip) rather than being rediscovered as a
+//    surprise test failure later.
+//
+// 11. **A genuine, newly-found primitive-layer divergence in `validateGuid`, not
+//    previously disclosed anywhere in `guid.ts`/`TODOS.md`**: real Python's
+//    `ifcopenshell.guid.expand` can genuinely raise (Python's `base64.b64decode` raises
+//    `binascii.Error` when, after silently discarding out-of-alphabet characters, the
+//    remaining decoded length is invalid) -- `validate_guid`'s own `except:` branch
+//    depends on this. This port's `guid.ts#expand` instead decodes via Node's
+//    `Buffer.from(str, "base64")`, which is **even more lenient than Python's own
+//    decoder and confirmed, empirically, to never throw** for any input string
+//    (garbage/all-invalid-character strings silently decode to whatever bytes Node can
+//    salvage, verified directly: `expand("!!!!!!!!!!!!!!!!!!!!!!")` returns `""` rather
+//    than throwing). Ported byte-for-byte, `validateGuid`'s `try { expand(guidValue) }
+//    catch { ... }` structure would therefore make its own "invalid characters"/"couldn't
+//    decompress" messages permanently unreachable dead code in this port -- a real,
+//    silent functional regression from real Python's actual validation behavior (a
+//    22-character, correct-first-character string full of garbage characters would be
+//    reported as a *valid* guid). **Decision: keep the `try`/`catch` structure (for
+//    fidelity, readability, and in case `expand()`'s own implementation ever becomes
+//    stricter), but perform the character-set membership check unconditionally,
+//    independent of whether the `catch` block actually ran** -- this reproduces real
+//    Python's actual practical outcome for every case that matters (a 22-char,
+//    correct-first-character guid containing any character outside the IFC base64
+//    alphabet is correctly reported invalid) despite the underlying mechanism (exception
+//    vs. unconditional check) genuinely differing. Real Python's own remaining "couldn't
+//    decompress, not base64 encoded" branch is, on inspection, already close to dead code
+//    in real Python too once the character-membership check passes (a 22-char string
+//    built entirely from the 64-symbol IFC alphabet always translates to a
+//    length-24 standard-base64 string, which always decodes successfully) -- ported
+//    as-is for structural parity, not because it's expected to ever fire in practice in
+//    either implementation.
+//
+// 12. **The task brief's own assumption that `IfcFile.header()` already exists (as a
+//    wrapper method, mirroring `spf_header`'s exposure) was checked directly and found
+//    stale**: `src/file.ts`'s `IfcFile` class has no `header()` method at all -- its own
+//    header comment already explicitly defers this ("`header`/`mvd`/`assignHeaderFrom`
+//    themselves are still not ported here; that remains later work"), and
+//    `TODOS.md`'s "`spf_header` has no `file_description()` sub-entity accessor" entry
+//    (itself now partially stale re: the accessor's existence, landed by PR #200, but
+//    still accurate re: `IfcFile.header()`/`.mvd` not existing) confirms this is
+//    deliberately-deferred, separate follow-up work, not something this chunk should add
+//    incidentally. `validateIfcHeader` therefore reaches the native `spf_header` via
+//    `f.nativeFile.header()` directly -- the exact same native-layer reach-through
+//    pattern chunk 2's own test suite (`test/validate.test.ts`) already established for
+//    the analogous `file.nativeFile.schema()` need, not a new convention.
+//
+// 13. **`validateIfcApplications`'s "previous element" reference** (real Python embeds
+//    both the offending instance and the one that first claimed the name/id pair in its
+//    error message): kept as plain text embedded in the `ValidationError`'s own `message`
+//    (both instances' `toString()` STEP-text rendering, matching real Python's own
+//    `%s`-formatted `inst`/`previous_element` substitutions) rather than adding a new
+//    field to `ValidationError` -- keeps the violation shape uniform with every other
+//    check in this file (`message` + optional `attribute`, nothing per-check-specific).
+//    Real Python's own `annotate_inst_attr_pos(...)` caret-position annotations (embedded
+//    in the same message) are dropped for the same already-established reason
+//    `validateIfcHeader` drops `to_string_header_entity`/its own annotation calls: this
+//    port has no raw SPF-text-with-caret diagnostic machinery, and the annotation is
+//    cosmetic, not load-bearing for pass/fail logic.
+//
+// 14. **`/code-review`-found gap, fixed in this same chunk**: `validateIfcHeader` originally
+//    dereferenced `f.nativeFile.header()` unchecked, even though that generated wrapper
+//    method (`ifcopenshell_native.ts`) explicitly handles a `null` native result (the same
+//    `result === null ? (null as unknown as spf_header) : ...` shape `schema()` uses, which
+//    `test/bootstrap.ts`'s own `isSchemaAvailable` treats as a real, reachable case for
+//    `schema()` specifically). Not proven reachable for `header()` in practice (every
+//    construction path this port's own tests exercise -- including a bare, freshly-created
+//    "blank" file -- returns a real, populated default header, per finding 9's own probing
+//    and `test/native/header.test.ts`), and real Python's own `f.header` SWIG attribute is
+//    presumed similarly always-populated (`ifcopenshell::file` owns its `spf_header` member
+//    by value, never by pointer) -- but the original code's incidental safety (each field's
+//    own `try`/`catch` happened to swallow a resulting raw `TypeError` rather than crash)
+//    still produced a misleading diagnostic instead of a clear one. Fixed with an explicit
+//    `header === null` guard at the top of `validateIfcHeader`, returning a single, clear
+//    violation instead.
 
 import { EntityInstance } from "./entityInstance";
+import type { IfcFile } from "./file";
+import { expand as guidExpand } from "./guid";
 import {
 	aggregation_type as NativeAggregationType,
 	type attribute as NativeAttribute,
@@ -608,4 +758,234 @@ export function getEntityAttributes(
 /** Test-only escape hatch, matching `attributeCache.ts`'s own established convention. */
 export function _clearEntityAttributeMapForTests(): void {
 	entityAttributeMap.clear();
+}
+
+// --- `validate_guid` (real source lines 632-651) ---
+
+/** The full IFC-convention base64 alphabet (`guid.ts`'s own `CHARS64_IFC`, inlined here to
+ * match real Python's own `allowed_characters` local rather than exporting it from
+ * `guid.ts` for a single caller). */
+const GUID_ALLOWED_CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+
+/**
+ * Python: `validate_guid(guid: str) -> Union[str, None]` (real source lines 632-651).
+ * Returns `null` when `guid` is valid, otherwise a human-readable error message -- kept as
+ * real Python's own single-message return shape (this check only ever has one thing to say
+ * about a single guid, unlike `validateIfcHeader`/`validateIfcApplications` below, so there
+ * is no multi-violation list to design here). Uses this port's own `guid.ts#expand`
+ * directly, matching real Python's own `ifcopenshell.guid.expand` call -- but see this
+ * file's header comment, finding 11, for a genuine, disclosed divergence: this port's
+ * `expand()` (Node's `Buffer.from(_, "base64")`) never actually throws the way Python's
+ * `base64.b64decode`-backed `expand()` can, so the character-membership check below runs
+ * unconditionally rather than only inside the `catch`, reproducing real Python's actual
+ * practical outcome despite the underlying mechanism differing.
+ */
+export function validateGuid(guidValue: string): string | null {
+	if (guidValue.length !== 22) {
+		return "Guid length should be 22 characters.";
+	}
+	if (!"0123".includes(guidValue[0])) {
+		return "Guid first character must be either a 0, 1, 2, or 3.";
+	}
+	let expandFailed = false;
+	try {
+		guidExpand(guidValue);
+	} catch {
+		expandFailed = true;
+	}
+	const hasInvalidCharacter = [...guidValue].some((c) => !GUID_ALLOWED_CHARACTERS.includes(c));
+	if (expandFailed || hasInvalidCharacter) {
+		if (hasInvalidCharacter) {
+			return `Guid contains invalid characters, allowed characters: '${GUID_ALLOWED_CHARACTERS}'.`;
+		}
+		// NOTE (ported verbatim from real source's own comment, real source line 649): are
+		// there actually cases where guid won't expand, besides invalid characters?
+		return "Couldn't decompress guid, it's not base64 encoded.";
+	}
+	return null;
+}
+
+// --- `validate_ifc_header` (real source lines 667-739; `to_string_header_entity`, lines
+// 654-665, is deliberately not ported -- see this file's header comment, finding 12) ---
+
+const HEADER_STRING_TYPE = "STRING (256)";
+const HEADER_AGGREGATE_TYPE = "LIST [ 1 : ? ] OF STRING (256)";
+
+function pushHeaderFieldViolation(
+	violations: ValidationError[],
+	entityLabel: string,
+	name: string,
+	expectedType: string,
+	detail: string,
+): void {
+	violations.push(
+		new ValidationError(
+			`On ${entityLabel}:\nAttribute '${name}' has invalid type:\n    Expected: ${expectedType}\n    ${detail}`,
+			name,
+		),
+	);
+}
+
+/**
+ * A single `STRING (256)`-typed header field (Python: `validate_attribute(header_entity,
+ * name, index)`, real source lines 704-714's non-aggregate branch). See this file's header
+ * comment, finding 9: the native `spf_header` accessor's own exception (thrown for a `$`/
+ * missing value or a value of the wrong shape) IS the check -- there is no separate
+ * `isinstance(value, str)` to perform here, since a successful call already guarantees a
+ * `string`.
+ */
+function checkHeaderStringField(
+	violations: ValidationError[],
+	entityLabel: string,
+	name: string,
+	accessor: () => string,
+): void {
+	try {
+		accessor();
+	} catch (e) {
+		pushHeaderFieldViolation(violations, entityLabel, name, HEADER_STRING_TYPE, (e as Error).message);
+	}
+}
+
+/**
+ * A single `LIST [ 1 : ? ] OF STRING (256)`-typed header field (Python:
+ * `validate_attribute(header_entity, name, index, aggregate=True)`, real source lines
+ * 704-714's aggregate branch). Unlike Python, no per-element `isinstance(v, str)` loop is
+ * needed (see this file's header comment, finding 9) -- but the "empty list" check is
+ * still needed here, since a present-but-empty list does not throw (confirmed directly,
+ * same finding).
+ */
+function checkHeaderStringListField(
+	violations: ValidationError[],
+	entityLabel: string,
+	name: string,
+	accessor: () => string[],
+): void {
+	let value: string[];
+	try {
+		value = accessor();
+	} catch (e) {
+		pushHeaderFieldViolation(violations, entityLabel, name, HEADER_AGGREGATE_TYPE, (e as Error).message);
+		return;
+	}
+	if (value.length === 0) {
+		pushHeaderFieldViolation(violations, entityLabel, name, HEADER_AGGREGATE_TYPE, "Current value is an empty list.");
+	}
+}
+
+/**
+ * Python: `validate_ifc_header(f, logger) -> None` (real source lines 667-739). Validates
+ * `FILE_DESCRIPTION`'s `description`/`implementation_level` and `FILE_NAME`'s `name`/
+ * `time_stamp`/`author`/`organization`/`preprocessor_version`/`originating_system`/
+ * `authorization` -- `FILE_SCHEMA` is deliberately skipped, matching real Python's own
+ * comment ("Ignore header.file_schema as file won't load to IfcOpenShell with invalid
+ * file_schema."). Returns every violation found (not just the first), matching this file's
+ * locked multi-violation design (see header comment, chunk 3 preface) -- real Python's own
+ * `to_string_header_entity`/`annotate_inst_attr_pos` message-formatting helpers are
+ * deliberately not ported (this port has no raw-SPF-text-with-caret diagnostic machinery,
+ * and they're cosmetic, not load-bearing -- see header comment, finding 9/12). Reaches the
+ * native header via `f.nativeFile.header()` since `IfcFile` itself has no `header()` method
+ * yet (see header comment, finding 12).
+ *
+ * `/code-review`-found defensive fix (see header comment, finding 14): `NativeFile.header()`'s
+ * own generated wrapper (`ifcopenshell_native.ts`) mirrors `schema()`'s null-handling shape
+ * (an unsafe cast papering over a real, possible `null` from the underlying native call) --
+ * not proven reachable by anything this port's own tests construct (even a "blank" file gets
+ * a real, populated default header, `test/native/header.test.ts`'s own finding), but guarded
+ * explicitly here rather than left to surface as 9 confusing raw null-dereference messages
+ * (each field's own try/catch would otherwise swallow a generic `TypeError` instead of a
+ * clear diagnostic).
+ */
+export function validateIfcHeader(f: IfcFile): ValidationError[] {
+	const header = f.nativeFile.header();
+	if (header === null) {
+		return [new ValidationError("File has no header.")];
+	}
+	const violations: ValidationError[] = [];
+
+	checkHeaderStringListField(violations, "FILE_DESCRIPTION", "description", () =>
+		header.file_description_description(),
+	);
+	checkHeaderStringField(violations, "FILE_DESCRIPTION", "implementation_level", () =>
+		header.file_description_implementation_level(),
+	);
+
+	checkHeaderStringField(violations, "FILE_NAME", "name", () => header.file_name_name());
+	checkHeaderStringField(violations, "FILE_NAME", "time_stamp", () => header.file_name_time_stamp());
+	checkHeaderStringListField(violations, "FILE_NAME", "author", () => header.file_name_author());
+	checkHeaderStringListField(violations, "FILE_NAME", "organization", () => header.file_name_organization());
+	checkHeaderStringField(violations, "FILE_NAME", "preprocessor_version", () =>
+		header.file_name_preprocessor_version(),
+	);
+	checkHeaderStringField(violations, "FILE_NAME", "originating_system", () => header.file_name_originating_system());
+	checkHeaderStringField(violations, "FILE_NAME", "authorization", () => header.file_name_authorization());
+
+	return violations;
+}
+
+// --- `validate_ifc_applications` (real source lines 741-782) ---
+
+/**
+ * Python: `validate_ifc_applications(f, logger) -> None` (real source lines 741-782).
+ * Checks `IfcApplication` uniqueness: no two instances may share the same
+ * `(ApplicationFullName, Version)` pair (Rule `IfcApplication.UR2`), and no two may share
+ * the same `ApplicationIdentifier` (Rule `IfcApplication.UR1`). Returns every violation
+ * found (not just the first) -- matching this file's locked multi-violation design.
+ *
+ * Real Python's dict-based "first claimant wins" semantics are preserved exactly: once a
+ * given pair/id is first recorded, every subsequent duplicate is reported against that
+ * SAME original instance (not against whichever duplicate was seen most recently) --
+ * mirrored here by never overwriting `usedNames`/`usedIds` once a key is first set.
+ *
+ * See this file's header comment, finding 13, for the disclosed design choice on the
+ * "previous element" reference (embedded as STEP text in the violation's own `message`
+ * rather than a new field on `ValidationError`), and for why `annotate_inst_attr_pos`'s
+ * caret-position annotations are dropped (same reasoning as `validateIfcHeader` dropping
+ * `to_string_header_entity`).
+ */
+export function validateIfcApplications(f: IfcFile): ValidationError[] {
+	const violations: ValidationError[] = [];
+	const usedNames = new Map<unknown, Map<unknown, EntityInstance>>();
+	const usedIds = new Map<unknown, EntityInstance>();
+
+	for (const inst of f.byType("IfcApplication")) {
+		const fullName = inst.get("ApplicationFullName");
+		const version = inst.get("Version");
+		const appId = inst.get("ApplicationIdentifier");
+
+		if (fullName !== null && fullName !== undefined && version !== null && version !== undefined) {
+			let byVersion = usedNames.get(fullName);
+			const previous = byVersion?.get(version);
+			if (previous) {
+				violations.push(
+					new ValidationError(
+						`Rule IfcApplication.UR2:\n    The combination of attributes ApplicationFullName and Version should be unique\nOn instance:\n    ${inst.toString()}\nViolated by:\n    ${previous.toString()}`,
+						"ApplicationFullName",
+					),
+				);
+			} else {
+				if (!byVersion) {
+					byVersion = new Map();
+					usedNames.set(fullName, byVersion);
+				}
+				byVersion.set(version, inst);
+			}
+		}
+
+		if (appId !== null && appId !== undefined) {
+			const previous = usedIds.get(appId);
+			if (previous) {
+				violations.push(
+					new ValidationError(
+						`Rule IfcApplication.UR1:\n    The attribute ApplicationIdentifier should be unique\nOn instance:\n    ${inst.toString()}\nViolated by:\n    ${previous.toString()}`,
+						"ApplicationIdentifier",
+					),
+				);
+			} else {
+				usedIds.set(appId, inst);
+			}
+		}
+	}
+
+	return violations;
 }
