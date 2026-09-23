@@ -166,6 +166,80 @@ describe.each(AVAILABLE_SCHEMAS)("IfcFile (%s)", (schema) => {
 		expect(file.schemaVersion[0]).toBe(schema === "IFC2X3" ? 2 : schema === "IFC4" ? 4 : 4);
 	});
 
+	// Regression coverage for the `TODOS.md` gate this chunk fixes ("EntityInstance
+	// .setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly
+	// created simple/defined-type instance"). Before this fix, every case in this
+	// block threw "Attribute access is only supported on entity instances" --
+	// `attribute_value_shim.cpp`'s `entity_declaration_of` unconditionally required
+	// `instance.declaration().as_entity()`, with no fallback for a bare
+	// `type_declaration`-declared instance (a standalone `IfcLabel`/`IfcDuration`/
+	// `IfcLineIndex`/etc., constructed on its own with no owning entity/attribute).
+	describe("createEntity() on a standalone simple/defined-type instance (TODOS.md: EntityInstance.setByIndex/IfcFile.createEntity gate)", () => {
+		test("scalar defined type: construct WITH an initial value round-trips", () => {
+			const file = newFile();
+			const label = file.createEntity("IfcLabel", "hello");
+			expect(label.id()).toBe(0); // loose, not-yet-attached value -- matches real Python
+			expect(label.getByIndex(0)).toBe("hello");
+			expect(label.attributeType(0)).toBe("STRING");
+		});
+
+		test("scalar defined type: construct bare, then mutate via setByIndex", () => {
+			const file = newFile();
+			const label = file.createEntity("IfcLabel");
+			label.setByIndex(0, "world");
+			expect(label.getByIndex(0)).toBe("world");
+		});
+
+		// `IfcDuration` is IFC4+-only (confirmed against the real schema headers --
+		// `SCHEMA_HAS_IfcDuration` is undefined for IFC2X3), matching this entry's own
+		// `assignLagTime.test.ts` precedent for schema-gating a real-typed-but-not-
+		// universal defined type.
+		test.skipIf(schema === "IFC2X3")("a real (non-IfcLabel) STRING-backed defined type round-trips both ways", () => {
+			const file = newFile();
+			const durationCreated = file.createEntity("IfcDuration", "P1D");
+			expect(durationCreated.getByIndex(0)).toBe("P1D");
+
+			const durationMutated = file.createEntity("IfcDuration");
+			durationMutated.setByIndex(0, "P2D");
+			expect(durationMutated.getByIndex(0)).toBe("P2D");
+		});
+
+		// `IfcLineIndex` (`LIST [2:?] OF IfcPositiveInteger`, confirmed against the
+		// generated schema source) is IFC4+-only (no `SCHEMA_HAS_IfcLineIndex` on
+		// IFC2X3) -- an AGGREGATE-kind defined type, not just a scalar one, exercising
+		// `attribute_kind_of`'s `ATTRIBUTE_VALUE_KIND_AGGREGATE`/
+		// `Argument_AGGREGATE_OF_INT` path through the same new `type_declaration`
+		// fallback.
+		test.skipIf(schema === "IFC2X3")("an aggregate (LIST-typed) defined type round-trips both ways", () => {
+			const file = newFile();
+			const lineIndexCreated = file.createEntity("IfcLineIndex", [1, 2]);
+			expect(lineIndexCreated.getByIndex(0)).toEqual([1, 2]);
+			expect(lineIndexCreated.attributeType(0)).toBe("AGGREGATE OF INT");
+
+			const lineIndexMutated = file.createEntity("IfcLineIndex");
+			lineIndexMutated.setByIndex(0, [3, 4, 5]);
+			expect(lineIndexMutated.getByIndex(0)).toEqual([3, 4, 5]);
+		});
+
+		test("attribute index 1 (out of range for a bare simple/defined-type instance, which only ever has index 0) still throws, matching the existing entity out-of-range behavior", () => {
+			const file = newFile();
+			const label = file.createEntity("IfcLabel", "x");
+			expect(() => label.setByIndex(1, "y")).toThrow();
+			expect(() => label.attributeType(1)).toThrow();
+		});
+
+		// Scope boundary this chunk deliberately does NOT change: a bare
+		// select_type-declared instance (e.g. `IfcValue`, an abstract SELECT with no
+		// `declared_type`) still throws exactly as before -- in fact even earlier than
+		// this gate, at `create_with_declaration_instance_id` itself ("Requires and
+		// entity or type declaration"), confirming there is no reachable bare
+		// select_type/enumeration_type instance this fix needed to (or did) touch.
+		test("a bare select_type-declared instance (e.g. IfcValue) is still rejected, unaffected by this fix", () => {
+			const file = newFile();
+			expect(() => file.createEntity("IfcValue")).toThrow();
+		});
+	});
+
 	describe("Transaction / undo-redo", () => {
 		test("create -> undo -> verify gone -> redo -> verify back", () => {
 			const file = newFile();

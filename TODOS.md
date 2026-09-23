@@ -686,7 +686,148 @@ same reason.
 **Depends on / blocked by:** `util.geolocation` dependency resolved. Still blocked on Phase 6's
 `api.unit`/`api.georeference` landing first.
 
-### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch
+### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch -- **RESOLVED 2026-09-23 for the shared gate itself; see "Resolved" below for exactly what's verified vs. what remains (each individual consequence's own test file still needs its own follow-up flip from "throws" to the real assertion)**
+
+**Resolved (2026-09-23):** Fixed at the exact root this entry always pointed at --
+`src/wrappergen/shim/attribute_value_shim.cpp`'s `entity_declaration_of` (the helper both
+`attribute_kind_of`, backing `EntityInstance.setByIndex`, and `get_attribute_type_name`, backing
+`.attributeType()`, went through) unconditionally required `instance.declaration().as_entity()` to
+be non-null, with no fallback for a bare, standalone simple/defined-type instance (a `type_declaration`
+-declared instance, e.g. a loose `IfcLabel`/`IfcDuration`/`IfcLineIndex` constructed on its own, with
+no owning entity/attribute).
+
+Verified directly against the real current source (not just re-asserting this entry's own prior
+claims) before implementing: `src/ifcparse/schema.h`'s `declaration` base class (lines 141-179) has
+virtual `as_entity()`/`as_type_declaration()`/`as_select_type()`/`as_enumeration_type()` accessors,
+each defaulting to `nullptr` and overridden by the matching subclass; `type_declaration` (lines
+181-195) has a `declared_type()` accessor needing zero entity/attribute context to resolve.
+`src/ifcparse/utils.cpp`'s `ifcopenshell::from_parameter_type` (line 204) already walks a bare
+`parameter_type*` on its own -- recursing through further `type_declaration`s via `declared_type()`
+and through `aggregation_type::type_of_element()` for aggregates -- with no entity/attribute context
+needed; `attribute_kind_of` (`attribute_value_shim.cpp`, was line 387) already called this exact
+function, just fed an attribute's own `type_of_attribute()` rather than a bare type declaration's.
+
+**The fix:** added a new `declared_argument_type_of(instance, attribute_index)` helper in
+`attribute_value_shim.cpp`, factoring out the "resolve the declared EXPRESS argument type at this
+index" logic `attribute_kind_of`/`get_attribute_type_name` both need (avoiding duplicating either the
+`type_declaration`-vs-entity branch or the `from_parameter_type` mapping switch across both callers):
+for a real entity, behavior is byte-identical to before (delegates to `attribute_declaration_at`'s
+existing attribute-level `type_of_attribute()`); for a non-entity instance whose declaration
+`.as_type_declaration()` is non-null, attribute index 0 resolves via
+`from_parameter_type(type_decl->declared_type())` (matching `entityInstance.ts`'s own
+`attributeCount()`, which already returns 1 for exactly this case, confirmed unchanged at lines
+259-263), and any other index still throws `std::out_of_range("Attribute index out of range")`,
+matching the existing entity out-of-range behavior exactly. A bare instance that is neither an entity
+nor a `type_declaration` (i.e. a `select_type`/`enumeration_type`-declared instance) still falls
+through to `entity_declaration_of`'s original throw, completely unchanged -- deliberately NOT
+handled, per this chunk's own scope (and empirically confirmed unreachable in practice: attempting
+`file.createEntity("IfcValue")`, a bare SELECT type, throws even earlier, at
+`create_with_declaration_instance_id` itself, with an unrelated, pre-existing "Requires and entity or
+type declaration" message -- there is no way to construct a bare select/enumeration-type instance at
+all via `file.createEntity` for this gate to ever reach in the first place). `get_attribute_type_name`
+was simplified to a one-line call through the same shared helper.
+
+**Verified working, empirically, against a from-scratch full rebuild of both the C++ core
+(`-DSCHEMA_VERSIONS="2x3;4;4x3_add2"`) and the native addon** (not assumed from the diff alone):
+- `file.createEntity("IfcLabel", "hello")` (scalar, STRING-backed, construct WITH an initial value)
+  round-trips on all 3 schemas.
+- `file.createEntity("IfcLabel")` followed by `.setByIndex(0, "world")` (construct bare, then mutate)
+  round-trips on all 3 schemas.
+- `file.createEntity("IfcDuration", "P1D")` (a real, non-`IfcLabel` STRING-backed defined type, the
+  exact shape `assignLagTime.ts`'s/`editLagTime.ts`'s own blocked call sites need) round-trips on
+  IFC4/IFC4X3 (IFC4+-only, confirmed absent on IFC2X3 via `SCHEMA_HAS_IfcDuration`, matching this
+  entry's own fifteenth-consequence UPDATE below).
+- `file.createEntity("IfcLineIndex", [1, 2])` (an AGGREGATE-kind defined type -- `LIST [2:?] OF
+  IfcPositiveInteger`, confirmed against the generated schema source) round-trips both the
+  construct-with-value and construct-then-`setByIndex`-mutate shapes on IFC4/IFC4X3 (also IFC4+-only,
+  confirmed absent on IFC2X3), exercising `attribute_kind_of`'s `ATTRIBUTE_VALUE_KIND_AGGREGATE`/
+  `Argument_AGGREGATE_OF_INT` path through the same new fallback.
+- Attribute index 1 (out of range for a bare simple/defined-type instance) still throws, both via
+  `EntityInstance.setByIndex`/`.attributeType()` and via the raw native `attribute_kind_of`/
+  `attribute_type` primitives directly.
+- A bare `select_type`-declared instance (`IfcValue`) is still rejected, unaffected by this fix (see
+  above).
+
+New regression tests: `src/ifcopenshell-ts/test/native/primitives.test.ts` (raw native-primitive
+level: `attribute_kind_of`/`attribute_type` directly on a freshly created `IfcLabel`/`IfcLineIndex`
+instance, bypassing `EntityInstance`/`IfcFile` entirely) and
+`src/ifcopenshell-ts/test/file.test.ts` (a new `describe` block, schema-parameterized, covering every
+case above at the `IfcFile.createEntity`/`EntityInstance` level real callers actually use). `tsc
+--noEmit` (both `tsconfig.json` and `tsconfig.typecheck.json`) and `biome check .` are both clean.
+
+**Full suite, from-scratch rebuild, before vs. after (same 6439 pre-existing tests in both runs; the
+19-test delta in the "after" total is this chunk's own new tests -- 17 newly passing + 2 schema-gated
+`skipIf`s):**
+- Before this fix: 420/420 test files passed, 6422 passed / 0 failed / 17 skipped (6439 total).
+- After this fix: 391/420 test files passed, 6240 passed / **199 failed** / 19 skipped (6458 total).
+
+**The 199 newly-failing tests, across 29 files, are the EXPECTED, disclosed consequence this entry's
+own phasing recommendation predicted** -- every one of them is a test that was written to pin the
+OLD, blocked "throws" behavior as its own explicit assertion (per this entry's own long history of
+UPDATEs below, each already diagnosing exactly why its own module's tests throw here), and now fails
+because the underlying operation genuinely succeeds instead. None of these are regressions and none
+were fixed as part of this chunk (out of scope, by design -- a separate, later set of module-grouped
+chunks flips each file's assertions from "throws" to the real, working result, per this entry's own
+prior phasing recommendation). Full file list, with a one-line reason each (all consequences of this
+same now-fixed gate, already diagnosed in this entry's own UPDATE history below unless noted):
+
+- `test/util/migrator.test.ts` (1) -- this entry's own original finding: `Migrator.migrate`'s
+  `id() === 0` SELECT-typed-value branch.
+- `test/util/unit.test.ts` (6), `test/api/unit/addConversionBasedUnit.test.ts` (16),
+  `test/api/unit/assignUnit.test.ts` (3), `test/api/unit/removeUnit.test.ts` (3) -- `util.unit`'s own
+  standalone-unit-value construction (`addConversionBasedUnit`'s imperial/offset units, transitively
+  `assignUnit`/`removeUnit`).
+- `test/api/owner/addApplication.test.ts` (1) -- third consequence (IFC4X3 default-organisation
+  `IfcLabel` pset property).
+- `test/api/pset/editPset.test.ts` (18) -- fourth consequence (`cast_value_to_primary_measure_type`,
+  the single widest-impact consequence).
+- `test/util/shapeBuilder.test.ts` (19) -- transitively via the same `editPset`/pset-property gate
+  (profile/swept-solid helpers that round-trip a property through `editPset`).
+- `test/api/pset_template/editPropTemplate.test.ts` (2) -- sixth consequence (`Enumerators` raw-value
+  wrapping).
+- `test/api/structural/editStructuralBoundaryCondition.test.ts` (4) -- seventh consequence
+  (`IfcBoolean`/generic-measure-class SELECT-typed stiffness attributes).
+- `test/api/cost/editCostValue.test.ts` (4), `test/api/cost/editCostValueFormula.test.ts` (2),
+  `test/api/cost/calculateCostItemResourceValue.test.ts` (2) -- eighth consequence (`AppliedValue`/
+  `UnitBasis` standalone measure construction, transitively through formula evaluation and resource
+  cost calculation).
+- `test/api/georeference/addGeoreferencing.test.ts` (2), `test/api/georeference/editGeoreferencing
+  .test.ts` (1) -- ninth/tenth consequence (IFC2X3 pset-property/dead-code branches, IFC4X3
+  `IfcRigidOperation` branch).
+- `test/api/geometry/clipSolid.test.ts` (6), `test/api/geometry/clipSolidBounded.test.ts` (3) --
+  eleventh/twelfth consequence (`element`-provided branch's final `edit_pset` call).
+- `test/api/alignment/addPositioningReferent.test.ts` (2), `test/api/alignment/addStationingReferent
+  .test.ts` (4), `test/api/alignment/updateKeyPointReferents.test.ts` (3) -- fourteenth consequence
+  (composite-curve placement branch plus `Pset_Stationing.Station` property creation); `test/api
+  /alignment/create.test.ts` (3) and `test/api/alignment/createLayoutSegment.test.ts` (1) are the
+  same underlying alignment-module standalone-value construction gate, not previously itemized by
+  file name in this entry's own alignment UPDATEs.
+- `test/api/sequence/assignLagTime.test.ts` (2) -- fifteenth consequence (`IfcDuration` construction,
+  every schema).
+- `test/api/sequence/editLagTime.test.ts` (4), `test/api/sequence/calculateTaskDuration.test.ts` (2)
+  -- same `IfcLagTime`/`IfcDuration`/`editPset`-property gate family, not previously itemized by file
+  name in this entry's own UPDATEs.
+- `test/api/geometry/addDoorRepresentation.test.ts` (31), `test/api/geometry/addWindowRepresentation
+  .test.ts` (32), `test/api/geometry/regenerateWallRepresentation.test.ts` (18), `test/api/geometry
+  /validateType.test.ts` (4) -- named in this entry's own EXPRESS-DERIVE-gap UPDATE (2026-09-22) as
+  downstream of `guessType`'s `Dim` dispatch; on closer inspection during this chunk's own full-suite
+  run, at least part of each of these files' newly-failing cases trace to THIS gate too (standalone
+  measure/defined-type construction inside the same geometry helpers), not solely the separate
+  EXPRESS-DERIVE gate -- both gates are real and independent, and untangling exactly which failure
+  belongs to which gate file-by-file is left to whichever follow-up chunk actually flips these
+  files' assertions, not re-diagnosed line-by-line here.
+
+**What this resolution does NOT cover (left to follow-up, module-grouped chunks, per this entry's own
+established phasing recommendation):** flipping each of the 29 files above from asserting "throws"
+to asserting the real, correct working result is explicitly out of this chunk's scope -- untouched,
+by design, so each module's own owner/reviewer can verify the *correct* unblocked value (not just
+"doesn't throw") against real Python before flipping its assertions. IFC4/IFC4X3's own separate
+EXPRESS-DERIVE `.get("Dim")` gap (this file's own dedicated entry below, "`util.representation
+.guessType`'s `Curve2D`/.../ blocked by the pre-existing `entityInstance.ts` DERIVED-attribute gap")
+remains genuinely unresolved for those two schemas and is unrelated to (though sometimes co-occurring
+with, per `addDoorRepresentation.test.ts`/etc. above) this entry's own gate.
+
+<details><summary>Original TODO text</summary>
 
 **What:** `EntityInstance.setByIndex` (called by both `IfcFile.createEntity(type, ...args)`'s own
 initial-attribute-assignment loop and any later `.set()`/`.setByIndex()` call) always calls the
@@ -1189,6 +1330,8 @@ Key file/line references: `src/ifcparse/schema.h:141-195`; `src/ifcparse/utils.c
 `src/ifcopenshell-ts/src/entityInstance.ts:260-263,301-307,475-513`;
 `src/ifcopenshell-ts/src/file.ts:484-513`;
 `src/ifcparse/schemas/Ifc2x3-schema.cpp:355,1171` and `Ifc4-schema.cpp:503,510`.
+
+</details>
 
 ### `EntityInstance.getByIndex`/`wrapValue` collapse EXPRESS INTEGER vs. REAL into one JS `number`, losing Python's `isinstance(value, float)` distinction
 
