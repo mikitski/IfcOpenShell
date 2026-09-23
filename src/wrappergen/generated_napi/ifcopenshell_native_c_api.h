@@ -112,9 +112,16 @@ typedef struct ifcopenshell_attribute_value_variant_list_t {
     int count;
 } ifcopenshell_attribute_value_variant_list_t;
 
+typedef struct ifcopenshell_string_list_t {
+    char** items;
+    int count;
+} ifcopenshell_string_list_t;
+
 const char* ifcopenshell_last_error_message(void);
 void ifcopenshell_last_error_clear(void);
 void ifcopenshell_string_free(char* value);
+
+void ifcopenshell_string_list_free(ifcopenshell_string_list_t list);
 
 void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_value_variant_t value);
 void ifcopenshell_attribute_value_variant_list_free(ifcopenshell_attribute_value_variant_list_t list);
@@ -154,6 +161,7 @@ ifcopenshell_parameter_type_t* ifcopenshell_type_declaration_declared_type(ifcop
 ifcopenshell_type_declaration_t* ifcopenshell_type_declaration_as_type_declaration(ifcopenshell_type_declaration_t* handle);
 ifcopenshell_declaration_list_t* ifcopenshell_select_type_select_list(ifcopenshell_select_type_t* handle);
 ifcopenshell_select_type_t* ifcopenshell_select_type_as_select_type(ifcopenshell_select_type_t* handle);
+ifcopenshell_string_list_t ifcopenshell_enumeration_type_enumeration_items(ifcopenshell_enumeration_type_t* handle);
 int ifcopenshell_enumeration_type_lookup_enum_offset(ifcopenshell_enumeration_type_t* handle, const char* value_name);
 ifcopenshell_enumeration_type_t* ifcopenshell_enumeration_type_as_enumeration_type(ifcopenshell_enumeration_type_t* handle);
 ifcopenshell_attribute_t* ifcopenshell_attribute_new_with_name_type_of_attribute_optional(const char* name, ifcopenshell_parameter_type_t* type_of_attribute, bool optional);
@@ -184,6 +192,7 @@ ifcopenshell_enumeration_type_list_t* ifcopenshell_schema_definition_enumeration
 char* ifcopenshell_schema_definition_name(ifcopenshell_schema_definition_t* handle);
 void ifcopenshell_schema_registry_bind(ifcopenshell_schema_registry_t* handle, ifcopenshell_schema_definition_t* schema);
 ifcopenshell_schema_definition_t* ifcopenshell_schema_registry_get(ifcopenshell_schema_registry_t* handle, const char* schema_name);
+ifcopenshell_string_list_t ifcopenshell_schema_registry_names(ifcopenshell_schema_registry_t* handle);
 void ifcopenshell_schema_registry_clear(ifcopenshell_schema_registry_t* handle);
 ifcopenshell_express_base_t* ifcopenshell_base_new();
 ifcopenshell_declaration_t* ifcopenshell_base_declaration(ifcopenshell_express_base_t* handle);
@@ -277,6 +286,16 @@ ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_file_logger(ifcopens
 ifcopenshell_spf_header_t* ifcopenshell_spf_header_new_with_other(ifcopenshell_spf_header_t* other);
 void ifcopenshell_spf_header_owner_file(ifcopenshell_spf_header_t* handle, ifcopenshell_file_t* file);
 void ifcopenshell_spf_header_assign(ifcopenshell_spf_header_t* handle, ifcopenshell_spf_header_t* other);
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_description_description(ifcopenshell_spf_header_t* handle);
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_name_author(ifcopenshell_spf_header_t* handle);
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_name_organization(ifcopenshell_spf_header_t* handle);
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_schema_schema_identifiers(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_description_implementation_level(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_name_name(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_name_time_stamp(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_name_preprocessor_version(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_name_originating_system(ifcopenshell_spf_header_t* handle);
+char* ifcopenshell_spf_header_file_name_authorization(ifcopenshell_spf_header_t* handle);
 ifcopenshell_file_t* ifcopenshell_file_new_with_path(const char* path);
 ifcopenshell_file_t* ifcopenshell_file_new_with_path_with_filetype(const char* path, ifcopenshell_file_type_t filetype);
 ifcopenshell_file_t* ifcopenshell_file_new_with_path_with_filetype_readonly(const char* path, ifcopenshell_file_type_t filetype, bool readonly);

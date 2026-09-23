@@ -10,6 +10,7 @@
 #include "file_reader.h"
 #include "file_shim.h"
 #include "global_id.h"
+#include "header_shim.h"
 #include "instance_data.h"
 #include "logger.h"
 #include "schema.h"
@@ -308,6 +309,13 @@ void ifcopenshell_last_error_clear(void) {
 
 void ifcopenshell_string_free(char* value) {
     delete[] value;
+}
+
+void ifcopenshell_string_list_free(ifcopenshell_string_list_t list) {
+    for (int index = 0; index < list.count; ++index) {
+        delete[] list.items[index];
+    }
+    delete[] list.items;
 }
 
 void ifcopenshell_attribute_value_variant_free_contents(ifcopenshell_attribute_value_variant_t value) {
@@ -821,6 +829,26 @@ ifcopenshell_select_type_t* ifcopenshell_select_type_as_select_type(ifcopenshell
     }
 }
 
+ifcopenshell_string_list_t ifcopenshell_enumeration_type_enumeration_items(ifcopenshell_enumeration_type_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = handle->value->enumeration_items();
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
+    }
+}
+
 int ifcopenshell_enumeration_type_lookup_enum_offset(ifcopenshell_enumeration_type_t* handle, const char* value_name) {
     ifcopenshell_last_error_clear();
     try {
@@ -1275,6 +1303,26 @@ ifcopenshell_schema_definition_t* ifcopenshell_schema_registry_get(ifcopenshell_
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return nullptr;
+    }
+}
+
+ifcopenshell_string_list_t ifcopenshell_schema_registry_names(ifcopenshell_schema_registry_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = handle->value.names();
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
     }
 }
 
@@ -2582,6 +2630,170 @@ void ifcopenshell_spf_header_assign(ifcopenshell_spf_header_t* handle, ifcopensh
     } catch (const std::exception& exception) {
         set_last_error(exception);
         return;
+    }
+}
+
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_description_description(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = ifcopenshell::wrappergen::header_file_description_description(handle->value);
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
+    }
+}
+
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_name_author(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = ifcopenshell::wrappergen::header_file_name_author(handle->value);
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
+    }
+}
+
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_name_organization(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = ifcopenshell::wrappergen::header_file_name_organization(handle->value);
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
+    }
+}
+
+ifcopenshell_string_list_t ifcopenshell_spf_header_file_schema_schema_identifiers(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto native_result = ifcopenshell::wrappergen::header_file_schema_schema_identifiers(handle->value);
+        ifcopenshell_string_list_t c_result{};
+        c_result.count = static_cast<int>(native_result.size());
+        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;
+        for (int index = 0; index < c_result.count; ++index) {
+            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);
+        }
+        return c_result;
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return {};
+    }
+}
+
+char* ifcopenshell_spf_header_file_description_implementation_level(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_description_implementation_level(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_spf_header_file_name_name(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_name_name(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_spf_header_file_name_time_stamp(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_name_time_stamp(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_spf_header_file_name_preprocessor_version(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_name_preprocessor_version(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_spf_header_file_name_originating_system(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_name_originating_system(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
+    }
+}
+
+char* ifcopenshell_spf_header_file_name_authorization(ifcopenshell_spf_header_t* handle) {
+    ifcopenshell_last_error_clear();
+    try {
+        if (handle == nullptr) {
+            throw std::runtime_error("Null handle received");
+        }
+        auto result = ifcopenshell::wrappergen::header_file_name_authorization(handle->value);
+        return duplicate_string(result);
+    } catch (const std::exception& exception) {
+        set_last_error(exception);
+        return nullptr;
     }
 }
 

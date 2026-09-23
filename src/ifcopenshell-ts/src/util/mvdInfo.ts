@@ -210,6 +210,15 @@
 // real `.ifc` file's live header" convenience is blocked pending that native
 // accessor landing; this is not a scope-reduction of `MvdInfo`'s own logic, which is
 // ported in full.
+//
+// *** UPDATE (Phase EX-3 chunk 1, planning/ifcopenshell-ts/70-express-rules-plan.md):
+// the native accessor landed, but as flat fields directly on `spf_header`
+// (`file_description_description()`, not a nested `file_description(): { description()
+// }` object -- `header_shim.h`'s own doc comment has the full rationale), so wiring
+// `IfcFile.mvd` still needs a small adapter shimming that flat shape into `MvdHeader`
+// (`{ file_description: { description: header.file_description_description() } }`),
+// not a direct `new MvdInfo(this.header().file_description())` as originally
+// envisioned above -- still a follow-up, not done by this update. ***
 
 /** Python: `class MvdInfo.__init__`'s `header` parameter -- `ifcopenshell.file`'s own
  * `spf_header` (`ifcopenshell/file.py`'s `.header` property) in real Python usage, or

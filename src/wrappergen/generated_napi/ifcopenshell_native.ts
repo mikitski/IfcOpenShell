@@ -254,6 +254,10 @@ export class enumeration_type {
         this._handle = handle;
     }
 
+    enumeration_items(): string[] {
+        return native.enumeration_type_enumeration_items(this._handle);
+    }
+
     lookup_enum_offset(value_name: string): number {
         return native.enumeration_type_lookup_enum_offset(this._handle, value_name);
     }
@@ -430,6 +434,10 @@ export class schema_registry {
     get(schema_name: string): schema_definition {
         const result = native.schema_registry_get(this._handle, schema_name);
         return result === null ? null as unknown as schema_definition : new schema_definition(result);
+    }
+
+    names(): string[] {
+        return native.schema_registry_names(this._handle);
     }
 
     clear(): void {
@@ -872,6 +880,46 @@ export class spf_header {
 
     assign(other: spf_header): void {
         native.spf_header_assign(this._handle, other._handle);
+    }
+
+    file_description_description(): string[] {
+        return native.spf_header_file_description_description(this._handle);
+    }
+
+    file_name_author(): string[] {
+        return native.spf_header_file_name_author(this._handle);
+    }
+
+    file_name_organization(): string[] {
+        return native.spf_header_file_name_organization(this._handle);
+    }
+
+    file_schema_schema_identifiers(): string[] {
+        return native.spf_header_file_schema_schema_identifiers(this._handle);
+    }
+
+    file_description_implementation_level(): string {
+        return native.spf_header_file_description_implementation_level(this._handle);
+    }
+
+    file_name_name(): string {
+        return native.spf_header_file_name_name(this._handle);
+    }
+
+    file_name_time_stamp(): string {
+        return native.spf_header_file_name_time_stamp(this._handle);
+    }
+
+    file_name_preprocessor_version(): string {
+        return native.spf_header_file_name_preprocessor_version(this._handle);
+    }
+
+    file_name_originating_system(): string {
+        return native.spf_header_file_name_originating_system(this._handle);
+    }
+
+    file_name_authorization(): string {
+        return native.spf_header_file_name_authorization(this._handle);
     }
 
 }
