@@ -21,7 +21,7 @@ import { createAsPolyline } from "../../../src/api/alignment/createAsPolyline";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createAsPolyline (IFC4X3)", () => {
-	test("throws the already-disclosed Dim gap, with the IfcAlignment already created (real preamble ran)", () => {
+	test("succeeds end-to-end: creates the IfcAlignment with a real polyline representation", () => {
 		const file = createTestFile("IFC4X3");
 		const points = [
 			file.createEntity("IfcCartesianPoint", [0.0, 0.0]),
@@ -29,13 +29,14 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createAsPo
 		];
 		const alignmentCountBefore = file.byType("IfcAlignment").length;
 
-		expect(() => createAsPolyline(file, "P1", points)).toThrow(/has no attribute 'Dim'/);
+		const alignment = createAsPolyline(file, "P1", points);
 
 		expect(file.byType("IfcAlignment").length).toBe(alignmentCountBefore + 1);
-		expect(file.byType("IfcAlignment")[alignmentCountBefore].get("Name")).toBe("P1");
+		expect(alignment.get("Name")).toBe("P1");
+		expect(alignment.get("ObjectPlacement")).not.toBeNull();
 	});
 
-	test("never reaches addStationingReferent/aggregation: no IfcReferent or IfcRelAggregates is created", () => {
+	test("reaches addStationingReferent/aggregation: a real IfcReferent and IfcRelAggregates are created", () => {
 		const file = createTestFile("IFC4X3");
 		const points = [
 			file.createEntity("IfcCartesianPoint", [0.0, 0.0]),
@@ -44,9 +45,10 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createAsPo
 		const referentCountBefore = file.byType("IfcReferent").length;
 		const relAggregatesCountBefore = file.byType("IfcRelAggregates").length;
 
-		expect(() => createAsPolyline(file, "P2", points, 4900.0)).toThrow();
+		const alignment = createAsPolyline(file, "P2", points, 4900.0);
 
-		expect(file.byType("IfcReferent").length).toBe(referentCountBefore);
-		expect(file.byType("IfcRelAggregates").length).toBe(relAggregatesCountBefore);
+		expect(file.byType("IfcReferent").length).toBe(referentCountBefore + 1);
+		expect(file.byType("IfcRelAggregates").length).toBe(relAggregatesCountBefore + 1);
+		expect(alignment.get("Name")).toBe("P2");
 	});
 });

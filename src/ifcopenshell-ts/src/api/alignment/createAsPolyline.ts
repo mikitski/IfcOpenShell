@@ -36,24 +36,21 @@
 //
 // The task brief's underlying intuition -- that a real, EARLIER `points[0].Dim`-shaped
 // check exists before `create_as_polyline` can succeed -- IS correct, just misattributed:
-// it's `_createPolylineRepresentation.ts`'s OWN already-disclosed `points[0].get("Dim")`
-// throw (chunk 6, the SAME pre-existing `entityInstance.ts` EXPRESS DERIVED-attribute
-// gap `TODOS.md`'s `api.cogo.editSurveyPoint` entry already tracks) that actually blocks
-// every real invocation of this function -- not `_create_layout` (which is never
-// reached at all).
+// it was `_createPolylineRepresentation.ts`'s OWN `points[0].get("Dim")` read (chunk 6,
+// the SAME pre-existing `entityInstance.ts` EXPRESS DERIVED-attribute gap `TODOS.md`'s
+// `api.cogo.editSurveyPoint` entry already tracks) -- not `_create_layout` (which is
+// never reached at all).
 //
-// --- Real logic runs BEFORE hitting that already-disclosed `.Dim` blocker ---
+// --- UPDATE (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/ifc4x3.ts`):
+// that gap is now closed for real ---
 //
-// Real Python creates the `IfcAlignment` entity (a real `guid.new()`, a real
-// `IfcAlignment` in the file) BEFORE calling `_create_polyline_representation` -- so a
-// real `IfcAlignment` genuinely exists in the file, and `_createPolylineRepresentation`'s
-// own real, portable `alignment.isA("IfcAlignment")` type-check and `getAxisSubcontext`
-// call have already run for real, by the time its own `points[0].get("Dim")` throw is
-// reached. Ported everything faithfully; no proactive guard added here. The stationing
-// referent (`addStationingReferent`) and project aggregation are never reached for any
-// real `points` input (both come strictly after the `_createPolylineRepresentation`
-// call), matching `./createAsOffsetCurve.ts`'s own identical shape (real preamble logic,
-// then an already-disclosed throw from inside an already-landed dependency).
+// `calc_IfcPoint_Dim` is now ported for IFC4X3 -- `_createPolylineRepresentation`'s own
+// `points[0].get("Dim")` read now resolves to a real number instead of throwing, so
+// `createAsPolyline` now runs to completion end-to-end: the stationing referent
+// (`addStationingReferent`) and project aggregation ARE now reached for any real
+// `points` input -- re-verified directly against the real built addon, not assumed.
+// `createAsPolyline.test.ts`'s own former "throws"/"never reaches" tests are replaced
+// with real, passing success tests.
 //
 // --- Real, disclosed TS-vs-Python divergence: same empty-`IfcProject` quirk as
 //     `./createAsOffsetCurve.ts` ---
@@ -88,11 +85,6 @@ import { addStationingReferent } from "./addStationingReferent";
  * @param points Sequence of points defining the polyline.
  * @param startStation Station value at the start of the alignment.
  * @returns The new `IfcAlignment`.
- * @throws {Error} At the exact point real Python's own `points[0].Dim` read would need
- *   the (not-yet-implemented) EXPRESS DERIVED-attribute machinery -- see
- *   `_createPolylineRepresentation.ts`'s own header comment. Reached for every real
- *   `points` input (see this file's own header comment for why the never-called
- *   `_create_layout`/its own separate `Dim` check is NOT the actual blocker here).
  */
 export function createAsPolyline(
 	file: IfcFile,

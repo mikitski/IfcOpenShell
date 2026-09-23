@@ -1619,6 +1619,18 @@ complete successfully on IFC2X3** wherever they used to hit this exact `.get("Di
    correctness -- a real, disclosed, scoped-out follow-up (see each of those entries' own
    updates below), comparable in size to its own dedicated verification chunk.
 
+**UPDATE (Phase EX-2, per-schema `calc_*` DERIVE porting continues): point 1 above ("IFC4/IFC4X3:
+`.get("Dim")` still throws unconditionally") is now stale for both schemas, superseded piecemeal by
+each schema's own `calc_*`-porting chunks, not rewritten in full here -- see
+`src/express/rules/ifc4.ts`'s own chunk headers (IFC4 reaches its own full `IfcCurveDim`/
+`IfcSurfaceDim` coverage by its third/fourth chunks) and `src/util/representation.ts`'s own header
+comment (UPDATE 1 through UPDATE 4) for the exact, current, per-branch, per-schema state -- as of
+IFC4X3's own THIRD `calc_*`-porting chunk (`src/express/rules/ifc4x3.ts`), `Curve2D`/`Curve3D` are
+resolvable for every `IfcCurve` subtype on IFC4X3 except `IfcCompositeCurve` (still blocked on the
+separately-unported `calc_IfcSegment_Dim`), and `Surface2D`/`Surface3D` remain blocked on IFC4X3
+(`calc_IfcSurface_Dim` not yet ported for that schema). Point 2 (geometric-fidelity verification)
+is UNCHANGED, still a real, disclosed, scoped-out follow-up.
+
 ---
 
 ### `util.date.stringToDate` doesn't reproduce `dateutil.parser.parse(..., fuzzy=True)`'s free-text date extraction
@@ -3477,6 +3489,18 @@ as `util.representation.guessType`'s entry (gap 1) and `EntityInstance.setByInde
 above (neither yet scheduled/started). Finding B depends on an upstream `ifcopenshell-python` fix,
 outside this port's own control.
 
+**UPDATE (Phase EX-2, per-schema `calc_*` DERIVE porting, `70-express-rules-plan.md`): Finding A's
+own root cause (gap 1, the `entityInstance.ts` EXPRESS DERIVED-attribute gap) is now RESOLVED for
+IFC4 (that schema's own THIRD chunk, `src/express/rules/ifc4.ts`, ports `calc_IfcPlacement_Dim`)
+AND IFC4X3 (that schema's own THIRD chunk, `src/express/rules/ifc4x3.ts`, ports
+`calc_IfcPlacement_Dim`/`calc_IfcPoint_Dim` together) -- `addRailingRepresentation` now succeeds
+end to end on both schemas for the documented default 2-point straight path, re-verified directly
+against the real built addon (`addRailingRepresentation.ts`'s own header comment, UPDATE 2/UPDATE 4,
+has the full per-schema citation). IFC2X3 remains blocked, but by a DIFFERENT, unrelated,
+primitive-layer gap (`ShapeBuilder`'s own "Arcs are not supported for IFC2X3."), not gap 1/2 above.
+Finding B (the incomplete `except` clause) is UNCHANGED by this update -- a genuine upstream Python
+bug, not a TS-port gap, and out of Phase EX-2's own scope.
+
 ### `api.geometry.regenerateWallRepresentation` is blocked on every wall with a real
 `IfcMaterialLayerSet`, on every schema (same 2 already-tracked primitive-layer gaps as
 window/door/railing) -- plus a genuinely NEW, severe upstream-Python bug in `combine_layers`
@@ -3701,12 +3725,19 @@ means IFC4X3 was always the only schema this function could ever actually run on
 had already ported the identical formula in their own respective third chunks earlier still --
 `addSurveyPoint` now succeeds end to end, restoring real Python's own test assertions verbatim
 (`addSurveyPoint.test.ts`'s own updated header comment has the full citation). Finding 2
-(`editSurveyPoint`'s `IfcCartesianPoint.Dim`) remains a live gap for IFC4X3 specifically ONLY --
+(`editSurveyPoint`'s `IfcCartesianPoint.Dim`) remained a live gap for IFC4X3 specifically ONLY --
 `calc_IfcCartesianPoint_Dim` was ported for IFC2X3/IFC4 in each schema's own first chunk (already
 resolved there), but ADD2 consolidated it into a differently-named `calc_IfcPoint_Dim` at an
-abstract supertype level, genuinely not yet ported by any chunk (`rules/ifc4x3.ts`'s own header
-comment has the full writeup) -- `editSurveyPoint.test.ts`'s own IFC4X3 branch is unaffected by
-this update and still asserts the disclosed throw.
+abstract supertype level, genuinely not yet ported by any chunk at that point (`rules/ifc4x3.ts`'s
+own header comment has the full writeup).
+
+**UPDATE (Phase EX-2, IFC4X3's own THIRD `calc_*`-porting chunk, `src/express/rules/ifc4x3.ts`):
+finding 2 is now RESOLVED for real too.** That chunk ports `calc_IfcPoint_Dim` for IFC4X3 --
+`editSurveyPoint`'s own `Items[0].Dim` read now resolves correctly on all 3 schemas, re-verified
+directly against the real built addon, not assumed. `editSurveyPoint.test.ts`'s own former
+schema-conditional "still BLOCKED for IFC4X3" branch is removed; a single, unconditional test now
+covers all 3 schemas. This whole entry (`api.cogo.addSurveyPoint`/`editSurveyPoint`) is now fully
+resolved -- both functions succeed end to end on every schema they can run on.
 
 ---
 

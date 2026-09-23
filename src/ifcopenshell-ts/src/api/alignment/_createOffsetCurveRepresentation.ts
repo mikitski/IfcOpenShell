@@ -11,10 +11,10 @@
 // `__init__.py`'s own `__all__`) -- NOT re-exported from `./index.ts`'s public barrel.
 //
 // --- WAS independently blocked by the pre-existing `entityInstance.ts` EXPRESS
-// DERIVED-attribute gap (`.get()` had no DERIVED-category fallback at all); NOW
+// DERIVED-attribute gap (`.get()` had no DERIVED-category fallback at all); NOW FULLY
 // GENUINELY UNBLOCKED for IFC4X3 (the only schema `IfcOffsetCurveByDistances`/
-// `IfcPointByDistanceExpression`/`IfcAlignment` even exist on), but with a real,
-// disclosed LATENT CORRECTNESS gap in its place, not a crash ---
+// `IfcPointByDistanceExpression`/`IfcAlignment` even exist on), including the branch
+// selection itself ---
 //
 // Line 49, `basis_curve.Dim == 3` (`basis_curve` is `offsets[0].BasisCurve`, schema-
 // typed `IfcCurve`). `IfcCurve.Dim` was the SAME real EXPRESS DERIVED attribute
@@ -24,27 +24,24 @@
 //
 // **UPDATE (Phase EX-2, IFC4X3's own SECOND `calc_*`-porting chunk,
 // `src/express/rules/ifc4x3.ts`): `calc_IfcCurve_Dim` is now ported for IFC4X3, so
-// `basisCurve.get("Dim")` no longer throws at all.** But this module's own realistic
-// `basisCurve` values (a plain `IfcLine`/`IfcPolyline`, per this file's own test
-// fixtures and every real caller) bottom out on `IfcCurveDim`'s `Pnt.Dim`/
-// `Points[0].Dim` branches, which read a plain `IfcCartesianPoint`'s own `.Dim` --
-// STILL genuinely unported for IFC4X3 (ADD2 consolidated it into an abstract-
-// supertype `calc_IfcPoint_Dim`, not one of either of this port's own 2 IFC4X3
-// chunks so far -- `rules/ifc4x3.ts`'s own header comment has the full writeup).
-// `expressGetAttr`'s own try/catch (`runtimeShim.ts`) silently swallows that
-// still-missing dependency's own throw and substitutes `runtimeShim.INDETERMINATE`
-// -- so `basisCurve.get("Dim")` resolves to that sentinel, `INDETERMINATE === 3` is
-// `false` (a `Symbol` is never `===` a number), and this function now ALWAYS takes
-// the 2D (`else`) branch below, REGARDLESS of the real curve's actual
-// dimensionality -- confirmed empirically against the real built addon (a 3D
-// `IfcLine` basis curve still produces a `"Curve2D"` representation). This is a
-// real, disclosed, CURRENT-STATE latent correctness gap (silently wrong branch, not
-// a crash) -- not fixed here (fixing it means porting `calc_IfcPoint_Dim` for
-// IFC4X3, a separate, future `calc_*`-porting chunk's own scope, not this file's)
-// -- pinned by a dedicated regression test asserting today's real, empirically-
-// confirmed (if structurally wrong) `"Curve2D"` outcome, matching this project's
-// "assert what this port actually does today, not what it will do once more chunks
-// land" precedent.
+// `basisCurve.get("Dim")` no longer throws at all.** At that point, this module's own
+// realistic `basisCurve` values (a plain `IfcLine`/`IfcPolyline`) bottomed out on
+// `IfcCurveDim`'s `Pnt.Dim`/`Points[0].Dim` branches, which read a plain
+// `IfcCartesianPoint`'s own `.Dim` -- STILL genuinely unported at that time (ADD2
+// consolidated it into an abstract-supertype `calc_IfcPoint_Dim`) -- so
+// `basisCurve.get("Dim")` resolved to `runtimeShim.INDETERMINATE`, and this function
+// ALWAYS took the 2D (`else`) branch below, REGARDLESS of the real curve's actual
+// dimensionality -- a disclosed, then-current-state latent correctness gap.
+//
+// **UPDATE AGAIN (Phase EX-2, IFC4X3's own THIRD chunk, `src/express/rules/
+// ifc4x3.ts`): that gap is now closed for real.** `calc_IfcPoint_Dim` is now ported
+// -- `basisCurve.get("Dim")` now resolves to the REAL dimensionality of the basis
+// curve, so this function now correctly takes the 3D branch for a 3D basis curve and
+// the 2D branch for a 2D one -- re-verified directly against the real built addon
+// (a 3D `IfcLine` basis curve now correctly produces a `"Curve3D"` representation),
+// not assumed. `_createOffsetCurveRepresentation.test.ts`'s own former "always 2D"
+// regression test is replaced with 2 real, passing tests (one 2D, one 3D basis
+// curve) proving correct branch selection.
 //
 // Ported everything faithfully either way -- both type checks (the
 // `alignment`/`offsets` loop) and the branch below are real, fully portable,
@@ -64,11 +61,6 @@ import { getAxisSubcontext } from "./getAxisSubcontext";
  * @param offsets The `IfcPointByDistanceExpression`s defining the offset curve.
  * @throws {TypeError} If `alignment` is not an `IfcAlignment`, or any `offsets`
  *   element is not an `IfcPointByDistanceExpression`.
- * @remarks See this file's own header comment: `basisCurve.get("Dim")` currently
- *   always resolves to `runtimeShim.INDETERMINATE` for a realistic basis curve on
- *   IFC4X3 (a still-unported transitive dependency), so this function currently
- *   ALWAYS takes the 2D branch below, regardless of the real curve's dimensionality
- *   -- a disclosed, current-state latent correctness gap, not a crash.
  */
 export function _createOffsetCurveRepresentation(
 	file: IfcFile,
@@ -93,11 +85,6 @@ export function _createOffsetCurveRepresentation(
 
 	let placement: EntityInstance;
 	let representationType: string;
-	// *** See this file's own header comment: `basisCurve.get("Dim")` no longer
-	// throws (Phase EX-2, IFC4X3's own second chunk), but for every realistic basis
-	// curve today it resolves to `runtimeShim.INDETERMINATE`, not a real number, so
-	// this always takes the 2D (`else`) branch below regardless of the real curve's
-	// dimensionality -- a disclosed latent correctness gap, not a crash. ***
 	if ((basisCurve.get("Dim") as number) === 3) {
 		placement = file.createEntity(
 			"IfcLocalPlacement",

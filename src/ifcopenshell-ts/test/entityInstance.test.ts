@@ -177,38 +177,32 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 	// that chunk ports IFC4X3_ADD2's own first 15 `calc_*` functions, but
 	// `calc_IfcSIUnit_Dimensions` is not one of them, so this still throws exactly as
 	// before -- re-verified directly against the real built addon, not assumed.
-	test.skipIf(schema !== "IFC4X3")(
-		".get() throws for a DERIVED attribute on a schema with no ported EXPRESS calc_* rules for this attribute yet",
-		() => {
-			// `calc_IfcSIUnit_Dimensions` is not one of the 15 functions Phase EX-2's IFC4X3
-			// first chunk ported (`rules/ifc4x3.ts`'s own header comment) -- `dispatch.ts`'s
-			// per-schema registry has no entry for this specific attribute, so this still
-			// throws exactly as it always has.
-			const file = newFile();
-			const unit = file.createEntity("IfcSIUnit");
-			expect(() => unit.get("Dimensions")).toThrow();
-		},
-	);
-
-	test.skipIf(schema === "IFC4X3")(
-		".get() resolves a DERIVED attribute via ported EXPRESS calc_* dispatch (IFC2X3/IFC4, Phase EX-2)",
-		() => {
-			// Leading `null` placeholder for the derived `Dimensions` slot -- see
-			// `getInfo()`'s own interleaved-DERIVE-attribute test below for the full
-			// citation. `calc_IfcSIUnit_Dimensions("METRE")` ->
-			// `IfcDimensionsForSiUnit("METRE")` -> `IfcDimensionalExponents(1, 0, 0,
-			// 0, 0, 0, 0)` (`src/express/rules/ifc2x3.ts`'s/`ifc4.ts`'s own chunk-5/
-			// chunk-4 header comments -- METRE's own branch is one of the 29
-			// byte-identical branches between the two schemas' real tables, see
-			// `ifc4.ts`'s own fourth-chunk header comment for the one branch, FARAD,
-			// that actually differs).
-			const file = newFile();
-			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
-			const dimensions = unit.get("Dimensions") as EntityInstance;
-			expect(dimensions.isA()).toBe("IfcDimensionalExponents");
-			expect(dimensions.get("LengthExponent")).toBe(1);
-		},
-	);
+	//
+	// **Updated AGAIN by Phase EX-2's IFC4X3 THIRD chunk** (`src/express/rules/
+	// ifc4x3.ts`): that chunk ports exactly `calc_IfcSIUnit_Dimensions` for IFC4X3 too
+	// (one of its own 15 assigned functions) -- `.get("Dimensions")` now genuinely
+	// resolves for IFC4X3 as well, so there is no remaining schema left to demonstrate
+	// a genuine dispatch MISS with via THIS specific attribute. The dedicated
+	// "still throws" test below is removed (not skipped -- there is no schema left for
+	// it to exercise); the "resolves" test right below now runs unconditionally across
+	// every `AVAILABLE_SCHEMAS` entry, re-verified directly against the real built
+	// addon, not assumed.
+	test(".get() resolves a DERIVED attribute via ported EXPRESS calc_* dispatch (IFC2X3/IFC4/IFC4X3, Phase EX-2 complete for this attribute)", () => {
+		// Leading `null` placeholder for the derived `Dimensions` slot -- see
+		// `getInfo()`'s own interleaved-DERIVE-attribute test below for the full
+		// citation. `calc_IfcSIUnit_Dimensions("METRE")` ->
+		// `IfcDimensionsForSiUnit("METRE")` -> `IfcDimensionalExponents(1, 0, 0,
+		// 0, 0, 0, 0)` (`src/express/rules/ifc2x3.ts`'s/`ifc4.ts`'s own chunk-5/
+		// chunk-4 header comments -- METRE's own branch is one of the 29
+		// byte-identical branches between the two schemas' real tables, see
+		// `ifc4.ts`'s own fourth-chunk header comment for the one branch, FARAD,
+		// that actually differs).
+		const file = newFile();
+		const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
+		const dimensions = unit.get("Dimensions") as EntityInstance;
+		expect(dimensions.isA()).toBe("IfcDimensionalExponents");
+		expect(dimensions.get("LengthExponent")).toBe(1);
+	});
 
 	test("getByIndex()/setByIndex() index-based access", () => {
 		const file = newFile();
