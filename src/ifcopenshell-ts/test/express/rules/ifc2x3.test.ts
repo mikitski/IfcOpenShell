@@ -1,7 +1,7 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// Original, hand-rolled coverage for Phase EX-2's first THREE chunks
-// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): 44 of IFC2X3's 55
+// Original, hand-rolled coverage for Phase EX-2's first FOUR chunks
+// (planning/ifcopenshell-ts/70-express-rules-plan.md §4): 53 of IFC2X3's 55
 // `calc_*` DERIVE functions (`src/express/rules/ifc2x3.ts`) and their wiring into
 // `EntityInstance`'s attribute-read path (`entityInstance.ts`'s `.get()`). Real Python
 // has no per-function unit test for individual `calc_*` formulas -- verified directly
@@ -46,12 +46,32 @@
 // in, so it is swapped once more, this time for `IfcOrientedEdge.EdgeStart`
 // (`IFC2X3.py` line 5611, `calc_IfcOrientedEdge_EdgeStart`), confirmed still
 // genuinely unported.
+//
+// Chunk 4 (fourth `describe` block, "Phase EX-2, chunk 4"): the LAST 9 real `calc_*`
+// functions this chunk's own dispatch identified as still unregistered after chunks
+// 1-3's own 44 -- see `../../src/express/rules/ifc2x3.ts`'s own chunk-4 header
+// comment for the full citations. **This chunk does NOT bring IFC2X3 to 55/55**:
+// `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` remain genuinely
+// unported (both need a defined-type-construction primitive this port doesn't have
+// yet -- see that same header comment), so the running total after this chunk is
+// 53/55, not 55/55 as this chunk's own dispatching task brief assumed. One genuine,
+// real, verbatim Python bug is newly disclosed and pinned here (`IfcAddToBeginOfList`
+// unconditionally crashes whenever its scalar argument is set -- confirmed both by
+// reading `IFC2X3.py` directly AND by live execution against a real installed
+// `ifcopenshell` 0.8.4 interpreter), affecting all 3 of this chunk's own
+// `*Varying_Varying*` functions. This chunk updates the same PRE-EXISTING "an
+// unported DERIVE-shaped attribute still throws" test a THIRD time -- chunk 4 ports
+// exactly the `IfcOrientedEdge.EdgeStart` example chunk 3 swapped in, so it is
+// swapped once more, this time for `IfcDerivedUnit.Dimensions` (one of the 2
+// functions confirmed still genuinely unported even after this chunk, per this
+// chunk's own finding above).
 
 import { describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../../src/entityInstance";
 import * as ifc2x3 from "../../../src/express/rules/ifc2x3";
 import { INDETERMINATE } from "../../../src/express/runtimeShim";
 import type { IfcFile } from "../../../src/file";
+import * as guid from "../../../src/guid";
 import { createTestFile } from "../../bootstrap";
 
 function ratios(direction: unknown): number[] {
@@ -1000,6 +1020,371 @@ describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 3)", () =>
 	});
 });
 
+describe("express/rules/ifc2x3 -- calc_* functions (Phase EX-2, chunk 4)", () => {
+	// --- calc_IfcOrientedEdge_EdgeStart / calc_IfcOrientedEdge_EdgeEnd (+ IfcBooleanChoose) ---
+	describe("calc_IfcOrientedEdge_EdgeStart / calc_IfcOrientedEdge_EdgeEnd", () => {
+		// Fixture note (same shape as chunk 3's own `IfcGeometricRepresentationSubContext`
+		// fixture note above): `IfcOrientedEdge`'s real, native attribute order
+		// (`declaration().as_entity().all_attributes()`, confirmed empirically, not
+		// assumed from `generated/ifc2x3.d.ts`) is `[EdgeStart, EdgeEnd, EdgeElement,
+		// Orientation]` -- the FULL inherited list, including the 2 attributes this
+		// subtype overrides as DERIVE (`EdgeStart`/`EdgeEnd`, inherited positionally
+		// from `IfcEdge`) -- `createEntity` needs all 4 positional slots, not just the
+		// 2 genuinely-storable ones `generated/ifc2x3.d.ts` documents (`EdgeElement`,
+		// `Orientation`).
+		function buildOrientedEdge(file: IfcFile, orientation: boolean | null) {
+			const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const v0 = file.createEntity("IfcVertexPoint", p0);
+			const v1 = file.createEntity("IfcVertexPoint", p1);
+			const edge = file.createEntity("IfcEdge", v0, v1);
+			const orientedEdge = file.createEntity("IfcOrientedEdge", null, null, edge, orientation);
+			return { v0, v1, orientedEdge };
+		}
+
+		// Python: `IfcBooleanChoose(orientation, EdgeElement.EdgeStart, EdgeElement.EdgeEnd)`.
+		// Orientation=true -> `if b:` is true -> choice1 (EdgeElement.EdgeStart = v0).
+		test("Orientation=true -> EdgeStart is EdgeElement.EdgeStart", () => {
+			const file = createTestFile("IFC2X3");
+			const { v0, orientedEdge } = buildOrientedEdge(file, true);
+			const result = ifc2x3.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v0 as EntityInstance).id());
+		});
+
+		// Orientation=false -> `if b:` is false -> choice2 (EdgeElement.EdgeEnd = v1).
+		test("Orientation=false -> EdgeStart is EdgeElement.EdgeEnd", () => {
+			const file = createTestFile("IFC2X3");
+			const { v1, orientedEdge } = buildOrientedEdge(file, false);
+			const result = ifc2x3.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		// `calc_IfcOrientedEdge_EdgeEnd` swaps choice1/choice2: Orientation=true ->
+		// EdgeElement.EdgeEnd (v1); Orientation=false -> EdgeElement.EdgeStart (v0).
+		test("Orientation=true -> EdgeEnd is EdgeElement.EdgeEnd", () => {
+			const file = createTestFile("IFC2X3");
+			const { v1, orientedEdge } = buildOrientedEdge(file, true);
+			const result = ifc2x3.calc_IfcOrientedEdge_EdgeEnd(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		test("Orientation=false -> EdgeEnd is EdgeElement.EdgeStart", () => {
+			const file = createTestFile("IFC2X3");
+			const { v0, orientedEdge } = buildOrientedEdge(file, false);
+			const result = ifc2x3.calc_IfcOrientedEdge_EdgeEnd(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v0 as EntityInstance).id());
+		});
+
+		// `IfcBooleanChoose`'s own disclosed careful-truthiness handling (see
+		// `ifc2x3.ts`'s own header comment): `Orientation` unset (`$`) resolves to
+		// `runtimeShim.INDETERMINATE`, which real Python's own `indeterminate_type.
+		// __bool__` treats as falsy -- confirmed empirically against a real installed
+		// `ifcopenshell` 0.8.4 interpreter (an `IfcOrientedEdge` with `Orientation`
+		// left unset resolves `.EdgeStart` to `EdgeElement.EdgeEnd`, the `else`
+		// branch) -- so this port must NOT naively do `if (b)` (a JS `Symbol` is
+		// always truthy).
+		test("Orientation unset (INDETERMINATE) -> treated as falsy, matching real Python's indeterminate_type.__bool__", () => {
+			const file = createTestFile("IFC2X3");
+			const { v1, orientedEdge } = buildOrientedEdge(file, null);
+			const result = ifc2x3.calc_IfcOrientedEdge_EdgeStart(orientedEdge as EntityInstance) as EntityInstance;
+			expect(result.id()).toBe((v1 as EntityInstance).id());
+		});
+
+		// End-to-end: read `.EdgeStart` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: orientedEdge.EdgeStart resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const { v0, orientedEdge } = buildOrientedEdge(file, true);
+			const result = (orientedEdge as unknown as { EdgeStart: EntityInstance }).EdgeStart;
+			expect(result.id()).toBe((v0 as EntityInstance).id());
+		});
+	});
+
+	// --- calc_IfcRationalBezierCurve_Weights (reuses chunk 1's ifcListToArray) ---
+	describe("calc_IfcRationalBezierCurve_Weights", () => {
+		// Python: `IfcListToArray(WeightsData, 0, UpperIndexOnControlPoints)`. Reuses
+		// this file's own chunk-1 `ifcListToArray` UNCHANGED -- it therefore also
+		// reproduces chunk 1's own already-disclosed bug #3 (the `low === 0`
+		// left-rotation) for this new call site: for 4 weights [1,2,3,4], the real
+		// (buggy) result is [2,3,4,1], NOT an identity copy -- confirmed empirically
+		// against a real installed `ifcopenshell` 0.8.4 interpreter (a live
+		// 4-control-point `IfcRationalBezierCurve` with `WeightsData=[1,2,3,4]`
+		// resolves `.Weights` to exactly `[2.0, 3.0, 4.0, 1.0]`).
+		test("4 weights -> cyclically rotated, NOT an identity copy (chunk 1's disclosed bug #3, reused here)", () => {
+			const file = createTestFile("IFC2X3");
+			const points = [0, 1, 2, 3].map((i) => file.createEntity("IfcCartesianPoint", [Number(i), 0.0]));
+			const bezier = file.createEntity(
+				"IfcRationalBezierCurve",
+				3,
+				points,
+				"UNSPECIFIED",
+				false,
+				false,
+				[1.0, 2.0, 3.0, 4.0],
+			);
+			const weights = ifc2x3.calc_IfcRationalBezierCurve_Weights(bezier as EntityInstance);
+			expect(weights).toEqual([2.0, 3.0, 4.0, 1.0]);
+		});
+
+		// End-to-end: read `.Weights` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: bezier.Weights resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const points = [0, 1, 2].map((i) => file.createEntity("IfcCartesianPoint", [Number(i), 0.0]));
+			const bezier = file.createEntity(
+				"IfcRationalBezierCurve",
+				2,
+				points,
+				"UNSPECIFIED",
+				false,
+				false,
+				[10.0, 20.0, 30.0],
+			);
+			expect((bezier as unknown as { Weights: number[] }).Weights).toEqual([20.0, 30.0, 10.0]);
+		});
+	});
+
+	// --- calc_IfcRevolvedAreaSolid_AxisLine / calc_IfcSurfaceOfRevolution_AxisLine (+ IfcLine) ---
+	describe("calc_IfcRevolvedAreaSolid_AxisLine / calc_IfcSurfaceOfRevolution_AxisLine", () => {
+		// Python: `IfcLine(Pnt=Axis.Location, Dir=IfcVector(Orientation=Axis.Z,
+		// Magnitude=1.0))`. `Axis.Z` is `IfcAxis1Placement`'s own DERIVE attribute
+		// (`calc_IfcAxis1Placement_Z`, chunk 1): `nvl(IfcNormalise(Axis), default)` --
+		// exercised here with an UNNORMALIZED `Axis` ([0,0,2]) to confirm the full
+		// chain normalizes it (-> [0,0,1]), not just passes it through.
+		test("RevolvedAreaSolid: AxisLine.Pnt is Axis.Location, AxisLine.Dir is a unit vector along (normalised) Axis.Z", () => {
+			const file = createTestFile("IFC2X3");
+			const profile = file.createEntity("IfcRectangleProfileDef", "AREA", null, null, 2.0, 3.0);
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [1.0, 2.0, 3.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 2.0]);
+			const axis = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolvedSolid = file.createEntity("IfcRevolvedAreaSolid", profile, position, axis, Math.PI / 2);
+			const axisLine = ifc2x3.calc_IfcRevolvedAreaSolid_AxisLine(revolvedSolid as EntityInstance) as EntityInstance;
+			const pnt = (axisLine as unknown as { Pnt: EntityInstance }).Pnt;
+			expect(pnt.id()).toBe((axisLocation as EntityInstance).id());
+			const dir = (axisLine as unknown as { Dir: EntityInstance }).Dir;
+			expect((dir as unknown as { Magnitude: number }).Magnitude).toBe(1.0);
+			closeArray(ratios((dir as unknown as { Orientation: unknown }).Orientation), [0, 0, 1]);
+		});
+
+		// Same shape as `calc_IfcRevolvedAreaSolid_AxisLine`, delegating to
+		// `AxisPosition` instead of `Axis`.
+		test("SurfaceOfRevolution: AxisLine.Pnt is AxisPosition.Location, AxisLine.Dir is a unit vector along (normalised) AxisPosition.Z", () => {
+			const file = createTestFile("IFC2X3");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [4.0, 5.0, 6.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 3.0]);
+			const axisPosition = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolutionSurface = file.createEntity("IfcSurfaceOfRevolution", null, position, axisPosition);
+			const axisLine = ifc2x3.calc_IfcSurfaceOfRevolution_AxisLine(
+				revolutionSurface as EntityInstance,
+			) as EntityInstance;
+			const pnt = (axisLine as unknown as { Pnt: EntityInstance }).Pnt;
+			expect(pnt.id()).toBe((axisLocation as EntityInstance).id());
+			const dir = (axisLine as unknown as { Dir: EntityInstance }).Dir;
+			expect((dir as unknown as { Magnitude: number }).Magnitude).toBe(1.0);
+			closeArray(ratios((dir as unknown as { Orientation: unknown }).Orientation), [0, 0, 1]);
+		});
+
+		// End-to-end: read `.AxisLine` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: revolvedSolid.AxisLine resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const profile = file.createEntity("IfcRectangleProfileDef", "AREA", null, null, 2.0, 3.0);
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [1.0, 2.0, 3.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 1.0]);
+			const axis = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolvedSolid = file.createEntity("IfcRevolvedAreaSolid", profile, position, axis, Math.PI / 2);
+			const axisLine = (revolvedSolid as unknown as { AxisLine: EntityInstance }).AxisLine;
+			expect(axisLine.isA()).toBe("IfcLine");
+			expect((axisLine as unknown as { Pnt: EntityInstance }).Pnt.id()).toBe((axisLocation as EntityInstance).id());
+		});
+	});
+
+	// --- calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis ---
+	describe("calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis", () => {
+		// Python: `IfcVector(Orientation=ExtrudedDirection, Magnitude=Depth)` -- a
+		// direct, unnormalized pass-through (unlike the `AxisLine` functions above,
+		// this one does NOT normalise `ExtrudedDirection` first).
+		test("ExtrusionAxis.Orientation is ExtrudedDirection, .Magnitude is Depth", () => {
+			const file = createTestFile("IFC2X3");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const extrudedDirection = file.createEntity("IfcDirection", [1.0, 0.0, 0.0]);
+			const surface = file.createEntity("IfcSurfaceOfLinearExtrusion", null, position, extrudedDirection, 5.0);
+			const vec = ifc2x3.calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis(surface as EntityInstance) as EntityInstance;
+			expect((vec as unknown as { Orientation: EntityInstance }).Orientation.id()).toBe(
+				(extrudedDirection as EntityInstance).id(),
+			);
+			expect((vec as unknown as { Magnitude: number }).Magnitude).toBe(5.0);
+		});
+
+		// End-to-end: read `.ExtrusionAxis` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: surface.ExtrusionAxis resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const extrudedDirection = file.createEntity("IfcDirection", [1.0, 0.0, 0.0]);
+			const surface = file.createEntity("IfcSurfaceOfLinearExtrusion", null, position, extrudedDirection, 5.0);
+			const vec = (surface as unknown as { ExtrusionAxis: EntityInstance }).ExtrusionAxis;
+			expect(vec.isA()).toBe("IfcVector");
+			expect((vec as unknown as { Magnitude: number }).Magnitude).toBe(5.0);
+		});
+	});
+
+	// --- calc_IfcStructuralLinearActionVarying_VaryingAppliedLoads / calc_IfcStructuralPlanarActionVarying_VaryingAppliedLoads / calc_IfcStructuralSurfaceMemberVarying_VaryingThickness (+ IfcAddToBeginOfList) ---
+	describe("calc_IfcStructuralLinearActionVarying_VaryingAppliedLoads / calc_IfcStructuralPlanarActionVarying_VaryingAppliedLoads / calc_IfcStructuralSurfaceMemberVarying_VaryingThickness", () => {
+		function buildLinearActionVarying(
+			file: IfcFile,
+			appliedLoad: EntityInstance | null,
+			subsequentAppliedLoads: EntityInstance[],
+		) {
+			return file.createEntity(
+				"IfcStructuralLinearActionVarying",
+				guid.new(),
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				appliedLoad,
+				"GLOBAL_COORDS",
+				false,
+				null,
+				"TRUE_LENGTH",
+				null,
+				subsequentAppliedLoads,
+			);
+		}
+
+		function buildPlanarActionVarying(
+			file: IfcFile,
+			appliedLoad: EntityInstance | null,
+			subsequentAppliedLoads: EntityInstance[],
+		) {
+			return file.createEntity(
+				"IfcStructuralPlanarActionVarying",
+				guid.new(),
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				appliedLoad,
+				"GLOBAL_COORDS",
+				false,
+				null,
+				"TRUE_LENGTH",
+				null,
+				subsequentAppliedLoads,
+			);
+		}
+
+		function buildSurfaceMemberVarying(file: IfcFile, thickness: number | null, subsequentThickness: number[]) {
+			return file.createEntity(
+				"IfcStructuralSurfaceMemberVarying",
+				guid.new(),
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				"SHELL",
+				thickness,
+				subsequentThickness,
+				null,
+			);
+		}
+
+		// Python: `IfcAddToBeginOfList(AppliedLoad, SubsequentAppliedLoads)`.
+		// `AppliedLoad` unset -> `not exists(ascalar)` -> `result = alist`, real
+		// Python's own only actually-reachable branch (see `ifc2x3.ts`'s own header
+		// comment, disclosed bug #4) -- confirmed empirically against a real
+		// installed `ifcopenshell` 0.8.4 interpreter.
+		test("IfcStructuralLinearActionVarying: AppliedLoad unset -> SubsequentAppliedLoads returned unchanged", () => {
+			const file = createTestFile("IFC2X3");
+			const load1 = file.createEntity("IfcStructuralLoadSingleForce", null, 1.0, null, null, null, null, null);
+			const action = buildLinearActionVarying(file, null, [load1 as EntityInstance]);
+			const result = ifc2x3.calc_IfcStructuralLinearActionVarying_VaryingAppliedLoads(
+				action as EntityInstance,
+			) as EntityInstance[];
+			expect(result.map((r) => r.id())).toEqual([(load1 as EntityInstance).id()]);
+		});
+
+		// **Disclosed bug #4 pin**: `AppliedLoad` SET (the normal, expected case, since
+		// it's a mandatory attribute in the real schema) -- real Python's own
+		// `IfcAddToBeginOfList` unconditionally raises `TypeError: can only
+		// concatenate list (not "entity_instance") to list` here, confirmed live
+		// against a real installed `ifcopenshell` 0.8.4 interpreter. Ported as an
+		// equivalent thrown error.
+		test("disclosed bug #4: IfcStructuralLinearActionVarying, AppliedLoad set -> throws (real Python crashes here too)", () => {
+			const file = createTestFile("IFC2X3");
+			const load1 = file.createEntity("IfcStructuralLoadSingleForce", null, 1.0, null, null, null, null, null);
+			const load2 = file.createEntity("IfcStructuralLoadSingleForce", null, 2.0, null, null, null, null, null);
+			const action = buildLinearActionVarying(file, load1 as EntityInstance, [load2 as EntityInstance]);
+			expect(() => ifc2x3.calc_IfcStructuralLinearActionVarying_VaryingAppliedLoads(action as EntityInstance)).toThrow(
+				/can only concatenate list/,
+			);
+		});
+
+		// Same shape, `IfcStructuralPlanarActionVarying` (identical formula body).
+		test("IfcStructuralPlanarActionVarying: AppliedLoad unset -> SubsequentAppliedLoads returned unchanged", () => {
+			const file = createTestFile("IFC2X3");
+			const load1 = file.createEntity("IfcStructuralLoadSingleForce", null, 1.0, null, null, null, null, null);
+			const action = buildPlanarActionVarying(file, null, [load1 as EntityInstance]);
+			const result = ifc2x3.calc_IfcStructuralPlanarActionVarying_VaryingAppliedLoads(
+				action as EntityInstance,
+			) as EntityInstance[];
+			expect(result.map((r) => r.id())).toEqual([(load1 as EntityInstance).id()]);
+		});
+
+		test("disclosed bug #4: IfcStructuralPlanarActionVarying, AppliedLoad set -> throws (real Python crashes here too)", () => {
+			const file = createTestFile("IFC2X3");
+			const load1 = file.createEntity("IfcStructuralLoadSingleForce", null, 1.0, null, null, null, null, null);
+			const action = buildPlanarActionVarying(file, load1 as EntityInstance, []);
+			expect(() => ifc2x3.calc_IfcStructuralPlanarActionVarying_VaryingAppliedLoads(action as EntityInstance)).toThrow(
+				/can only concatenate list/,
+			);
+		});
+
+		// `IfcStructuralSurfaceMemberVarying.Thickness` is a scalar `number`, not an
+		// entity -- confirms disclosed bug #4 also fires for a `float` scalar (real
+		// Python: `TypeError: can only concatenate list (not "float") to list"),
+		// confirmed live against a real installed `ifcopenshell` 0.8.4 interpreter.
+		test("IfcStructuralSurfaceMemberVarying: Thickness unset -> SubsequentThickness returned unchanged", () => {
+			const file = createTestFile("IFC2X3");
+			const member = buildSurfaceMemberVarying(file, null, [1.0, 2.0]);
+			const result = ifc2x3.calc_IfcStructuralSurfaceMemberVarying_VaryingThickness(member as EntityInstance);
+			expect(result).toEqual([1.0, 2.0]);
+		});
+
+		test("disclosed bug #4: IfcStructuralSurfaceMemberVarying, Thickness set -> throws (real Python crashes here too, with a float scalar)", () => {
+			const file = createTestFile("IFC2X3");
+			const member = buildSurfaceMemberVarying(file, 5.0, [1.0, 2.0]);
+			expect(() => ifc2x3.calc_IfcStructuralSurfaceMemberVarying_VaryingThickness(member as EntityInstance)).toThrow(
+				/can only concatenate list/,
+			);
+		});
+
+		// End-to-end: read `.VaryingThickness` through the normal `EntityInstance`
+		// attribute-read path (the working, "Thickness unset" branch, so the
+		// end-to-end test itself doesn't throw).
+		test("end-to-end: member.VaryingThickness resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC2X3");
+			const member = buildSurfaceMemberVarying(file, null, [3.0, 4.0]);
+			expect((member as unknown as { VaryingThickness: number[] }).VaryingThickness).toEqual([3.0, 4.0]);
+		});
+	});
+});
+
 describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 	test("a genuinely nonexistent attribute still throws the same error as before this chunk", () => {
 		const file: IfcFile = createTestFile("IFC2X3");
@@ -1010,23 +1395,25 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 	});
 
 	test("an unported DERIVE-shaped attribute still throws (purely additive capability)", () => {
-		// `IfcOrientedEdge.EdgeStart` (`calc_IfcOrientedEdge_EdgeStart`, `IFC2X3.py`
-		// line 5611) is a real DERIVE attribute in the same broad family as the
-		// functions ported so far, but genuinely untouched by chunks 1-3 -- confirms
-		// dispatch stays additive, not a general claim that every DERIVE-shaped
-		// attribute now resolves. (`IfcCompositeCurve.NSegments` was this test's
-		// example in chunk 2, but chunk 3 ports exactly that function as a necessary,
-		// disclosed extra dependency of `calc_IfcCompositeCurve_ClosedCurve` -- see
-		// `../../../src/express/rules/ifc2x3.ts`'s own chunk-3 header comment for why
-		// this test was updated instead of silently starting to assert the opposite
-		// of what it's named for.)
+		// `IfcDerivedUnit.Dimensions` (`calc_IfcDerivedUnit_Dimensions`, `IFC2X3.py`
+		// line 4741) is a real DERIVE attribute genuinely untouched by chunks 1-4 --
+		// it needs `IfcDeriveDimensionalExponents`, which constructs/mutates an
+		// `IfcDimensionalExponents` DEFINED TYPE value, a primitive this port doesn't
+		// have yet (see `../../../src/express/rules/ifc2x3.ts`'s own chunk-4 header
+		// comment for the full citation) -- confirms dispatch stays additive, not a
+		// general claim that every DERIVE-shaped attribute now resolves.
+		// (`IfcOrientedEdge.EdgeStart` was this test's example in chunk 3, but chunk 4
+		// ports exactly that function -- see this file's own top-of-file header
+		// comment for why this test was updated instead of silently starting to
+		// assert the opposite of what it's named for. Chunk 4 is also the point at
+		// which this test's example had to change kind, not just name: after chunk 4,
+		// only 2 of IFC2X3's 55 real `calc_*` functions remain unported at all, both
+		// for this same defined-type-construction reason, so this is now the only
+		// kind of example left to use.)
 		const file: IfcFile = createTestFile("IFC2X3");
-		const p0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
-		const p1 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
-		const v0 = file.createEntity("IfcVertexPoint", p0);
-		const v1 = file.createEntity("IfcVertexPoint", p1);
-		const edge = file.createEntity("IfcEdge", v0, v1);
-		const orientedEdge = file.createEntity("IfcOrientedEdge", edge, true);
-		expect(() => (orientedEdge as unknown as { EdgeStart: unknown }).EdgeStart).toThrow(/has no attribute 'EdgeStart'/);
+		const derivedUnit = file.createEntity("IfcDerivedUnit", [], "MASSDENSITYUNIT", null);
+		expect(() => (derivedUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(
+			/has no attribute 'Dimensions'/,
+		);
 	});
 });
