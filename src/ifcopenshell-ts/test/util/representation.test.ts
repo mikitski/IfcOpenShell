@@ -40,9 +40,12 @@
 //    `calc_IfcCurve_Dim`/`calc_IfcCartesianPointList_Dim` are now ported for IFC4, so
 //    `Curve2D`/`Curve3D` (and the plain `Curve` fallback) now resolve correctly instead
 //    of throwing -- see `representation.ts`'s own updated header comment (finding 4)
-//    for the full writeup. `Surface2D`/`Surface3D` remain genuinely blocked (no
-//    `IfcSurface`-subtype `Dim` function ported by any chunk yet) -- unaffected, not
-//    retested here.
+//    for the full writeup.
+//    **Updated AGAIN by Phase EX-2's IFC4 FOURTH (and last) chunk**: `calc_IfcSurface_Dim`
+//    is now ported for IFC4 too (a bare, unconditional constant `3`) -- `Surface3D` now
+//    resolves correctly instead of throwing, and `Surface2D` becomes permanently
+//    unreachable dead code for IFC4 (since `Dim` can never be `2`) -- see
+//    `representation.ts`'s own updated header comment (UPDATE 2) for the full writeup.
 
 import { mat4 } from "gl-matrix";
 import { describe, expect, test } from "vitest";
@@ -395,15 +398,35 @@ describe("util.representation guessType", () => {
 		expect(subject.guessType([line])).toBe("Curve");
 	});
 
-	// `Surface2D`/`Surface3D` remain genuinely blocked for IFC4 (no `IfcSurface`-subtype
-	// `Dim` function ported by any chunk yet) -- unaffected by this chunk, still pinned
-	// with the original disclosed-error regression test.
-	test("Surface2D/Surface3D branches still throw the disclosed .Dim DERIVED-attribute error for a real IfcSurface", () => {
+	// **Updated by Phase EX-2's IFC4 fourth (and last) chunk**: `calc_IfcSurface_Dim`
+	// is now ported for IFC4 (a bare, unconditional constant `3` -- no `IfcSurface`
+	// subtype redeclares its own `Dim` in `IFC4.py` at all, unlike IFC2X3) -- `Dim`
+	// resolves to `3` for any real `IfcSurface` subtype, so `guessType`'s `Surface3D`
+	// branch is now genuinely reachable and correct, instead of throwing.
+	test("Surface3D for a real IfcPlane (Dim resolves via calc_IfcSurface_Dim, always 3)", () => {
 		const file = createTestFile("IFC4");
 		const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
 		const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
 		const plane = file.createEntity("IfcPlane", planePlacement);
-		expect(() => subject.guessType([plane])).toThrow(/has no attribute 'Dim'/);
+		expect(subject.guessType([plane])).toBe("Surface3D");
+	});
+
+	// `Surface2D` is now PERMANENTLY UNREACHABLE dead code for IFC4 (not merely
+	// untested): `calc_IfcSurface_Dim`'s real formula is an unconditional constant `3`
+	// for every concrete `IfcSurface` subtype (no subtype overrides it), so
+	// `i.get("Dim") === 2` can never be true for IFC4 -- the same shape of finding
+	// this file's own header comment (finding 5) already documents for
+	// `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"`/`"PointCloud"`. There is
+	// therefore no real `IfcSurface` fixture that could ever make this branch match on
+	// IFC4 -- this test asserts that non-matching directly (falls through to
+	// `Surface3D`, per the test above, for ANY real surface, never `Surface2D`) rather
+	// than attempting to construct an impossible one.
+	test("Surface2D is unreachable dead code for IFC4 (Dim is always 3, never 2)", () => {
+		const file = createTestFile("IFC4");
+		const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+		const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+		const plane = file.createEntity("IfcPlane", planePlacement);
+		expect(subject.guessType([plane])).not.toBe("Surface2D");
 	});
 });
 

@@ -166,28 +166,36 @@ describe.each(AVAILABLE_SCHEMAS)("EntityInstance (%s)", (schema) => {
 	// project's own established `test.skipIf(schema === ...)` precedent, e.g.
 	// `test/api/project/appendAsset.test.ts`) rather than silently keeping a
 	// now-false assertion for IFC2X3.
-	test.skipIf(schema === "IFC2X3")(
+	//
+	// **Updated AGAIN by Phase EX-2's IFC4 FOURTH (and last) chunk**
+	// (`src/express/rules/ifc4.ts`), which closes out IFC4 at 62/62 ported `calc_*`
+	// functions, `calc_IfcSIUnit_Dimensions` included: `.get("Dimensions")` now
+	// genuinely resolves for IFC4 too, so the "still throws" branch below now applies
+	// to IFC4X3 only (no `rules/ifc4x3.ts` module exists yet).
+	test.skipIf(schema !== "IFC4X3")(
 		".get() throws for a DERIVED attribute on a schema with no ported EXPRESS calc_* rules yet",
 		() => {
-			// IFC4/IFC4X3 have no `rules/ifc4.ts`/`rules/ifc4x3.ts` module yet (Phase
-			// EX-2 has so far only ported IFC2X3) -- `dispatch.ts`'s per-schema
-			// registry has zero entries for either, so this still throws exactly as
-			// it always has.
+			// IFC4X3 has no `rules/ifc4x3.ts` module yet (Phase EX-2 has so far ported
+			// IFC2X3 and IFC4 in full) -- `dispatch.ts`'s per-schema registry has zero
+			// entries for it, so this still throws exactly as it always has.
 			const file = newFile();
 			const unit = file.createEntity("IfcSIUnit");
 			expect(() => unit.get("Dimensions")).toThrow();
 		},
 	);
 
-	test.skipIf(schema !== "IFC2X3")(
-		".get() resolves a DERIVED attribute via ported EXPRESS calc_* dispatch (IFC2X3, Phase EX-2)",
+	test.skipIf(schema === "IFC4X3")(
+		".get() resolves a DERIVED attribute via ported EXPRESS calc_* dispatch (IFC2X3/IFC4, Phase EX-2)",
 		() => {
 			// Leading `null` placeholder for the derived `Dimensions` slot -- see
 			// `getInfo()`'s own interleaved-DERIVE-attribute test below for the full
 			// citation. `calc_IfcSIUnit_Dimensions("METRE")` ->
 			// `IfcDimensionsForSiUnit("METRE")` -> `IfcDimensionalExponents(1, 0, 0,
-			// 0, 0, 0, 0)` (`src/express/rules/ifc2x3.ts`'s own chunk-5 header
-			// comment).
+			// 0, 0, 0, 0)` (`src/express/rules/ifc2x3.ts`'s/`ifc4.ts`'s own chunk-5/
+			// chunk-4 header comments -- METRE's own branch is one of the 29
+			// byte-identical branches between the two schemas' real tables, see
+			// `ifc4.ts`'s own fourth-chunk header comment for the one branch, FARAD,
+			// that actually differs).
 			const file = newFile();
 			const unit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
 			const dimensions = unit.get("Dimensions") as EntityInstance;

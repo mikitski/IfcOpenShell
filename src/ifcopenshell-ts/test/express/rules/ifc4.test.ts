@@ -857,9 +857,11 @@ describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 2)", ()
 		}
 
 		// A `IfcContextDependentUnit` has a PLAIN, directly-stored `Dimensions`
-		// attribute (not DERIVE) -- used here so these tests don't need
-		// `calc_IfcSIUnit_Dimensions` (deliberately NOT ported by this chunk, still
-		// genuinely unported for IFC4 -- see `ifc4.ts`'s own header comment).
+		// attribute (not DERIVE) -- used here so these tests isolate
+		// `IfcDeriveDimensionalExponents`'s own accumulation logic from any other
+		// DERIVE dependency (`calc_IfcSIUnit_Dimensions` is fully ported for IFC4 too
+		// now, by this file's own fourth chunk -- see that chunk's own header comment
+		// -- simply not needed for this narrow purpose).
 		function buildUnitWithDimensions(file: IfcFile, dims: number[]) {
 			const dimensions = file.createEntity("IfcDimensionalExponents", ...dims);
 			return file.createEntity("IfcContextDependentUnit", dimensions, "USERDEFINED", "test-unit");
@@ -1391,6 +1393,452 @@ describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 3)", ()
 			const revolvedSolid = file.createEntity("IfcRevolvedAreaSolid", profile, position, axis, Math.PI / 2);
 			const axisLine = (revolvedSolid as unknown as { AxisLine: EntityInstance }).AxisLine;
 			expect((axisLine as unknown as { Pnt: EntityInstance }).Pnt.id()).toBe((axisLocation as EntityInstance).id());
+		});
+	});
+});
+
+// This chunk's own coverage: the final 14 of IFC4's 62 `calc_*` functions (Phase EX-2,
+// IFC4's fourth and LAST chunk -- this completes IFC4 to the full 62/62). See
+// `../../../src/express/rules/ifc4.ts`'s own fourth-chunk header comment for the full
+// byte-identical/genuinely-different/IFC4-only breakdown and all bug-disclosure
+// citations (2 new call sites into chunk 1's/chunk 2's own already-disclosed bugs #3
+// and #1/#2 -- no genuinely NEW bugs found).
+describe("express/rules/ifc4 -- calc_* functions (Phase EX-2, IFC4 chunk 4 -- FINAL, completes 62/62)", () => {
+	// --- calc_IfcRationalBSplineCurveWithKnots_Weights (genuinely IFC4-only, reuses chunk 1's ifcListToArray) ---
+	describe("calc_IfcRationalBSplineCurveWithKnots_Weights", () => {
+		// Python: `IfcListToArray(WeightsData, 0, UpperIndexOnControlPoints)`. Reuses
+		// this file's own chunk-1 `ifcListToArray` UNCHANGED -- a NEW CALL SITE into
+		// chunk 1's own already-disclosed bug #3 (the `low === 0` left-rotation), not a
+		// new bug -- same shape `ifc2x3.ts`'s own `calc_IfcRationalBezierCurve_Weights`
+		// already pins: for 4 weights [1,2,3,4], the buggy result is [2,3,4,1], not an
+		// identity copy.
+		test("4 weights -> cyclically rotated, NOT an identity copy (chunk 1's disclosed bug #3, reused here)", () => {
+			const file = createTestFile("IFC4");
+			const points = [0, 1, 2, 3].map((i) => file.createEntity("IfcCartesianPoint", [Number(i), 0.0]));
+			const curve = file.createEntity(
+				"IfcRationalBSplineCurveWithKnots",
+				3,
+				points,
+				"UNSPECIFIED",
+				false,
+				false,
+				[4, 4],
+				[0.0, 1.0],
+				"UNSPECIFIED",
+				[1.0, 2.0, 3.0, 4.0],
+			);
+			const weights = ifc4.calc_IfcRationalBSplineCurveWithKnots_Weights(curve as EntityInstance);
+			expect(weights).toEqual([2.0, 3.0, 4.0, 1.0]);
+		});
+
+		// End-to-end: read `.Weights` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: curve.Weights resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const points = [0, 1, 2].map((i) => file.createEntity("IfcCartesianPoint", [Number(i), 0.0]));
+			const curve = file.createEntity(
+				"IfcRationalBSplineCurveWithKnots",
+				2,
+				points,
+				"UNSPECIFIED",
+				false,
+				false,
+				[3, 3],
+				[0.0, 1.0],
+				"UNSPECIFIED",
+				[10.0, 20.0, 30.0],
+			);
+			expect((curve as unknown as { Weights: number[] }).Weights).toEqual([20.0, 30.0, 10.0]);
+		});
+	});
+
+	// --- calc_IfcRationalBSplineSurfaceWithKnots_Weights (genuinely IFC4-only, reuses chunk 2's ifcMakeArrayOfArray) ---
+	describe("calc_IfcRationalBSplineSurfaceWithKnots_Weights", () => {
+		function buildSurface(file: IfcFile) {
+			const p00 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const p01 = file.createEntity("IfcCartesianPoint", [0.0, 1.0, 0.0]);
+			const p10 = file.createEntity("IfcCartesianPoint", [1.0, 0.0, 0.0]);
+			const p11 = file.createEntity("IfcCartesianPoint", [1.0, 1.0, 0.0]);
+			return file.createEntity(
+				"IfcRationalBSplineSurfaceWithKnots",
+				1,
+				1,
+				[
+					[p00, p01],
+					[p10, p11],
+				],
+				"UNSPECIFIED",
+				false,
+				false,
+				false,
+				[2, 2],
+				[2, 2],
+				[0.0, 1.0],
+				[0.0, 1.0],
+				"UNSPECIFIED",
+				[
+					[1.0, 2.0],
+					[3.0, 4.0],
+				],
+			);
+		}
+
+		// Python: `IfcMakeArrayOfArray(WeightsData, 0, UUpper, 0, VUpper)`. Reuses this
+		// file's own chunk-2 `ifcMakeArrayOfArray` UNCHANGED -- a NEW CALL SITE into
+		// chunk 2's own already-disclosed bug #1 (unconditional `TypeError`, `list *
+		// int` then `list - int` via Python's own operator precedence), not a new bug.
+		// **Net effect: this function can never successfully compute a value in real
+		// Python, for ANY structurally valid `IfcRationalBSplineSurfaceWithKnots`** --
+		// same as `calc_IfcBSplineSurface_ControlPoints` itself (chunk 2), once both of
+		// `ifcMakeArrayOfArray`'s own preceding size-validation guards pass (a 2x2
+		// `ControlPointsList` with a matching 2x2 `WeightsData` here).
+		test("always throws once both size-validation guards pass (chunk 2's disclosed bug #1, reused here)", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file);
+			expect(() => ifc4.calc_IfcRationalBSplineSurfaceWithKnots_Weights(surface as EntityInstance)).toThrow(
+				/IfcMakeArrayOfArray/,
+			);
+		});
+
+		// End-to-end: read `.Weights` through the normal `EntityInstance`
+		// attribute-read path -- throws there too, not just via the direct call.
+		test("end-to-end: surface.Weights throws through the normal attribute-read path too", () => {
+			const file = createTestFile("IFC4");
+			const surface = buildSurface(file);
+			expect(() => (surface as unknown as { Weights: unknown }).Weights).toThrow(/IfcMakeArrayOfArray/);
+		});
+	});
+
+	// --- calc_IfcSIUnit_Dimensions (+ IfcDimensionsForSiUnit, GENUINELY DIFFERENT from IFC2X3's own by exactly one value) ---
+	describe("calc_IfcSIUnit_Dimensions", () => {
+		function exponents(result: unknown): number[] {
+			const d = result as EntityInstance;
+			return [
+				"LengthExponent",
+				"MassExponent",
+				"TimeExponent",
+				"ElectricCurrentExponent",
+				"ThermodynamicTemperatureExponent",
+				"AmountOfSubstanceExponent",
+				"LuminousIntensityExponent",
+			].map((name) => d.get(name) as number);
+		}
+
+		function buildSiUnit(file: IfcFile, name: string) {
+			return file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, name);
+		}
+
+		// Base unit, byte-identical to IFC2X3's own branch.
+		test("METRE -> LengthExponent=1, everything else 0 (byte-identical to IFC2X3's own branch)", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildSiUnit(file, "METRE");
+			const result = ifc4.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// Derived unit with cross-terms, byte-identical to IFC2X3's own branch.
+		test("NEWTON -> (1, 1, -2, 0, 0, 0, 0) (byte-identical to IFC2X3's own branch)", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildSiUnit(file, "NEWTON");
+			const result = ifc4.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([1, 1, -2, 0, 0, 0, 0]);
+		});
+
+		// The ONE genuinely different branch between IFC2X3 and IFC4 (confirmed by a
+		// direct `diff` of both real, complete 30-branch tables -- see `ifc4.ts`'s own
+		// fourth-chunk header comment for the full citation): FARAD's own
+		// `ElectricCurrentExponent` is `2` here, `1` in IFC2X3 -- real, verified schema
+		// evolution, not a porting error.
+		test("FARAD -> (-2, -1, 4, 2, 0, 0, 0) -- GENUINELY DIFFERENT from IFC2X3's own (-2, -1, 4, 1, 0, 0, 0)", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildSiUnit(file, "FARAD");
+			const result = ifc4.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([-2, -1, 4, 2, 0, 0, 0]);
+		});
+
+		// The 2 branches whose own explicit result is all zeros (distinct from the
+		// `else` fallback, which also produces all zeros but via a different path).
+		test("RADIAN -> (0, 0, 0, 0, 0, 0, 0) (an explicit branch, not the else fallback)", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildSiUnit(file, "RADIAN");
+			const result = ifc4.calc_IfcSIUnit_Dimensions(unit as EntityInstance);
+			expect(exponents(result)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+		});
+
+		// Same already-established finding as `ifc2x3.ts`'s own chunk-5 test: the
+		// `else` fallback is genuine dead code -- native ENUMERATION-domain validation
+		// rejects an out-of-domain `IfcSIUnitName` before `calc_IfcSIUnit_Dimensions`
+		// is ever reached, on IFC4 too (re-verified directly, not assumed to carry
+		// over just because IFC2X3 already established it).
+		test("an out-of-domain Name cannot even be constructed (native ENUMERATION-domain validation) -- the else branch is genuine dead code", () => {
+			const file = createTestFile("IFC4");
+			expect(() => buildSiUnit(file, "NOT_A_REAL_SI_UNIT_NAME")).toThrow(/Unable to find keyword in schema/);
+		});
+
+		// End-to-end: read `.Dimensions` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: unit.Dimensions resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const unit = buildSiUnit(file, "WATT");
+			const result = (unit as unknown as { Dimensions: unknown }).Dimensions;
+			expect(exponents(result)).toEqual([2, 1, -3, 0, 0, 0, 0]);
+		});
+	});
+
+	// --- calc_IfcSectionedSpine_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcSectionedSpine_Dim", () => {
+		// Python: `return 3` (unconditional constant).
+		test("always 3", () => {
+			const file = createTestFile("IFC4");
+			const spine = file.createEntity("IfcSectionedSpine");
+			expect(ifc4.calc_IfcSectionedSpine_Dim(spine as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcShellBasedSurfaceModel_Dim (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcShellBasedSurfaceModel_Dim", () => {
+		// Python: `return 3` (unconditional constant).
+		test("always 3", () => {
+			const file = createTestFile("IFC4");
+			const model = file.createEntity("IfcShellBasedSurfaceModel");
+			expect(ifc4.calc_IfcShellBasedSurfaceModel_Dim(model as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcSurface_Dim (genuinely IFC4-only -- no IFC2X3 subtype-Dim equivalent) ---
+	describe("calc_IfcSurface_Dim", () => {
+		// Python: `return 3` (unconditional constant) -- declared directly on
+		// `IfcSurface` itself in IFC4 (unlike IFC2X3, which redeclares `Dim` separately
+		// on each of `IfcElementarySurface`/`IfcCurveBoundedPlane`/
+		// `IfcRectangularTrimmedSurface`/`IfcSweptSurface` instead -- real, verified
+		// schema evolution, see `ifc4.ts`'s own fourth-chunk header comment).
+		test("always 3, ignoring self entirely", () => {
+			const file = createTestFile("IFC4");
+			const dummy = file.createEntity("IfcCsgPrimitive3D");
+			expect(ifc4.calc_IfcSurface_Dim(dummy as EntityInstance)).toBe(3);
+		});
+
+		// End-to-end, via supertype dispatch: `IfcPlane` (a concrete `IfcSurface`
+		// subtype) declares no `Dim` of its own -- dispatch must walk up to
+		// `IfcSurface.Dim` to resolve it. This is also the exact fixture
+		// `representation.test.ts`'s own updated `guessType` "Surface3D" test uses.
+		test("end-to-end: plane.Dim resolves through the normal attribute-read path via supertype dispatch", () => {
+			const file = createTestFile("IFC4");
+			const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+			const plane = file.createEntity("IfcPlane", planePlacement);
+			expect((plane as unknown as { Dim: number }).Dim).toBe(3);
+		});
+	});
+
+	// --- calc_IfcSurfaceCurve_BasisSurface (genuinely IFC4-only, reuses chunk 2's ifcGetBasisSurface) ---
+	describe("calc_IfcSurfaceCurve_BasisSurface", () => {
+		function buildSurfaceCurve(file: IfcFile) {
+			const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+			const plane = file.createEntity("IfcPlane", planePlacement);
+			const refP0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+			const refP1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0]);
+			const referenceCurve = file.createEntity("IfcPolyline", [refP0, refP1]);
+			const pcurve = file.createEntity("IfcPcurve", plane, referenceCurve);
+			const curve3dP0 = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const curve3dP1 = file.createEntity("IfcCartesianPoint", [1.0, 1.0, 1.0]);
+			const curve3d = file.createEntity("IfcPolyline", [curve3dP0, curve3dP1]);
+			return file.createEntity("IfcSurfaceCurve", curve3d, [pcurve], "CURVE3D");
+		}
+
+		// Python: `IfcGetBasisSurface(SELF)`. Reuses this file's own chunk-2
+		// `ifcGetBasisSurface` UNCHANGED -- a NEW CALL SITE into chunk 2's own
+		// already-disclosed bug #2 (`surfs = surfs + IfcAssociatedSurface(...)`, `list +
+		// non-list`, unconditional `TypeError`), not a new bug. `AssociatedGeometry` is
+		// schema-mandatory (`LIST [1:2]`) on `IfcSurfaceCurve`, so this reproduces for
+		// ANY real, populated `AssociatedGeometry` -- see `ifc4.ts`'s own fourth-chunk
+		// header comment for the full citation.
+		test("always throws for a real, populated AssociatedGeometry (chunk 2's disclosed bug #2, reused here)", () => {
+			const file = createTestFile("IFC4");
+			const surfaceCurve = buildSurfaceCurve(file);
+			expect(() => ifc4.calc_IfcSurfaceCurve_BasisSurface(surfaceCurve as EntityInstance)).toThrow(
+				/IfcGetBasisSurface/,
+			);
+		});
+
+		// End-to-end: read `.BasisSurface` through the normal `EntityInstance`
+		// attribute-read path -- throws there too, not just via the direct call.
+		test("end-to-end: surfaceCurve.BasisSurface throws through the normal attribute-read path too", () => {
+			const file = createTestFile("IFC4");
+			const surfaceCurve = buildSurfaceCurve(file);
+			expect(() => (surfaceCurve as unknown as { BasisSurface: unknown }).BasisSurface).toThrow(/IfcGetBasisSurface/);
+		});
+	});
+
+	// --- calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis", () => {
+		// Python: `IfcVector(Orientation=ExtrudedDirection, Magnitude=Depth)` -- a
+		// direct, unnormalized pass-through (does NOT normalise `ExtrudedDirection`).
+		test("ExtrusionAxis.Orientation is ExtrudedDirection, .Magnitude is Depth", () => {
+			const file = createTestFile("IFC4");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const extrudedDirection = file.createEntity("IfcDirection", [1.0, 0.0, 0.0]);
+			const surface = file.createEntity("IfcSurfaceOfLinearExtrusion", null, position, extrudedDirection, 5.0);
+			const vec = ifc4.calc_IfcSurfaceOfLinearExtrusion_ExtrusionAxis(surface as EntityInstance) as EntityInstance;
+			expect((vec as unknown as { Orientation: EntityInstance }).Orientation.id()).toBe(
+				(extrudedDirection as EntityInstance).id(),
+			);
+			expect((vec as unknown as { Magnitude: number }).Magnitude).toBe(5.0);
+		});
+
+		// End-to-end: read `.ExtrusionAxis` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: surface.ExtrusionAxis resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const extrudedDirection = file.createEntity("IfcDirection", [1.0, 0.0, 0.0]);
+			const surface = file.createEntity("IfcSurfaceOfLinearExtrusion", null, position, extrudedDirection, 5.0);
+			const vec = (surface as unknown as { ExtrusionAxis: EntityInstance }).ExtrusionAxis;
+			expect(vec.isA()).toBe("IfcVector");
+			expect((vec as unknown as { Magnitude: number }).Magnitude).toBe(5.0);
+		});
+	});
+
+	// --- calc_IfcSurfaceOfRevolution_AxisLine (+ IfcLine, byte-identical to IFC2X3's own) ---
+	describe("calc_IfcSurfaceOfRevolution_AxisLine", () => {
+		// Python: `IfcLine(Pnt=AxisPosition.Location, Dir=IfcVector(Orientation=
+		// AxisPosition.Z, Magnitude=1.0))` -- `AxisPosition.Z` is `IfcAxis1Placement`'s
+		// own DERIVE attribute (`calc_IfcAxis1Placement_Z`, chunk 1), exercised here
+		// with an UNNORMALIZED axis ([0,0,3]) to confirm the full chain normalizes it.
+		test("AxisLine.Pnt is AxisPosition.Location, AxisLine.Dir is a unit vector along (normalised) AxisPosition.Z", () => {
+			const file = createTestFile("IFC4");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [4.0, 5.0, 6.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 3.0]);
+			const axisPosition = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolutionSurface = file.createEntity("IfcSurfaceOfRevolution", null, position, axisPosition);
+			const axisLine = ifc4.calc_IfcSurfaceOfRevolution_AxisLine(revolutionSurface as EntityInstance) as EntityInstance;
+			const pnt = (axisLine as unknown as { Pnt: EntityInstance }).Pnt;
+			expect(pnt.id()).toBe((axisLocation as EntityInstance).id());
+			const dir = (axisLine as unknown as { Dir: EntityInstance }).Dir;
+			expect((dir as unknown as { Magnitude: number }).Magnitude).toBe(1.0);
+			closeArray(ratios((dir as unknown as { Orientation: unknown }).Orientation), [0, 0, 1]);
+		});
+
+		// End-to-end: read `.AxisLine` through the normal `EntityInstance`
+		// attribute-read path.
+		test("end-to-end: surface.AxisLine resolves through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const positionLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+			const position = file.createEntity("IfcAxis2Placement3D", positionLocation, null, null);
+			const axisLocation = file.createEntity("IfcCartesianPoint", [4.0, 5.0, 6.0]);
+			const zAxis = file.createEntity("IfcDirection", [0.0, 0.0, 1.0]);
+			const axisPosition = file.createEntity("IfcAxis1Placement", axisLocation, zAxis);
+			const revolutionSurface = file.createEntity("IfcSurfaceOfRevolution", null, position, axisPosition);
+			const axisLine = (revolutionSurface as unknown as { AxisLine: EntityInstance }).AxisLine;
+			expect(axisLine.isA()).toBe("IfcLine");
+			expect((axisLine as unknown as { Pnt: EntityInstance }).Pnt.id()).toBe((axisLocation as EntityInstance).id());
+		});
+	});
+
+	// --- calc_IfcTable_NumberOfCellsInRow / calc_IfcTable_NumberOfHeadings / calc_IfcTable_NumberOfDataRows (byte-identical to IFC2X3's own) ---
+	describe("calc_IfcTable_NumberOfCellsInRow / calc_IfcTable_NumberOfHeadings / calc_IfcTable_NumberOfDataRows", () => {
+		function buildRow(file: IfcFile, cells: unknown[], isHeading: boolean) {
+			return file.createEntity("IfcTableRow", cells, isHeading);
+		}
+
+		// Python: `hiindex(Rows[0].RowCells)` -- only the FIRST row's own cell count,
+		// regardless of other rows' shapes.
+		test("NumberOfCellsInRow is hiindex(Rows[0].RowCells)", () => {
+			const file = createTestFile("IFC4");
+			const heading = buildRow(file, ["A", "B", "C"], true);
+			const data = buildRow(file, [1, 2], false);
+			const table = file.createEntity("IfcTable", "test-table", [heading, data], null);
+			expect(ifc4.calc_IfcTable_NumberOfCellsInRow(table as EntityInstance)).toBe(3);
+		});
+
+		// Python: `sizeof([temp for temp in Rows if temp.IsHeading])`.
+		test("NumberOfHeadings counts rows with IsHeading=true", () => {
+			const file = createTestFile("IFC4");
+			const heading1 = buildRow(file, ["A"], true);
+			const heading2 = buildRow(file, ["B"], true);
+			const data = buildRow(file, [1], false);
+			const table = file.createEntity("IfcTable", "test-table", [heading1, heading2, data], null);
+			expect(ifc4.calc_IfcTable_NumberOfHeadings(table as EntityInstance)).toBe(2);
+		});
+
+		// Python: `sizeof([temp for temp in Rows if not temp.IsHeading])`.
+		test("NumberOfDataRows counts rows with IsHeading=false", () => {
+			const file = createTestFile("IFC4");
+			const heading = buildRow(file, ["A"], true);
+			const data1 = buildRow(file, [1], false);
+			const data2 = buildRow(file, [2], false);
+			const table = file.createEntity("IfcTable", "test-table", [heading, data1, data2], null);
+			expect(ifc4.calc_IfcTable_NumberOfDataRows(table as EntityInstance)).toBe(2);
+		});
+
+		// End-to-end: read all 3 through the normal `EntityInstance` attribute-read path.
+		test("end-to-end: table's 3 attributes resolve through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const heading = buildRow(file, ["A", "B"], true);
+			const data1 = buildRow(file, [1, 2], false);
+			const data2 = buildRow(file, [3, 4], false);
+			const table = file.createEntity("IfcTable", "test-table", [heading, data1, data2], null);
+			const t = table as unknown as {
+				NumberOfCellsInRow: number;
+				NumberOfHeadings: number;
+				NumberOfDataRows: number;
+			};
+			expect(t.NumberOfCellsInRow).toBe(2);
+			expect(t.NumberOfHeadings).toBe(1);
+			expect(t.NumberOfDataRows).toBe(2);
+		});
+	});
+
+	// --- calc_IfcTessellatedFaceSet_Dim (genuinely IFC4-only) ---
+	describe("calc_IfcTessellatedFaceSet_Dim", () => {
+		// Python: `return 3` (unconditional constant) -- NOT reached via `IfcSurface`'s
+		// own supertype chain (`IfcTessellatedFaceSet` is not a subtype of `IfcSurface`
+		// at all, confirmed directly: `IfcSurface.Dim` and `IfcTessellatedFaceSet.Dim`
+		// are 2 entirely separate, independently-declared DERIVE attributes in real
+		// `IFC4.py`, not one inheriting from the other).
+		test("always 3, ignoring self entirely", () => {
+			const file = createTestFile("IFC4");
+			const dummy = file.createEntity("IfcCsgPrimitive3D");
+			expect(ifc4.calc_IfcTessellatedFaceSet_Dim(dummy as EntityInstance)).toBe(3);
+		});
+	});
+
+	// --- calc_IfcTriangulatedFaceSet_NumberOfTriangles (genuinely IFC4-only) ---
+	describe("calc_IfcTriangulatedFaceSet_NumberOfTriangles", () => {
+		function buildTriangulatedFaceSet(file: IfcFile, coordIndex: number[][]) {
+			const coords = file.createEntity("IfcCartesianPointList3D", [
+				[0.0, 0.0, 0.0],
+				[1.0, 0.0, 0.0],
+				[0.0, 1.0, 0.0],
+				[1.0, 1.0, 0.0],
+			]);
+			return file.createEntity("IfcTriangulatedFaceSet", coords, null, null, coordIndex, null);
+		}
+
+		// Python: `sizeof(CoordIndex)` -- one entry per triangle.
+		test("NumberOfTriangles is sizeof(CoordIndex)", () => {
+			const file = createTestFile("IFC4");
+			const faceSet = buildTriangulatedFaceSet(file, [
+				[1, 2, 3],
+				[2, 4, 3],
+			]);
+			expect(ifc4.calc_IfcTriangulatedFaceSet_NumberOfTriangles(faceSet as EntityInstance)).toBe(2);
+		});
+
+		// End-to-end: read both `.NumberOfTriangles` (own DERIVE) and `.Dim` (inherited
+		// from `IfcTessellatedFaceSet.Dim`, via supertype dispatch) through the normal
+		// `EntityInstance` attribute-read path on the same real instance.
+		test("end-to-end: faceSet.NumberOfTriangles and .Dim both resolve through the normal attribute-read path", () => {
+			const file = createTestFile("IFC4");
+			const faceSet = buildTriangulatedFaceSet(file, [[1, 2, 3]]);
+			const f = faceSet as unknown as { NumberOfTriangles: number; Dim: number };
+			expect(f.NumberOfTriangles).toBe(1);
+			expect(f.Dim).toBe(3);
 		});
 	});
 });

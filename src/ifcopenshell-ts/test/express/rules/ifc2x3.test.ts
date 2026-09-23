@@ -91,7 +91,7 @@ import * as ifc2x3 from "../../../src/express/rules/ifc2x3";
 import { INDETERMINATE } from "../../../src/express/runtimeShim";
 import type { IfcFile } from "../../../src/file";
 import * as guid from "../../../src/guid";
-import { createTestFile } from "../../bootstrap";
+import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 function ratios(direction: unknown): number[] {
 	return (direction as EntityInstance & { DirectionRatios: number[] }).DirectionRatios;
@@ -1649,47 +1649,63 @@ describe("EntityInstance DERIVE-dispatch wiring (entityInstance.ts)", () => {
 		);
 	});
 
-	test("an unported-for-THIS-SCHEMA DERIVE-shaped attribute still throws (purely additive, schema-scoped capability)", () => {
-		// Chunk 5 (planning/ifcopenshell-ts/70-express-rules-plan.md §4) ports the
-		// last 2 of IFC2X3's 55 `calc_*` functions -- `IfcDerivedUnit.Dimensions`
-		// (this test's own example in chunks 3/4) is no longer usable here: after
-		// chunk 5, EVERY IFC2X3 DERIVE attribute this dispatch mechanism knows about
-		// resolves, so there is no remaining genuinely-unported IFC2X3 attribute left
-		// to demonstrate a dispatch MISS with. (Chunk 4's own version of this test
-		// asserted `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` were
-		// blocked by a missing defined-type-construction primitive -- re-verified
-		// directly by this chunk and found WRONG: `IfcDimensionalExponents` is a
-		// genuine ENTITY, not a defined type, and both functions are ordinary
-		// entity construction/mutation, already fully supported. See
-		// `../../../src/express/rules/ifc2x3.ts`'s own chunk-5 header comment for the
-		// full correction.)
-		//
-		// So this test's example changed in KIND, not just name: it read the exact
-		// same `IfcDerivedUnit.Dimensions` attribute NAME chunks 3/4 already used, but
-		// off an `IFC4` fixture instead of an `IFC2X3` one, since no `rules/ifc4.ts`
-		// module existed in this port yet at that time.
-		//
-		// **Updated AGAIN by Phase EX-2's IFC4 SECOND chunk** (`src/express/rules/
-		// ifc4.ts`): that chunk ports exactly `calc_IfcDerivedUnit_Dimensions` for
-		// IFC4 (one of its own 15 assigned functions, `IFC4.py` line 6418) -- so
-		// `IfcDerivedUnit.Dimensions` now fully resolves on IFC4 too, and this test's
-		// own example would silently start asserting the wrong thing (that dispatch
-		// still fails) instead of failing loudly. Swapped for `IfcSIUnit.Dimensions`
-		// (`IFC4.py` line 9552, `calc_IfcSIUnit_Dimensions`) -- confirmed still
-		// genuinely unported for IFC4 by that chunk's own dispatch (not one of its own
-		// 15, nor IFC4's own first chunk's 15) via the same `grep -n "^def calc_"
-		// IFC4.py` sweep this project's own established convention uses, and
-		// independently corroborated by `test/api/unit/editNamedUnit.test.ts`'s own
-		// already-passing "IFC4/IFC4X3: still throws (no ported calc_IfcSIUnit_
-		// Dimensions for this schema yet)" assertion. Still demonstrates the dispatch
-		// mechanism's own SCHEMA-SCOPING directly (see `dispatch.ts`'s own header
-		// comment): `IfcSIUnit.Dimensions` is a real DERIVE attribute
-		// (`calc_IfcSIUnit_Dimensions` exists in `IFC4.py`), yet still a dispatch miss
-		// on IFC4 because this port simply hasn't ported that ONE function for that
-		// schema yet -- the same shape of demonstration as before, just with a
-		// genuinely still-unported attribute name.
-		const file: IfcFile = createTestFile("IFC4");
-		const siUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
-		expect(() => (siUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(/has no attribute 'Dimensions'/);
-	});
+	test.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))(
+		"an unported-for-THIS-SCHEMA DERIVE-shaped attribute still throws (purely additive, schema-scoped capability)",
+		() => {
+			// Chunk 5 (planning/ifcopenshell-ts/70-express-rules-plan.md §4) ports the
+			// last 2 of IFC2X3's 55 `calc_*` functions -- `IfcDerivedUnit.Dimensions`
+			// (this test's own example in chunks 3/4) is no longer usable here: after
+			// chunk 5, EVERY IFC2X3 DERIVE attribute this dispatch mechanism knows about
+			// resolves, so there is no remaining genuinely-unported IFC2X3 attribute left
+			// to demonstrate a dispatch MISS with. (Chunk 4's own version of this test
+			// asserted `calc_IfcDerivedUnit_Dimensions`/`calc_IfcSIUnit_Dimensions` were
+			// blocked by a missing defined-type-construction primitive -- re-verified
+			// directly by this chunk and found WRONG: `IfcDimensionalExponents` is a
+			// genuine ENTITY, not a defined type, and both functions are ordinary
+			// entity construction/mutation, already fully supported. See
+			// `../../../src/express/rules/ifc2x3.ts`'s own chunk-5 header comment for the
+			// full correction.)
+			//
+			// So this test's example changed in KIND, not just name: it read the exact
+			// same `IfcDerivedUnit.Dimensions` attribute NAME chunks 3/4 already used, but
+			// off an `IFC4` fixture instead of an `IFC2X3` one, since no `rules/ifc4.ts`
+			// module existed in this port yet at that time.
+			//
+			// **Updated by Phase EX-2's IFC4 SECOND chunk** (`src/express/rules/
+			// ifc4.ts`): that chunk ports exactly `calc_IfcDerivedUnit_Dimensions` for
+			// IFC4 (one of its own 15 assigned functions, `IFC4.py` line 6418) -- so
+			// `IfcDerivedUnit.Dimensions` now fully resolves on IFC4 too, and this test's
+			// own example would silently start asserting the wrong thing (that dispatch
+			// still fails) instead of failing loudly. Swapped for `IfcSIUnit.Dimensions`
+			// (`IFC4.py` line 9552, `calc_IfcSIUnit_Dimensions`) -- confirmed still
+			// genuinely unported for IFC4 at that time.
+			//
+			// **Updated AGAIN by Phase EX-2's IFC4 FOURTH (and last) chunk**
+			// (`src/express/rules/ifc4.ts`): that chunk ports exactly
+			// `calc_IfcSIUnit_Dimensions` for IFC4 too (one of its own 14 assigned
+			// functions, `IFC4.py` line 9552) -- completing IFC4 to the full 62/62
+			// `calc_*` functions and leaving NO remaining genuinely-unported IFC4 DERIVE
+			// attribute at all to demonstrate a dispatch MISS with, the exact same
+			// situation chunk 5 itself hit for IFC2X3 above. Swapped again, this time to
+			// an `IFC4X3` fixture instead of an `IFC4` one -- same attribute name
+			// (`IfcSIUnit.Dimensions`; `calc_IfcSIUnit_Dimensions` exists in `IFC4X3.py`
+			// too, confirmed directly), but no `rules/ifc4x3.ts` module exists in this
+			// port at all yet, so `dispatch.ts`'s per-schema registry has zero entries
+			// for `"IFC4X3"` and the read still throws "has no attribute" -- the exact
+			// same "move to the next, still fully empty schema" pattern this test's own
+			// chunk-5 update already used once before (IFC2X3 -> IFC4), applied a second
+			// time (IFC4 -> IFC4X3). Gated with `skipIf` (not hardcoded) since, unlike
+			// IFC4, IFC4X3's own availability is not guaranteed in every environment
+			// this suite runs in (`bootstrap.ts`'s own `AVAILABLE_SCHEMAS` disclosure).
+			// Still demonstrates the dispatch mechanism's own SCHEMA-SCOPING directly
+			// (see `dispatch.ts`'s own header comment): `IfcSIUnit.Dimensions` is a real
+			// DERIVE attribute (`calc_IfcSIUnit_Dimensions` exists in `IFC4X3.py`), yet
+			// still a dispatch miss on IFC4X3 because this port simply hasn't ported
+			// ANY `calc_*` function for that schema yet -- the same shape of
+			// demonstration as before, just with a genuinely still-unported schema.
+			const file: IfcFile = createTestFile("IFC4X3");
+			const siUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", null, "METRE");
+			expect(() => (siUnit as unknown as { Dimensions: unknown }).Dimensions).toThrow(/has no attribute 'Dimensions'/);
+		},
+	);
 });
