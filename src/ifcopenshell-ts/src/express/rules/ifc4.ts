@@ -787,9 +787,11 @@ registerSchemaCalcFunctions("IFC4", {
 //    chunk adds, dispatching into `calc_IfcCartesianPointList_Dim`, also this chunk),
 //    `ShapeBuilder.profile()`/`.createSweptDiskSolid()`'s own leading `Dim` guard no
 //    longer throws for IFC4 -- both now complete successfully end-to-end (verified
-//    directly against the real built addon, not assumed). IFC4X3 is UNCHANGED (no
-//    `rules/ifc4x3.ts` module exists yet) -- still throws exactly as before. Split
-//    into schema-conditional branches (`schema === "IFC4"` vs. `"IFC4X3"`), matching
+//    directly against the real built addon, not assumed). IFC4X3 is UNCHANGED
+//    (`calc_IfcCurve_Dim` is not one of the 15 functions Phase EX-2's own IFC4X3 first
+//    chunk later ported, `rules/ifc4x3.ts`'s own header comment) -- still throws
+//    exactly as before. Split into schema-conditional branches (`schema === "IFC4"`
+//    vs. `"IFC4X3"`), matching
 //    `editSurveyPoint.test.ts`'s own established precedent for this exact shape of
 //    partial, schema-scoped resolution.
 // =============================================================================

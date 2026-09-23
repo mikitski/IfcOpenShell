@@ -177,9 +177,11 @@
 // was only ever written against a hardcoded IFC4 fixture (no IFC2X3-specific
 // `Curve2D`/`Curve3D` test exists here at all, even though IFC2X3 ported
 // `calc_IfcCurve_Dim` itself several chunks ago) -- out of scope for this chunk to
-// add, which only touches IFC4's own dispatch; IFC4X3 remains blocked regardless (no
-// `rules/ifc4x3.ts` module exists yet). `representation.test.ts`'s own `guessType`
-// coverage is updated accordingly for IFC4 (see that file's own updated comment).
+// add, which only touches IFC4's own dispatch; IFC4X3 remains blocked regardless
+// (`calc_IfcCurve_Dim` is not one of the 15 functions Phase EX-2's IFC4X3 first chunk
+// ported, `rules/ifc4x3.ts`'s own header comment -- re-verified directly, not assumed
+// unaffected). `representation.test.ts`'s own `guessType` coverage is updated
+// accordingly for IFC4 (see that file's own updated comment).
 //
 // --- UPDATE 2 (Phase EX-2, IFC4's FOURTH and LAST `calc_*`-porting chunk): the
 //     `Surface2D`/`Surface3D` HALF of this gap is now closed for IFC4 too --
