@@ -8,7 +8,8 @@
 // DERIVED attribute always has every ported schema's functions available, regardless of
 // which module a particular caller happened to import first.
 //
-// Additive by design: a future chunk porting IFC4/IFC4X3's own `calc_*` functions adds
-// one more `import "./ifc4";` line here -- nothing else in this barrel, `dispatch.ts`,
-// or `entityInstance.ts` needs to change.
+// Additive by design: a future chunk porting IFC4X3's own `calc_*` functions adds one
+// more `import "./ifc4x3";` line here -- nothing else in this barrel, `dispatch.ts`, or
+// `entityInstance.ts` needs to change.
 import "./ifc2x3";
+import "./ifc4";
