@@ -11,6 +11,17 @@
 // `file_description()`/`file_name()`/`file_schema()` sub-entity accessors --
 // Python's `spf_header.file_description_py`/etc. only exist as SWIG-only glue,
 // research/01 SS5 -- and neither is in this chunk's required method list).
+// *** UPDATE (Phase EX-3 chunk 1, planning/ifcopenshell-ts/70-express-rules-plan.md):
+// `spf_header` gained 10 flat field accessors (`file_description_description()`/
+// `file_description_implementation_level()`/`file_name_name()`/`file_name_time_stamp()`/
+// `file_name_author()`/`file_name_organization()`/`file_name_preprocessor_version()`/
+// `file_name_originating_system()`/`file_name_authorization()`/
+// `file_schema_schema_identifiers()`, `header_shim.h`'s own doc comment for why flat
+// rather than nested `file_description()`/`file_name()`/`file_schema()` sub-objects) --
+// this closes the primitive-layer gap this comment describes, but `header`/`mvd`/
+// `assignHeaderFrom` themselves are still not ported here; that remains later work
+// (`TODOS.md`'s "spf_header has no file_description() sub-entity accessor" entry tracks
+// the follow-up `IfcFile`-level wiring). ***
 //
 // A real, disclosed primitive-layer gap surfaced while building this chunk: there is
 // no native `traverse`/`entity_names`/bulk-enumeration primitive for "every entity in

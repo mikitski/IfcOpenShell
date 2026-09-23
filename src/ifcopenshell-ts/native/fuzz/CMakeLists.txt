@@ -64,6 +64,7 @@ add_executable(ifcopenshell_fuzz_parse
     "${GENERATED_NAPI_DIR}/ifcopenshell_native_c_api.cpp"
     "${SHIM_DIR}/attribute_value_shim.cpp"
     "${SHIM_DIR}/file_shim.cpp"
+    "${SHIM_DIR}/header_shim.cpp"
 )
 target_include_directories(ifcopenshell_fuzz_parse PRIVATE
     "${GENERATED_NAPI_DIR}"

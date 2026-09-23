@@ -137,10 +137,12 @@ def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
     src_ifcparse = repo_root / "src" / "ifcparse"
     shim_header = repo_root / "src" / "wrappergen" / "shim" / "attribute_value_shim.h"
     file_shim_header = repo_root / "src" / "wrappergen" / "shim" / "file_shim.h"
+    header_shim_header = repo_root / "src" / "wrappergen" / "shim" / "header_shim.h"
     headers = [str(path.resolve()) for path in sorted(src_ifcparse.glob("*.h")) if path.parent.name != "schemas"]
     headers = [header for header in headers if not header.endswith(("rocksdb_map_adapter.h", "rocksdb_set_view.h"))]
     headers.append(str(shim_header.resolve()))
     headers.append(str(file_shim_header.resolve()))
+    headers.append(str(header_shim_header.resolve()))
 
     include_dirs = [str(src_ifcparse.resolve())]
 
@@ -555,6 +557,69 @@ def _inject_file_primitives(model) -> None:
     file_class.callables.extend([write, file_pointer])
 
 
+def _inject_header_primitives(model) -> None:
+    """Appends `ifcopenshell::spf_header`'s 10 sub-entity field accessors -- the "f.header
+    sub-entity accessors" gap `planning/ifcopenshell-ts/70-express-rules-plan.md` (Phase
+    EX-3 chunk 1) flags as a real, confirmed, blocking primitive gap for `validate.py`'s
+    `validate_ifc_header`. Backed by `header_shim.h`/`.cpp` -- see that header's own doc
+    comment for why these are flat, ownerless free functions (`spf_header.
+    file_description_description()` etc.) reading straight through to each field's plain
+    scalar/`vector<string>` value, rather than wrappergen-discovered handle classes for
+    `Header_section_schema::file_description`/`file_name`/`file_schema` themselves (which
+    would need a `spf_header`-to-`shared_ptr` ownership change this chunk deliberately
+    doesn't make, real Python's own upcast-to-`express::base` SWIG glue equivalent being
+    unavailable here for the same reason).
+
+    Named `file_description_*`/`file_name_*`/`file_schema_*` (not a flatter
+    `description`/`name`/... -- `implementation_level`/`name`/`time_stamp` alone would be
+    ambiguous or collide) to make each accessor's real EXPRESS-schema origin
+    (`Header_section_schema.h`) unambiguous from the TS call site, matching this
+    generator's own convention of deriving names mechanically from the underlying C++
+    shape rather than inventing new ones.
+    """
+    header_class = next(
+        class_model for class_model in model.classes if class_model.cpp_name == "ifcopenshell::spf_header"
+    )
+    string_sequence_functions = [
+        ("header_file_description_description", "file_description_description"),
+        ("header_file_name_author", "file_name_author"),
+        ("header_file_name_organization", "file_name_organization"),
+        ("header_file_schema_schema_identifiers", "file_schema_schema_identifiers"),
+    ]
+    scalar_string_functions = [
+        ("header_file_description_implementation_level", "file_description_implementation_level"),
+        ("header_file_name_name", "file_name_name"),
+        ("header_file_name_time_stamp", "file_name_time_stamp"),
+        ("header_file_name_preprocessor_version", "file_name_preprocessor_version"),
+        ("header_file_name_originating_system", "file_name_originating_system"),
+        ("header_file_name_authorization", "file_name_authorization"),
+    ]
+    injected = [
+        _free_function(
+            header_class,
+            f"ifcopenshell::wrappergen::{cpp_name}",
+            py_name,
+            py_name,
+            [],
+            return_cpp_type="std::vector<std::string>",
+            return_adapter="sequence_of_string",
+        )
+        for cpp_name, py_name in string_sequence_functions
+    ] + [
+        _free_function(
+            header_class,
+            f"ifcopenshell::wrappergen::{cpp_name}",
+            py_name,
+            py_name,
+            [],
+            return_cpp_type="std::string",
+            return_adapter="string",
+        )
+        for cpp_name, py_name in scalar_string_functions
+    ]
+    header_class.callables.extend(injected)
+
+
 def _inject_async_variants(model) -> None:
     """The three primitives planning/ifcopenshell-ts/10-architecture.md's "Async story"
     section names as needing a `napi_create_async_work`-based sibling alongside their
@@ -616,6 +681,7 @@ def build_napi_binding_model(repo_root: Path):
     model.variant_adapters.append(variant_adapter)
     _inject_entity_instance_primitives(model, variant_adapter)
     _inject_file_primitives(model)
+    _inject_header_primitives(model)
     _inject_async_variants(model)
     # The injected free functions above aren't discovered from any clang cursor, so
     # `build_module_model`'s `source_headers` computation (which only walks
@@ -625,6 +691,8 @@ def build_napi_binding_model(repo_root: Path):
         model.source_headers.append("attribute_value_shim.h")
     if "file_shim.h" not in model.source_headers:
         model.source_headers.append("file_shim.h")
+    if "header_shim.h" not in model.source_headers:
+        model.source_headers.append("header_shim.h")
     return model
 
 

@@ -434,6 +434,18 @@ def _resolve_return_adapter(
     if enum_key is not None:
         return enum_adapter_name(enum_key)
     vector_inner = _vector_inner_type(cpp_type)
+    if vector_inner is not None and vector_inner == normalize_cpp_type("std::string"):
+        # `std::vector<std::string>` -- e.g. `Header_section_schema::file_description
+        # ::description()`/`file_name::author()`/`file_name::organization()`/
+        # `file_schema::schema_identifiers()` (Phase EX-3 chunk 1). Checked before the
+        # class-handle sequence resolution below: `std::string` is never itself a
+        # registered `ClassModel`, so `resolve_cpp_type_key(vector_inner,
+        # class_models_by_cpp)` would just fail this method's discovery entirely (as it
+        # silently did for these exact methods before this chunk) rather than fall
+        # through to something else -- see `conventions.py`'s `is_sequence_of_string_adapter`
+        # doc comment for why this is a distinct, simpler adapter than `sequence:`/
+        # `sequence_of_variant:`.
+        return "sequence_of_string"
     if vector_inner:
         sequence_key = resolve_cpp_type_key(vector_inner, set(class_models_by_cpp))
         if sequence_key is not None:

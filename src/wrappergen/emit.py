@@ -10,6 +10,7 @@ from .conventions import (
     is_enum_adapter,
     is_handle_adapter,
     is_sequence_adapter,
+    is_sequence_of_string_adapter,
     is_sequence_of_variant_adapter,
     is_variant_adapter,
     normalize_cpp_type,
@@ -68,6 +69,29 @@ def _variant_list_c_type(variant_model: VariantAdapterModel) -> str:
 
 def _variant_list_free_name(variant_model: VariantAdapterModel) -> str:
     return f"{_variant_type_base(variant_model)}_list_free"
+
+
+# --- `sequence_of_string` adapter (a plain `std::vector<std::string>` return, e.g.
+# Phase EX-3 chunk 1's spf_header sub-entity field accessors) -- see
+# `conventions.py`'s `is_sequence_of_string_adapter` doc comment for why this is a
+# single, fixed, non-parameterized C struct rather than a `sequence:`/
+# `sequence_of_variant:`-style per-target-type name.
+
+
+def _string_list_c_type(model: ModuleModel) -> str:
+    return f"{model.c_prefix}_string_list_t"
+
+
+def _string_list_free_name(model: ModuleModel) -> str:
+    return f"{model.c_prefix}_string_list_free"
+
+
+def _uses_sequence_of_string_adapter(model: ModuleModel) -> bool:
+    return any(
+        is_sequence_of_string_adapter(callable_model.return_adapter)
+        for owner in model.classes
+        for callable_model in owner.callables
+    )
 
 
 def _variant_free_contents_name(variant_model: VariantAdapterModel) -> str:
@@ -251,6 +275,8 @@ def _return_c_type(adapter: str, model: ModuleModel) -> str:
         return _variant_model(adapter, model).c_type_name
     if is_sequence_of_variant_adapter(adapter):
         return _variant_list_c_type(_sequence_of_variant_model(adapter, model))
+    if is_sequence_of_string_adapter(adapter):
+        return _string_list_c_type(model)
     raise RuntimeError(f"Unsupported return adapter: {adapter}")
 
 
@@ -522,6 +548,27 @@ def _emit_sequence_of_variant_return_lines(
     lines.append("        return c_result;")
 
 
+def _emit_sequence_of_string_return_lines(lines: list[str], call_expression: str, model: ModuleModel) -> None:
+    """The `sequence_of_string` return adapter (Phase EX-3 chunk 1's spf_header
+    sub-entity field accessors, e.g. `file_description::description()`) -- copies each
+    `std::string` element out via `duplicate_string` (the same helper the plain
+    `string` scalar adapter already uses) into a heap-allocated `char**` array, paired
+    with a count, in a `{prefix}_string_list_t` returned by value. Simpler than
+    `_emit_sequence_of_variant_return_lines`: a `std::string` element needs no
+    discriminated-union conversion (no ENTITY_INSTANCE case, hence no owner-expression
+    argument) and no recursion."""
+    lines.append(f"        auto native_result = {call_expression};")
+    lines.append(f"        {_string_list_c_type(model)} c_result{{}};")
+    lines.append("        c_result.count = static_cast<int>(native_result.size());")
+    lines.append(
+        "        c_result.items = c_result.count > 0 ? new char*[static_cast<size_t>(c_result.count)] : nullptr;"
+    )
+    lines.append("        for (int index = 0; index < c_result.count; ++index) {")
+    lines.append("            c_result.items[index] = duplicate_string(native_result[static_cast<size_t>(index)]);")
+    lines.append("        }")
+    lines.append("        return c_result;")
+
+
 def _emit_variant_helper_functions(lines: list[str], model: ModuleModel) -> None:
     """Emits, per variant adapter, a recursive pair of private conversion helpers plus
     the two extern-"C" cleanup functions declared in the header
@@ -716,6 +763,14 @@ def emit_c_api_header(model: ModuleModel) -> str:
             lines.append("    int count;")
             lines.append(f"}} {list_type};")
             lines.append("")
+    uses_string_list = _uses_sequence_of_string_adapter(model)
+    if uses_string_list:
+        string_list_type = _string_list_c_type(model)
+        lines.append(f"typedef struct {string_list_type} {{")
+        lines.append("    char** items;")
+        lines.append("    int count;")
+        lines.append(f"}} {string_list_type};")
+        lines.append("")
     lines.extend(
         [
             "const char* ifcopenshell_last_error_message(void);",
@@ -724,6 +779,9 @@ def emit_c_api_header(model: ModuleModel) -> str:
             "",
         ]
     )
+    if uses_string_list:
+        lines.append(f"void {_string_list_free_name(model)}({_string_list_c_type(model)} list);")
+        lines.append("")
     for variant_model in model.variant_adapters:
         # Exposed (unlike the private, recursive native<->C conversion helpers
         # `emit_c_api_implementation` emits) because the N-API extension --
@@ -907,6 +965,19 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             "",
         ]
     )
+    if _uses_sequence_of_string_adapter(model):
+        string_list_type = _string_list_c_type(model)
+        lines.extend(
+            [
+                f"void {_string_list_free_name(model)}({string_list_type} list) {{",
+                "    for (int index = 0; index < list.count; ++index) {",
+                "        delete[] list.items[index];",
+                "    }",
+                "    delete[] list.items;",
+                "}",
+                "",
+            ]
+        )
     sequence_of_variant_models = _sequence_of_variant_models(model)
     for variant_model in model.variant_adapters:
         free_contents = _variant_free_contents_name(variant_model)
@@ -1036,6 +1107,8 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             _emit_sequence_of_variant_return_lines(
                 lines, variant.owner, variant.callable.return_adapter, call_expression, model
             )
+        elif is_sequence_of_string_adapter(variant.callable.return_adapter):
+            _emit_sequence_of_string_return_lines(lines, call_expression, model)
         else:
             raise RuntimeError(f"Unsupported return adapter in C API emitter: {variant.callable.return_adapter}")
         lines.append("    } catch (const std::exception& exception) {")
@@ -1049,8 +1122,10 @@ def emit_c_api_implementation(model: ModuleModel) -> str:
             lines.append(f"        return static_cast<{return_type}>(0);")
         elif return_type in {"int", "bool"}:
             lines.append("        return 0;")
-        elif is_variant_adapter(variant.callable.return_adapter) or is_sequence_of_variant_adapter(
-            variant.callable.return_adapter
+        elif (
+            is_variant_adapter(variant.callable.return_adapter)
+            or is_sequence_of_variant_adapter(variant.callable.return_adapter)
+            or is_sequence_of_string_adapter(variant.callable.return_adapter)
         ):
             lines.append("        return {};")
         else:
@@ -1368,6 +1443,24 @@ def emit_python_extension(model: ModuleModel) -> str:
             lines.append("    }")
             lines.append(f"    {list_prefix}_free(result);")
             lines.append("    return values;")
+        elif is_sequence_of_string_adapter(variant.callable.return_adapter):
+            string_list_type = _string_list_c_type(model)
+            string_list_free = _string_list_free_name(model)
+            lines.append(f"    {string_list_type} result = {native_call};")
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append(f"        {string_list_free}(result);")
+            lines.append('        return raise_last_error("Native call failed");')
+            lines.append("    }")
+            lines.append("    PyObject* values = PyList_New(result.count);")
+            lines.append("    if (values == nullptr) {")
+            lines.append(f"        {string_list_free}(result);")
+            lines.append("        return nullptr;")
+            lines.append("    }")
+            lines.append("    for (int index = 0; index < result.count; ++index) {")
+            lines.append("        PyList_SET_ITEM(values, index, PyUnicode_FromString(result.items[index]));")
+            lines.append("    }")
+            lines.append(f"    {string_list_free}(result);")
+            lines.append("    return values;")
         else:
             raise RuntimeError(
                 f"Unsupported return adapter in Python extension emitter: {variant.callable.return_adapter}"
@@ -1437,6 +1530,8 @@ def _python_type_for_return(adapter: str, model: ModuleModel) -> str:
     if is_sequence_adapter(adapter):
         target = _class_index(model)[sequence_adapter_target(adapter)]
         return f"list[{target.py_name}]"
+    if is_sequence_of_string_adapter(adapter):
+        return "list[str]"
     return "object"
 
 
@@ -1486,6 +1581,9 @@ def _emit_python_return(
     if is_sequence_adapter(adapter):
         target = _class_index(model)[sequence_adapter_target(adapter)]
         lines.append(f"{indent}return [{target.py_name}(item) for item in {call_expression}]")
+        return
+    if is_sequence_of_string_adapter(adapter):
+        lines.append(f"{indent}return {call_expression}")
         return
     raise RuntimeError(f"Unsupported return adapter in Python facade emitter: {adapter}")
 
@@ -2305,6 +2403,24 @@ def emit_napi_extension(model: ModuleModel) -> str:
             lines.append("    }")
             lines.append(f"    {list_free}(result);")
             lines.append("    return js_result;")
+        elif is_sequence_of_string_adapter(variant.callable.return_adapter):
+            string_list_type = _string_list_c_type(model)
+            string_list_free = _string_list_free_name(model)
+            lines.append(f"    {string_list_type} result = {native_call};")
+            lines.extend(free_variant_parameter_lines)
+            lines.append("    if (ifcopenshell_last_error_message() != nullptr) {")
+            lines.append(f"        {string_list_free}(result);")
+            lines.append('        return throw_last_error(env, "Native call failed");')
+            lines.append("    }")
+            lines.append("    napi_value js_result;")
+            lines.append("    napi_create_array_with_length(env, result.count, &js_result);")
+            lines.append("    for (int index = 0; index < result.count; ++index) {")
+            lines.append("        napi_value item;")
+            lines.append("        napi_create_string_utf8(env, result.items[index], NAPI_AUTO_LENGTH, &item);")
+            lines.append("        napi_set_element(env, js_result, index, item);")
+            lines.append("    }")
+            lines.append(f"    {string_list_free}(result);")
+            lines.append("    return js_result;")
         else:
             raise RuntimeError(
                 f"Unsupported return adapter in N-API extension emitter: {variant.callable.return_adapter}"
@@ -2408,6 +2524,8 @@ def _ts_type_for_return(adapter: str, model: ModuleModel) -> str:
         }
         alternatives = ["string", "number", "boolean", *sorted(handle_case_types), "null"]
         return " | ".join(alternatives)
+    if is_sequence_of_string_adapter(adapter):
+        return "string[]"
     return "unknown"
 
 
