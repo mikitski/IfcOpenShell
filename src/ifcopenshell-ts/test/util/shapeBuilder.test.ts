@@ -877,7 +877,39 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	test("profile: DISCLOSED BLOCKED (Dim derived-attribute gap)", () => {
+	// **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`,
+	// `planning/ifcopenshell-ts/70-express-rules-plan.md` §4): a straight
+	// (`closed=false`, no `arcPoints`) `polyline()` on a non-IFC2X3 schema builds a
+	// real `IfcIndexedPolyCurve` over an `IfcCartesianPointList2D` (`shapeBuilder.ts`'s
+	// own `polyline()`) -- `calc_IfcCurve_Dim`'s new `IfcIndexedPolyCurve` branch
+	// (dispatching into `calc_IfcCartesianPointList_Dim`, both this chunk) now
+	// resolves `.Dim` for IFC4, so `profile()`'s own leading `Dim` guard no longer
+	// throws there: `profile()` now completes successfully end to end on IFC4 (verified
+	// directly against the real built addon). IFC4X3 is UNCHANGED -- no `rules/
+	// ifc4x3.ts` module exists yet, so this still throws `DIM_ERROR` there. Split into
+	// schema-conditional branches, matching `editSurveyPoint.test.ts`'s own established
+	// precedent for this exact shape of partial, schema-scoped resolution.
+	test.skipIf(schema !== "IFC4")(
+		"profile: now genuinely unblocked on IFC4 (Dim resolves via calc_IfcCurve_Dim)",
+		() => {
+			const file = createTestFile(schema);
+			const builder = new ShapeBuilder(file);
+			const curve = builder.polyline(
+				[
+					[0, 0],
+					[1, 0],
+					[1, 1],
+				],
+				false,
+			);
+			const profileDef = builder.profile(curve);
+			expect(profileDef.isA()).toBe("IfcArbitraryClosedProfileDef");
+			expect((profileDef.get("OuterCurve") as EntityInstance).equals(curve)).toBe(true);
+			file.dispose();
+		},
+	);
+
+	test.skipIf(schema === "IFC4")("profile: still DISCLOSED BLOCKED on IFC4X3 (Dim derived-attribute gap)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
 		const curve = builder.polyline(
@@ -892,20 +924,44 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	test("createSweptDiskSolid: DISCLOSED BLOCKED (Dim derived-attribute gap)", () => {
-		const file = createTestFile(schema);
-		const builder = new ShapeBuilder(file);
-		const curve = builder.polyline(
-			[
-				[0, 0, 0],
-				[1, 0, 0],
-				[1, 1, 0],
-			],
-			false,
-		);
-		expect(() => builder.createSweptDiskSolid(curve, 0.5)).toThrow(DIM_ERROR);
-		file.dispose();
-	});
+	// Same update as `profile` above -- `createSweptDiskSolid`'s own leading `Dim`
+	// guard (`pathCurve.get("Dim") !== 3`) now resolves for IFC4 too.
+	test.skipIf(schema !== "IFC4")(
+		"createSweptDiskSolid: now genuinely unblocked on IFC4 (Dim resolves via calc_IfcCurve_Dim)",
+		() => {
+			const file = createTestFile(schema);
+			const builder = new ShapeBuilder(file);
+			const curve = builder.polyline(
+				[
+					[0, 0, 0],
+					[1, 0, 0],
+					[1, 1, 0],
+				],
+				false,
+			);
+			const solid = builder.createSweptDiskSolid(curve, 0.5);
+			expect(solid.isA()).toBe("IfcSweptDiskSolid");
+			file.dispose();
+		},
+	);
+
+	test.skipIf(schema === "IFC4")(
+		"createSweptDiskSolid: still DISCLOSED BLOCKED on IFC4X3 (Dim derived-attribute gap)",
+		() => {
+			const file = createTestFile(schema);
+			const builder = new ShapeBuilder(file);
+			const curve = builder.polyline(
+				[
+					[0, 0, 0],
+					[1, 0, 0],
+					[1, 1, 0],
+				],
+				false,
+			);
+			expect(() => builder.createSweptDiskSolid(curve, 0.5)).toThrow(DIM_ERROR);
+			file.dispose();
+		},
+	);
 
 	test("extrude / translate / rotate / mirror on a manually-built IfcExtrudedAreaSolid " +
 		"(isolated from the disclosed profile()/Dim gap via a local fixture helper)", () => {

@@ -33,9 +33,16 @@
 //    `"Body-Fallback"`-identified context is ranked BELOW `"Axis"`, not second (right
 //    after `"Body"`) as the documented priority order intends.
 // 5. `guessType`'s `Dim`-dependent branches (`Curve2D`/`Curve3D`/`Surface2D`/`Surface3D`)
-//    are blocked by the pre-existing `entityInstance.ts` "no EXPRESS DERIVED attribute"
-//    gap -- a dedicated test asserts the real, documented error for an `IfcLine` item,
-//    rather than silently skipping coverage of that branch.
+//    were blocked by the pre-existing `entityInstance.ts` "no EXPRESS DERIVED attribute"
+//    gap -- a dedicated test originally asserted the real, documented error for an
+//    `IfcLine` item, rather than silently skipping coverage of that branch.
+//    **Updated by Phase EX-2's IFC4 second chunk** (`src/express/rules/ifc4.ts`):
+//    `calc_IfcCurve_Dim`/`calc_IfcCartesianPointList_Dim` are now ported for IFC4, so
+//    `Curve2D`/`Curve3D` (and the plain `Curve` fallback) now resolve correctly instead
+//    of throwing -- see `representation.ts`'s own updated header comment (finding 4)
+//    for the full writeup. `Surface2D`/`Surface3D` remain genuinely blocked (no
+//    `IfcSurface`-subtype `Dim` function ported by any chunk yet) -- unaffected, not
+//    retested here.
 
 import { mat4 } from "gl-matrix";
 import { describe, expect, test } from "vitest";
@@ -356,15 +363,47 @@ describe("util.representation guessType", () => {
 		expect(subject.guessType([p, brep])).toBeNull();
 	});
 
-	// --- disclosed blocker: `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` need the real
-	// EXPRESS DERIVED `.Dim` attribute, which this port's `EntityInstance.get()` cannot
-	// resolve (a pre-existing `entityInstance.ts` gap) -- see this file's header
-	// comment and `representation.ts`'s own header comment/`TODOS.md` for the full
-	// story. Pinned here with a real regression test, not silently skipped.
-	test("Curve2D/Curve3D branches throw the disclosed .Dim DERIVED-attribute error for a real IfcCurve", () => {
+	// --- `Curve2D`/`Curve3D`/`Surface2D`/`Surface3D` need the real EXPRESS DERIVED
+	// `.Dim` attribute -- see this file's header comment (finding 5) and
+	// `representation.ts`'s own header comment (finding 4) for the full story.
+	// **Updated by Phase EX-2's IFC4 second chunk**: `calc_IfcCurve_Dim`/`calc_
+	// IfcCartesianPointList_Dim` now resolve `.Dim` for any real `IfcCurve` on IFC4,
+	// so these are no longer blocked -- `Curve2D`/`Curve3D` now genuinely reachable,
+	// pinned with real, resolved-behavior tests instead of a thrown-error regression.
+	test("Curve2D for a real 2D IfcLine (Dim resolves via calc_IfcCurve_Dim)", () => {
+		const file = createTestFile("IFC4");
+		const pnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0]);
+		const line = file.createEntity("IfcLine", pnt, null);
+		expect(subject.guessType([line])).toBe("Curve2D");
+	});
+
+	test("Curve3D for a real 3D IfcLine (Dim resolves via calc_IfcCurve_Dim)", () => {
+		const file = createTestFile("IFC4");
+		const pnt = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+		const line = file.createEntity("IfcLine", pnt, null);
+		expect(subject.guessType([line])).toBe("Curve3D");
+	});
+
+	// A bare `IfcLine` with NO `Pnt` set: `Dim` resolves to `runtimeShim.INDETERMINATE`
+	// (`expressGetAttr(null, 'Dim', INDETERMINATE)`, `IfcCurveDim`'s own `IfcLine`
+	// branch reading an unset `Pnt`), which matches neither `=== 2` nor `=== 3` --
+	// `guessType` falls through to the plain, `Dim`-independent `Curve` branch. A
+	// real, resolved (not thrown) edge case, not a bug.
+	test("plain Curve fallback for an IfcLine with Dim genuinely indeterminate (Pnt unset)", () => {
 		const file = createTestFile("IFC4");
 		const line = file.createEntity("IfcLine");
-		expect(() => subject.guessType([line])).toThrow();
+		expect(subject.guessType([line])).toBe("Curve");
+	});
+
+	// `Surface2D`/`Surface3D` remain genuinely blocked for IFC4 (no `IfcSurface`-subtype
+	// `Dim` function ported by any chunk yet) -- unaffected by this chunk, still pinned
+	// with the original disclosed-error regression test.
+	test("Surface2D/Surface3D branches still throw the disclosed .Dim DERIVED-attribute error for a real IfcSurface", () => {
+		const file = createTestFile("IFC4");
+		const planeLocation = file.createEntity("IfcCartesianPoint", [0.0, 0.0, 0.0]);
+		const planePlacement = file.createEntity("IfcAxis2Placement3D", planeLocation, null, null);
+		const plane = file.createEntity("IfcPlane", planePlacement);
+		expect(() => subject.guessType([plane])).toThrow(/has no attribute 'Dim'/);
 	});
 });
 

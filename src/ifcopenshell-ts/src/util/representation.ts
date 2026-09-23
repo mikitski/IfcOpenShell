@@ -159,6 +159,27 @@
 // blocker with a regression test (asserting the real, documented error), not just
 // prose. See `TODOS.md`'s new entry for this.
 //
+// --- UPDATE (Phase EX-2, planning/ifcopenshell-ts/70-express-rules-plan.md): the
+//     `Curve2D`/`Curve3D` HALF of this gap is now closed for IFC4 SPECIFICALLY ---
+//
+// IFC4's own second `calc_*`-porting chunk (`src/express/rules/ifc4.ts`) ported
+// `calc_IfcCurve_Dim` (real `IfcCurveDim`, all 10 dispatch branches including the 2
+// that postdate IFC2X3, `IfcPcurve`/`IfcIndexedPolyCurve`) and `calc_
+// IfcCartesianPointList_Dim` -- `i.get("Dim")` on a real `IfcCurve` now resolves
+// instead of throwing, for any IFC4 file. `guessType`'s `Curve2D`/`Curve3D` branches
+// (and the plain, `Dim`-independent `Curve` fallback) are therefore now genuinely
+// reachable and correct for IFC4, with ZERO further changes needed here (this file's
+// own code was already correct, real, working code the moment the underlying gap
+// closed -- exactly as this comment's own paragraph above anticipated). `Surface2D`/
+// `Surface3D` remain genuinely blocked for IFC4 (no `IfcSurface`-subtype `Dim`
+// function ported by any chunk yet). This file's own `guessType` test coverage was
+// only ever written against a hardcoded IFC4 fixture (no IFC2X3-specific `Curve2D`/
+// `Curve3D` test exists here at all, even though IFC2X3 ported `calc_IfcCurve_Dim`
+// itself several chunks ago) -- out of scope for this chunk to add, which only
+// touches IFC4's own dispatch; IFC4X3 remains blocked regardless (no `rules/
+// ifc4x3.ts` module exists yet). `representation.test.ts`'s own `guessType` coverage
+// is updated accordingly for IFC4 (see that file's own updated comment).
+//
 // *** A fifth real finding (not a bug, verified against the actual schema, disclosed
 // for anyone reading `guess_type`'s branch list expecting each string result to be
 // independently reachable): `"AdvancedSweptSolid"`/`"Brep"`/`"AdvancedBrep"` are dead
