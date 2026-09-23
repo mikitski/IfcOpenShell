@@ -301,8 +301,132 @@
 //    still produced a misleading diagnostic instead of a clear one. Fixed with an explicit
 //    `header === null` guard at the top of `validateIfcHeader`, returning a single, clear
 //    violation instead.
+//
+// *** Phase EX-3 chunk 4 (planning/ifcopenshell-ts/70-express-rules-plan.md): the main
+// `validate(f)` orchestrator (real source lines 419-629), wiring chunks 2/3 together --
+// see that function's own doc comment for the line-by-line real-source mapping. This
+// chunk also wires up the real, fixture-based `test/test_validate.py`-equivalent test
+// suite (`test/validate.orchestrator.test.ts`, all 38 already-vendored fixtures in
+// `test/fixtures/validate/`). ***
+//
+// 15. **A real, disclosed, and now fully-enumerated test-fidelity gap family**: this
+//    port's `validate()` cannot detect ANY malformed-STEP-syntax condition that real
+//    Python's own C++ core only reports via a parse-time log message
+//    (`ifcopenshell.get_log()`, surfaced through `log_internal_cpp_errors`) --
+//    `70-express-rules-plan.md`'s own Phase EX-3 finding already disclosed this whole
+//    mechanism as genuinely unavailable (no `logger::root()` binding, no factory) and
+//    already locked the resulting API decision (`validate()` accepts only an
+//    already-open `IfcFile`, never a raw path, making the entire log-capture branch
+//    N/A by design); chunk 3's own finding 10 already named the *first* concrete
+//    fixture this affects (`fail-header-attr-too-many.ifc`). Wiring up the full fixture
+//    suite in this chunk empirically confirmed (via `validate()` itself, run against
+//    every vendored fixture, not assumed) that the *same* root cause affects **8
+//    further fixtures**, each for a different concrete flavor of "the tolerant C++
+//    parser silently drops/pads/coerces a malformed value instead of raising a
+//    catchable exception, but *does* log something a path-based `validate()` would
+//    have captured":
+//    - `fail-attr-too-few.ifc` / `fail-attr-too-many.ifc`: an entity instance given 7 or
+//      9 raw STEP arguments where its schema declares exactly 8 (`IfcPerson`) --
+//      confirmed empirically (throwaway probe against the built addon) that this
+//      port's parser silently pads the missing trailing argument with `$`/drops the
+//      extra one entirely (`inst.toString()` round-trips to exactly 8 arguments either
+//      way), and every one of those 8 values reads back as an unremarkable, valid
+//      `null` -- zero violations reachable through any per-instance check this file
+//      implements.
+//    - `fail-expected-2-header-attr-too-few.ifc`: `FILE_NAME` given only 6 of its 7
+//      arguments. `validateIfcHeader` correctly reports the missing `authorization`
+//      field (1 violation, confirmed) -- real Python's expected count of 2 implies a
+//      *second*, log-only violation for the same underlying malformed-SPF-syntax event,
+//      unreachable here for the same reason.
+//    - `fail-expected-2-selected-simple-type-empty-typed-value.ifc`: a defined-type
+//      literal, `IFCREAL()`, given ZERO of its 1 expected argument. This port's
+//      `assertValid` DOES correctly flag the resulting `null` wrapped-value as invalid
+//      (1 violation, confirmed) -- but real Python's expected count of 2 again implies
+//      a second, log-only violation for the arg-count mismatch itself (the identical
+//      "too few args" condition as `fail-attr-too-few.ifc` above, just at defined-type-
+//      literal granularity instead of entity granularity).
+//    - `fail-expected-2-selected-simple-type-non-existant-type.ifc`: `IFCNONEXISTANTTYPE(0.1)`
+//      -- not a real declared EXPRESS type in the schema at all. Confirmed empirically
+//      that this port's parser marshals it as a bare, undecorated JS array (`[0.1]`),
+//      losing the (fictional) type name entirely; `assertValid`'s select branch
+//      correctly flags this as invalid because the value isn't an `EntityInstance` at
+//      all (1 violation, confirmed) -- real Python's expected count of 2 implies a
+//      second, log-only violation for the unknown-type-name condition itself.
+//    - `fail-expected-2-invalid-selected-enumeration.ifc`: `IFCNULLSTYLE(.NOT_EXISTING_ENUM.)`
+//      -- `IfcNullStyle` is a real schema declaration (confirmed via a direct probe:
+//      an `enumeration_type`, not an entity -- `TYPE IfcNullStyle = ENUMERATION OF
+//      (NULL);`), so this port's `assertValid` select branch correctly resolves it,
+//      reads its wrapped enum value, and correctly flags `"NOT_EXISTING_ENUM"` as not a
+//      member of `IfcNullStyle`'s own (single-item) enumeration (1 violation, confirmed
+//      -- and confirmed NOT a select-membership failure: `IfcNullStyle` genuinely IS a
+//      real, legal member of `IfcPresentationStyleSelect`, verified directly against
+//      `getSelectMembers`) -- real Python's expected count of 2 implies a second,
+//      log-only violation for the malformed enumeration literal itself.
+//    - `fail-expected-3-invalid-entity.ifc`: `IFCBUILTELEMENT(...)` (a nonexistent
+//      entity name, presumably a typo for `IFCBUILDINGELEMENT`) is referenced both
+//      standalone (`#1`) and from a valid `IfcRelAssociatesMaterial`'s `RelatedObjects`
+//      (`(#1)`). Confirmed empirically: `#1` is dropped from the parsed model entirely
+//      (`file.byId(1)` throws "Instance #1 not found", and this port's own
+//      `[Symbol.iterator]` -- which walks real schema declarations, never a raw id
+//      range -- can never visit it either), and the dangling reference to it is
+//      silently dropped from `RelatedObjects` too (marshals to an empty array). This
+//      port's own aggregation-bound check on `RelatedObjects` (`SET [1:?] OF IfcRoot`)
+//      correctly flags the resulting empty array as invalid (1 of the 3 expected
+//      violations, confirmed) -- the other 2 (one for the unknown entity name itself,
+//      one for the dangling reference) are real Python's own C++-log-only
+//      diagnostics, unreachable here for the same reason.
+//    - `fail-invalid-entity-in-attribute.ifc`: `IFCCARTESIANPOINT((5.,5.,nan.))` --
+//      `nan.` is not a valid STEP REAL literal (no special-case handling exists
+//      anywhere in `src/ifcparse`, confirmed by grep). Confirmed empirically that this
+//      port's tolerant parser silently drops the malformed third list element rather
+//      than erroring (`Coordinates` marshals to a plain 2-element `[5, 5]`, which
+//      satisfies `IfcCartesianPoint.Coordinates`'s own `LIST [1:3]` bound perfectly
+//      fine) -- zero violations reachable through any per-instance check this file
+//      implements; real Python's own single expected violation is presumably the same
+//      C++-log-only diagnostic for the dropped, malformed token.
+//    All 9 fixtures above are marked as accepted, disclosed known-divergences (skipped
+//    with a comment citing this finding) in `test/validate.orchestrator.test.ts`, not
+//    silently-adjusted expected counts -- matching chunk 3's own established precedent
+//    for `fail-header-attr-too-many.ifc`.
+//
+// 16. **A second, distinct, real test-fidelity gap family, confirmed empirically**:
+//    `fail-derived-as-nil.ifc` and `fail-nil-as-derived.ifc` (byte-identical fixture
+//    content, `#1=IFCSIUNIT(*,.LENGTHUNIT.,*,.METRE.)`, both real Python `fail-`
+//    fixtures expecting exactly 1 violation) are both a direct, disclosed consequence
+//    of `use_attribute_value_derived` being deliberately out of scope for this port
+//    (`70-express-rules-plan.md`'s locked Phase EX-3 decision; also see finding 2
+//    above). Confirmed via a direct probe against the built addon:
+//    `IfcSIUnit.Prefix` (an ordinary, optional, FORWARD-category attribute -- NOT
+//    declared DERIVE, confirmed via `EntityInstance.attributeCategory`) is given `*`
+//    in this fixture, which is a schema misuse (`*` may only appear at a position the
+//    schema itself declares DERIVE, e.g. `IfcSIUnit.Dimensions`, position 0). Real
+//    Python (with the feature flag on) reads `Prefix` back as an
+//    `attribute_value_derived` marker object -- not `None` -- so its own "not
+//    optional" guard (which only fires on `None`) never fires either, and instead
+//    `assert_valid` is invoked on the marker object itself, which fails Prefix's own
+//    `IfcSIPrefix` enumeration-membership check (the marker object is obviously not a
+//    valid enum member) and raises the single expected `ValidationError`. This port
+//    has no way to construct that marker object at all (feature out of scope); reading
+//    `Prefix` here returns a plain `null`, indistinguishable from an ordinary,
+//    perfectly legal `$` -- and since `Prefix` is genuinely optional, a `null` value
+//    is silently accepted, producing zero violations instead of the expected one. Both
+//    fixtures are marked as accepted, disclosed known-divergences in
+//    `test/validate.orchestrator.test.ts`.
+//
+// 17. **A third test-fidelity gap family, confirmed as a real fixture-level
+//    manifestation of an ALREADY-disclosed gap, not a new one**: `fail-invalid-
+//    selected-simple-type.ifc` (`IFCPOSITIVELENGTHMEASURE('1')` -- a string literal
+//    where a real number is declared) and `fail-selected-simple-type-wrong-literal.ifc`
+//    (`IFCLABEL(0.5)` -- a real-number literal where a string is declared) are both
+//    direct, concrete instances of this file's own finding 2 (`simple_type.
+//    declared_type()` has no N-API binding, so `assertValid`'s simple-type branch uses
+//    a disclosed, permissive `string | number | boolean` fallback instead of Python's
+//    exact per-EXPRESS-kind check) -- already anticipated and already pinned by
+//    `test/validate.test.ts`'s own "a disclosed permissive gap accepts other scalars
+//    too" test (chunk 2). Both fixtures are marked as accepted, disclosed known-
+//    divergences in `test/validate.orchestrator.test.ts`, citing this finding.
 
-import { EntityInstance } from "./entityInstance";
+import { AttributeCategory, EntityInstance } from "./entityInstance";
 import type { IfcFile } from "./file";
 import { expand as guidExpand } from "./guid";
 import {
@@ -983,6 +1107,191 @@ export function validateIfcApplications(f: IfcFile): ValidationError[] {
 				);
 			} else {
 				usedIds.set(appId, inst);
+			}
+		}
+	}
+
+	return violations;
+}
+
+// --- `validate` orchestrator (real source lines 419-629; closes Phase EX-3) ---
+
+/**
+ * Python: `validate(f, logger, express_rules=False) -> None` (real source lines
+ * 419-629). Deliberately omits the `use_attribute_value_derived` feature-flag toggle
+ * (lines 452-453, 622-623), the raw-path/`log_internal_cpp_errors` file-opening branch
+ * (lines 455-483), and the `express_rules` parameter (line 419, 625-629) -- all three
+ * locked out-of-scope decisions from `70-express-rules-plan.md`'s Phase EX-3 section,
+ * not overlooked. Calls chunk 3's `validateIfcHeader`/`validateIfcApplications` (lines
+ * 485-486) and merges their results, then walks every instance in the file (`for inst
+ * in f:`, line 491) checking, in order: file-wide `GlobalId` uniqueness/validity (lines
+ * 495-521), the entity-not-abstract check (lines 525-531), every forward attribute by
+ * index (lines 533-551), the per-forward-attribute derived/not-optional/`assertValid`
+ * checks (lines 553-593), and every inverse attribute via `assertValidInverse` (lines
+ * 595-612). Returns every violation found across the whole file, matching real
+ * Python's own "keep going, log everything" behavior (`try/except ValidationError`
+ * around each `assert_valid`/`assert_valid_inverse` call, never re-raised) -- see this
+ * file's header comment, chunk 3 preface, for why this whole file returns a structured
+ * violation list instead of accepting a Python-style duck-typed `logger`.
+ *
+ * See this file's header comment, findings 15-17, for real, disclosed test-fidelity
+ * gaps found and confirmed empirically (via throwaway probes against the real built
+ * addon, not assumed) while wiring up the fixture-based test suite below.
+ */
+export function validate(f: IfcFile): ValidationError[] {
+	const violations: ValidationError[] = [];
+
+	violations.push(...validateIfcHeader(f));
+	violations.push(...validateIfcApplications(f));
+
+	const schema = f.nativeFile.schema();
+	// Python: `used_guids: dict[str, entity_instance] = dict()` (real source line 158,
+	// just above the loop).
+	const usedGuids = new Map<string, EntityInstance>();
+
+	for (const inst of f) {
+		// Python: `entity, attrs = get_entity_attributes(schema, inst.is_a())` (line 175)
+		// -- hoisted above the GlobalId check below (real source calls this slightly
+		// later, after the GlobalId block) purely so `attrs` can answer "does this
+		// entity's declaration even have a GlobalId attribute at all" (see this file's
+		// header comment, finding 15, for why that's the right primitive-layer question
+		// to ask here) -- a disclosed, behavior-neutral reordering, not a logic change:
+		// `get_entity_attributes` is a pure, cached lookup with no side effects Python's
+		// own GlobalId block could possibly observe.
+		const [entity, attrs] = getEntityAttributes(schema, inst.isA());
+
+		// --- GlobalId uniqueness + validity (lines 495-521) ---
+		//
+		// Python: `if (guid := getattr(inst, "GlobalId", ...)) is not ...:` -- `getattr`
+		// with a sentinel default distinguishes "this entity type has no GlobalId
+		// attribute at all" (not every entity is an `IfcRoot` subtype) from "it has one,
+		// but the value is None." This port has no dynamic `getattr`-with-default
+		// equivalent, so the same question is answered directly against the schema:
+		// does `attrs` (`entity.all_attributes()`, from the cached lookup above) list a
+		// "GlobalId" attribute at all? (See this file's header comment, finding 15.)
+		if (attrs.some((a) => a.name() === "GlobalId")) {
+			let guidValue: unknown;
+			try {
+				guidValue = inst.get("GlobalId");
+			} catch {
+				// A malformed GlobalId value that fails to read at all is reported by the
+				// general forward-attribute read loop below (same index, same failure) --
+				// not double-reported here.
+				guidValue = undefined;
+			}
+			if (typeof guidValue === "string") {
+				const previous = usedGuids.get(guidValue);
+				if (previous) {
+					violations.push(
+						new ValidationError(
+							`On instance:\n    ${inst.toString()}\nRule IfcRoot.UR1:\n    The attribute GlobalId should be unique\nViolated by:\n    ${previous.toString()}\n`,
+							"GlobalId",
+						),
+					);
+				} else {
+					const guidError = validateGuid(guidValue);
+					if (guidError === null) {
+						usedGuids.set(guidValue, inst);
+					} else {
+						violations.push(
+							new ValidationError(
+								`On instance:\n    ${inst.toString()}\nIfcGloballyUniqueId base64 validation:\n    The attribute GlobalId should be valid base64 encoded 128-bit number.\nViolated by:\n    ${guidError}\n`,
+								"GlobalId",
+							),
+						);
+					}
+				}
+			}
+		}
+
+		// --- entity-not-abstract check (lines 525-531) ---
+		if (entity.is_abstract()) {
+			violations.push(
+				new ValidationError(`For instance:\n    ${inst.toString()}\nEntity ${entityName(entity)} is abstract`),
+			);
+		}
+
+		// --- read every forward attribute by index (lines 533-551) ---
+		let hasInvalidValue = false;
+		const values: unknown[] = new Array(attrs.length).fill(null);
+		for (let i = 0; i < attrs.length; i++) {
+			try {
+				values[i] = inst.getByIndex(i);
+			} catch {
+				violations.push(
+					new ValidationError(
+						`For instance:\n    ${inst.toString()}\nInvalid attribute value for ${entityName(entity)}.${attrs[i].name()}`,
+						attrs[i].name(),
+					),
+				);
+				hasInvalidValue = true;
+			}
+		}
+
+		// --- per-forward-attribute checks (lines 553-593) ---
+		//
+		// Python zips in `entity.derived()` (a per-position, per-concrete-class boolean
+		// tuple with no N-API binding) -- ported via `EntityInstance.attributeCategory`
+		// (`AttributeCategory.DERIVED`), confirmed to reproduce its exact per-position
+		// semantics (`70-express-rules-plan.md`'s locked Phase EX-3 finding). See this
+		// file's header comment, finding 16, for why a DERIVED-category position is
+		// unconditionally skipped here (never checked for "not optional," never passed
+		// to `assertValid`, and -- unlike real Python -- never itself flagged as "Derived
+		// in subtype" either): this port has no way to construct real Python's own
+		// `attribute_value_derived` marker object (the `use_attribute_value_derived`
+		// feature is locked out of scope), and both a *correct* `*` usage and an
+		// *incorrect* literal-value-instead-of-`*` usage marshal identically (indeed
+		// identically to plain `$`/`null`) through this port's own attribute-value
+		// layer -- skipping entirely reproduces real Python's outcome for the correct-
+		// usage case (by far the common one) at the cost of silently accepting the
+		// incorrect-usage case, a disclosed, deliberate trade-off, not an oversight.
+		if (!hasInvalidValue) {
+			for (let i = 0; i < attrs.length; i++) {
+				const attr = attrs[i];
+				const val = values[i];
+				if (inst.attributeCategory(attr.name()) === AttributeCategory.DERIVED) {
+					continue;
+				}
+
+				if (val === null && !attr.optional()) {
+					violations.push(
+						new ValidationError(
+							`For instance:\n    ${inst.toString()}\nWith attribute:\n    ${attr.name()}\nNot optional\n`,
+							attr.name(),
+						),
+					);
+				}
+
+				if (val !== null) {
+					try {
+						assertValid(attr.type_of_attribute(), val, schema, false, attr);
+					} catch (e) {
+						if (!(e instanceof ValidationError)) throw e;
+						violations.push(new ValidationError(`For instance:\n    ${inst.toString()}\n${e.message}`, e.attribute));
+					}
+				}
+			}
+		}
+
+		// --- every inverse attribute (lines 595-612) ---
+		for (const invAttr of entity.all_inverse_attributes()) {
+			let val: EntityInstance[];
+			try {
+				val = inst.getInverseAttribute(invAttr.name());
+			} catch (e) {
+				violations.push(
+					new ValidationError(
+						`For instance:\n    ${inst.toString()}\n${(e as Error).message}`,
+						`${entityName(entity)}.${invAttr.name()}`,
+					),
+				);
+				continue;
+			}
+			try {
+				assertValidInverse(invAttr, val, schema);
+			} catch (e) {
+				if (!(e instanceof ValidationError)) throw e;
+				violations.push(new ValidationError(`For instance:\n    ${inst.toString()}\n${e.message}`, e.attribute));
 			}
 		}
 	}

@@ -263,6 +263,24 @@ export class EntityInstance {
 	}
 
 	/**
+	 * `entity_instance.get_attribute_category(name)` -- a thin public wrapper around the
+	 * already-bound native primitive (no new native surface), matching `attributeType`
+	 * above's own precedent. Added for Phase EX-3 chunk 4's `validate()` orchestrator
+	 * (`src/validate.ts`), which needs this *per-instance* (not the class-level, cached,
+	 * FORWARD/INVERSE-only view `attributeCache.ts`'s `AttributeMeta` exposes -- that
+	 * cache deliberately excludes DERIVED-category forward slots entirely, see its own
+	 * header comment) to answer "is this specific forward attribute position DERIVED for
+	 * this instance's concrete declared type" -- the same question real Python's
+	 * `entity.derived()` answers, ported via `get_attribute_category` per
+	 * `70-express-rules-plan.md`'s locked Phase EX-3 finding (no native `derived()`
+	 * binding exists; this primitive already reproduces its exact per-position, per-
+	 * concrete-subtype semantics).
+	 */
+	attributeCategory(name: string): number {
+		return this.native.get_attribute_category(name);
+	}
+
+	/**
 	 * `entity_instance_mixin.attribute_type(index)` -- the underlying STEP argument kind
 	 * at `index` (e.g. `"DOUBLE"`/`"STRING"`/`"BOOL"`/`"INT"`/`"AGGREGATE OF DOUBLE"`/
 	 * ...), as opposed to `util/attribute.ts`'s `getPrimitiveType` (a *declaration*-level
