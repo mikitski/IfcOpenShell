@@ -157,6 +157,7 @@ import {
 	expressRange,
 	hiIndex,
 	isIndeterminate,
+	loIndex,
 	nvl,
 	sizeof,
 	typeOf,
@@ -1391,4 +1392,219 @@ registerSchemaCalcFunctions("IFC2X3", {
 	"IfcStructuralLinearActionVarying.VaryingAppliedLoads": calc_IfcStructuralLinearActionVarying_VaryingAppliedLoads,
 	"IfcStructuralPlanarActionVarying.VaryingAppliedLoads": calc_IfcStructuralPlanarActionVarying_VaryingAppliedLoads,
 	"IfcStructuralSurfaceMemberVarying.VaryingThickness": calc_IfcStructuralSurfaceMemberVarying_VaryingThickness,
+});
+
+// =============================================================================
+// Phase EX-2, fifth chunk (planning/ifcopenshell-ts/70-express-rules-plan.md §4): the
+// LAST 2 of IFC2X3's 55 `calc_*` functions -- `calc_IfcDerivedUnit_Dimensions`
+// (`IFC2X3.py` line 4741) and `calc_IfcSIUnit_Dimensions` (line 6541), both
+// re-verified directly against the real source before porting (exact line numbers
+// confirmed, bodies match verbatim). **This chunk closes out IFC2X3: 55/55 `calc_*`
+// functions now ported and registered** -- confirmed by summing this file's own 5
+// `registerSchemaCalcFunctions` calls' key counts (18 + 15 + 11 + 9 + 2 = 55) and by
+// the same `grep -n "^def calc_" IFC2X3.py | wc -l` sweep (55) every prior chunk in
+// this file has used.
+//
+// **Chunk 4's own header comment claimed these 2 were blocked by a missing
+// defined-type-construction primitive (the `EntityInstance.setByIndex`/
+// `IfcFile.createEntity` "Attribute access is only supported on entity instances"
+// gate, `TODOS.md`) -- that claim was WRONG, and this chunk re-confirms the
+// correction empirically itself rather than trusting either chunk 4's own claim or
+// the dispatching task brief's own correction of it.** `IfcDimensionalExponents` is
+// NOT a defined type at all -- re-verified directly against `generated/ifc2x3.d.ts`
+// (`export interface IfcDimensionalExponents { LengthExponent: number; ...}`, 7 plain
+// `number` fields, no `SELECT`/union anywhere) and against the real IFC2X3 EXPRESS
+// schema (`src/ifcparse/schemas/Ifc2x3-schema.cpp`) -- it is a genuine, ordinary
+// ENTITY with 7 non-optional INTEGER attributes, exactly like `IfcCartesianPoint` or
+// `IfcDirection` (both already constructed by this very file's own `ifcDirection`
+// helper, chunk 1). Confirmed empirically against this chunk's own freshly-built
+// native addon, not merely read from the `.d.ts`: `getScratchFile().createEntity(
+// "IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0)` succeeds and returns a real,
+// addressable entity (non-zero `id()`), and mutating one of its attributes
+// post-construction via the same Proxy-backed dot-assignment `ifcNormalise` above
+// already uses for `IfcDirection`/`IfcVector` (`(result as unknown as
+// Record<string, unknown>).LengthExponent = 5`) round-trips correctly through a
+// subsequent `.get("LengthExponent")`/`.LengthExponent` read. Both are ordinary
+// entity construction/mutation, already fully supported by this port's existing
+// `IfcFile.createEntity`/`EntityInstance` Proxy `set` trap -- no different from the
+// already-shipped `ifcDirection`/`ifcVector`/`ifcLine` helpers above, and completely
+// unrelated to the real, still-open `IfcLineIndex`/`IfcArcIndex`-style
+// defined-type-construction gap `TODOS.md` tracks (that gap is specific to
+// constructing a standalone SIMPLE/DEFINED-TYPE value like a bare `IfcLabel`/
+// `IfcLengthMeasure` by name, which routes through the native `attribute_kind_of`
+// primitive's "Attribute access is only supported on entity instances" throw for a
+// non-entity target -- `IfcDimensionalExponents` is a real entity, so it never
+// reaches that gate at all). See `test/express/rules/ifc2x3.test.ts`'s own "chunk 5"
+// `describe` block for the actual regression tests exercising this construction/
+// mutation path end to end (not just this comment's own claim).
+//
+// **2 new shared dependencies, both disclosed per this chunk's own task brief:**
+//
+// 1. `IfcDeriveDimensionalExponents(unitelements)` (real source line 7711,
+//    re-verified directly, byte-for-byte match) -- delegated to by
+//    `calc_IfcDerivedUnit_Dimensions`. Constructs a fresh `IfcDimensionalExponents`
+//    entity (all 7 exponents initialized to 0), then accumulates, for every element
+//    of `unitelements` (an `IfcDerivedUnitElement[]`), `Exponent *
+//    Unit.Dimensions.<X>Exponent` into the matching field of the result. `Unit` is
+//    typed `IfcNamedUnit` on `IfcDerivedUnitElement` (confirmed against `generated/
+//    ifc2x3.d.ts` -- a direct abstract-supertype reference, not a `SELECT`; the task
+//    brief's own framing of it as "a SELECT type" doesn't match what the schema
+//    actually declares, re-verified here rather than assumed from the brief). Reading
+//    `.Dimensions` off whatever concrete subtype `Unit` actually is dispatches
+//    correctly through the ordinary DERIVE-dispatch/plain-attribute machinery already
+//    wired up by this project, with NO extra `calc_IfcNamedUnit_Dimensions` function
+//    needed: confirmed directly against `IFC2X3.py` that no such function exists
+//    (`IfcNamedUnit` does not itself declare `Dimensions` as DERIVE -- `generated/
+//    ifc2x3.d.ts`'s own `IfcNamedUnit`/`IfcConversionBasedUnit` interfaces both list
+//    `Dimensions: IfcDimensionalExponents` as a PLAIN stored attribute, inherited
+//    as-is by `IfcConversionBasedUnit`; only `IfcSIUnit` and `IfcDerivedUnit`
+//    re-declare it as DERIVE at their own subtype level, exactly the 2 functions this
+//    chunk ports). So at runtime: a `IfcConversionBasedUnit` `Unit` resolves
+//    `.Dimensions` via the ordinary FORWARD-attribute path (already fully working,
+//    untouched by this chunk); an `IfcSIUnit`/`IfcDerivedUnit` `Unit` resolves it via
+//    this chunk's own 2 newly-registered DERIVE functions -- including the
+//    self-referential case where one `IfcDerivedUnitElement.Unit` is itself another
+//    `IfcDerivedUnit` (ordinary recursion through the same dispatch mechanism, no
+//    special-casing needed). Ported below as `ifcDeriveDimensionalExponents`.
+//
+// 2. `IfcDimensionsForSiUnit(n)` (real source line 7723, re-verified directly,
+//    byte-for-byte match -- a 29-branch lookup table plus an `else` fallback of all
+//    zeros) -- delegated to by `calc_IfcSIUnit_Dimensions`. `metre`/`square_metre`/
+//    etc. are real Python's own `enum_namespace` module-level re-exports of
+//    `IfcSIUnitName` enum labels (`IFC2X3.py` lines 1228-1257, e.g. `metre =
+//    IfcSIUnitName.METRE`) -- every one of the 29 labels this function's own branches
+//    reference was re-verified directly against those exact 29 assignment lines (not
+//    assumed from a mechanical snake-to-upper-snake conversion): all 29 turned out to
+//    be the straightforward uppercase conversion of their Python identifier
+//    (`degree_celsius` -> `DEGREE_CELSIUS` included), so this port's own version below
+//    is a plain chain of `n === "METRE"`/etc. string comparisons, matching this
+//    project's established `IfcTransitionCode.DISCONTINUOUS` -> `"DISCONTINUOUS"`
+//    string-literal convention (chunk 3's own header comment) rather than any kind of
+//    enum-object reference. Ported below as `ifcDimensionsForSiUnit`.
+//
+// **No new real Python bugs found in either of this chunk's own 2 assigned
+// functions or their 2 dependencies.** Both `calc_*` bodies are one-line
+// pass-throughs to their respective helper; `IfcDeriveDimensionalExponents`'s 7
+// parallel accumulation statements and `IfcDimensionsForSiUnit`'s 29-branch table are
+// direct, mechanical structural translations with no tuple-mutation, no
+// `INDETERMINATE`-poisoning arithmetic beyond this file's own already-disclosed,
+// inherited "JS throws instead of silently propagating" gap (see this file's own
+// header comment), and no other divergence from the real source found on direct
+// re-reading.
+//
+// This chunk's own test file (`test/express/rules/ifc2x3.test.ts`) updates the same
+// PRE-EXISTING "an unported DERIVE-shaped attribute still throws" test a FOURTH time
+// -- but this time there is no remaining genuinely-unported IFC2X3 DERIVE attribute
+// left to use as the example (this chunk closes out all 55), so the test's own
+// example is changed in KIND, not just swapped to a new IFC2X3 attribute name: it now
+// reads the identical `IfcDerivedUnit.Dimensions` attribute name chunk 4's own
+// version of this test used, but off an `IFC4` fixture instead of an `IFC2X3` one --
+// `calc_IfcDerivedUnit_Dimensions` exists in `IFC4.py` too (confirmed directly,
+// `IFC4.py` line 6418) but no `rules/ifc4.ts` module exists in this port yet, so
+// `dispatch.ts`'s per-schema registry has zero entries for `"IFC4"` and the read
+// still throws "has no attribute" -- demonstrating the dispatch mechanism's own
+// schema-scoping (§ `dispatch.ts`'s header comment) directly, rather than merely
+// re-asserting "some attribute somewhere is still unported" once IFC2X3 itself has
+// none left.
+// =============================================================================
+
+/**
+ * Python: `IfcDeriveDimensionalExponents` (`IFC2X3.py` line 7711) -- not itself a
+ * `calc_*` function (see this section's own header comment). Constructs a fresh
+ * `IfcDimensionalExponents` entity (a genuine ENTITY, not a defined type -- see
+ * header comment) via this file's own established `getScratchFile()` pattern, then
+ * mutates it in place across the loop, matching real Python's own
+ * `result.LengthExponent = ...` attribute reassignment exactly (ported via the same
+ * Proxy-backed dot-assignment cast `ifcNormalise` above already uses for
+ * `IfcDirection`/`IfcVector`, not `.set()` -- purely a style choice, both route
+ * through the identical `EntityInstance.setByIndex` path).
+ */
+function ifcDeriveDimensionalExponents(unitelements: unknown): EntityInstance {
+	const result = getScratchFile().createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	const mutable = result as unknown as Record<string, unknown>;
+	for (const i of expressRange(loIndex(unitelements), (hiIndex(unitelements) as number) + 1)) {
+		const element = expressGetItem(unitelements, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		const exponent = expressGetAttr(element, "Exponent", INDETERMINATE) as number;
+		const unitDimensions = expressGetAttr(expressGetAttr(element, "Unit", INDETERMINATE), "Dimensions", INDETERMINATE);
+		mutable.LengthExponent =
+			(expressGetAttr(result, "LengthExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "LengthExponent", INDETERMINATE) as number);
+		mutable.MassExponent =
+			(expressGetAttr(result, "MassExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "MassExponent", INDETERMINATE) as number);
+		mutable.TimeExponent =
+			(expressGetAttr(result, "TimeExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "TimeExponent", INDETERMINATE) as number);
+		mutable.ElectricCurrentExponent =
+			(expressGetAttr(result, "ElectricCurrentExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "ElectricCurrentExponent", INDETERMINATE) as number);
+		mutable.ThermodynamicTemperatureExponent =
+			(expressGetAttr(result, "ThermodynamicTemperatureExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "ThermodynamicTemperatureExponent", INDETERMINATE) as number);
+		mutable.AmountOfSubstanceExponent =
+			(expressGetAttr(result, "AmountOfSubstanceExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "AmountOfSubstanceExponent", INDETERMINATE) as number);
+		mutable.LuminousIntensityExponent =
+			(expressGetAttr(result, "LuminousIntensityExponent", INDETERMINATE) as number) +
+			exponent * (expressGetAttr(unitDimensions, "LuminousIntensityExponent", INDETERMINATE) as number);
+	}
+	return result;
+}
+
+/**
+ * Python: `IfcDimensionsForSiUnit` (`IFC2X3.py` line 7723) -- not itself a `calc_*`
+ * function (see this section's own header comment). Each `IfcDimensionalExponents`
+ * result is a fresh entity in this file's own shared scratch file, matching real
+ * Python's own "construct a brand-new instance per call" behavior exactly (no
+ * caching/interning in the real source either).
+ */
+function ifcDimensionsForSiUnit(n: unknown): EntityInstance {
+	const file = getScratchFile();
+	if (n === "METRE") return file.createEntity("IfcDimensionalExponents", 1, 0, 0, 0, 0, 0, 0);
+	if (n === "SQUARE_METRE") return file.createEntity("IfcDimensionalExponents", 2, 0, 0, 0, 0, 0, 0);
+	if (n === "CUBIC_METRE") return file.createEntity("IfcDimensionalExponents", 3, 0, 0, 0, 0, 0, 0);
+	if (n === "GRAM") return file.createEntity("IfcDimensionalExponents", 0, 1, 0, 0, 0, 0, 0);
+	if (n === "SECOND") return file.createEntity("IfcDimensionalExponents", 0, 0, 1, 0, 0, 0, 0);
+	if (n === "AMPERE") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 1, 0, 0, 0);
+	if (n === "KELVIN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 1, 0, 0);
+	if (n === "MOLE") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 1, 0);
+	if (n === "CANDELA") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 1);
+	if (n === "RADIAN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	if (n === "STERADIAN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+	if (n === "HERTZ") return file.createEntity("IfcDimensionalExponents", 0, 0, -1, 0, 0, 0, 0);
+	if (n === "NEWTON") return file.createEntity("IfcDimensionalExponents", 1, 1, -2, 0, 0, 0, 0);
+	if (n === "PASCAL") return file.createEntity("IfcDimensionalExponents", -1, 1, -2, 0, 0, 0, 0);
+	if (n === "JOULE") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, 0, 0, 0, 0);
+	if (n === "WATT") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, 0, 0, 0, 0);
+	if (n === "COULOMB") return file.createEntity("IfcDimensionalExponents", 0, 0, 1, 1, 0, 0, 0);
+	if (n === "VOLT") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, -1, 0, 0, 0);
+	if (n === "FARAD") return file.createEntity("IfcDimensionalExponents", -2, -1, 4, 1, 0, 0, 0);
+	if (n === "OHM") return file.createEntity("IfcDimensionalExponents", 2, 1, -3, -2, 0, 0, 0);
+	if (n === "SIEMENS") return file.createEntity("IfcDimensionalExponents", -2, -1, 3, 2, 0, 0, 0);
+	if (n === "WEBER") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, -1, 0, 0, 0);
+	if (n === "TESLA") return file.createEntity("IfcDimensionalExponents", 0, 1, -2, -1, 0, 0, 0);
+	if (n === "HENRY") return file.createEntity("IfcDimensionalExponents", 2, 1, -2, -2, 0, 0, 0);
+	if (n === "DEGREE_CELSIUS") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 1, 0, 0);
+	if (n === "LUMEN") return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 1);
+	if (n === "LUX") return file.createEntity("IfcDimensionalExponents", -2, 0, 0, 0, 0, 0, 1);
+	if (n === "BECQUEREL") return file.createEntity("IfcDimensionalExponents", 0, 0, -1, 0, 0, 0, 0);
+	if (n === "GRAY") return file.createEntity("IfcDimensionalExponents", 2, 0, -2, 0, 0, 0, 0);
+	if (n === "SIEVERT") return file.createEntity("IfcDimensionalExponents", 2, 0, -2, 0, 0, 0, 0);
+	return file.createEntity("IfcDimensionalExponents", 0, 0, 0, 0, 0, 0, 0);
+}
+
+// --- the 2 assigned `calc_*` functions (exact real-Python names, file order) ---
+
+export function calc_IfcDerivedUnit_Dimensions(self: EntityInstance): unknown {
+	const elements = expressGetAttr(self, "Elements", INDETERMINATE);
+	return ifcDeriveDimensionalExponents(elements);
+}
+
+export function calc_IfcSIUnit_Dimensions(self: EntityInstance): unknown {
+	return ifcDimensionsForSiUnit(expressGetAttr(self, "Name", INDETERMINATE));
+}
+
+registerSchemaCalcFunctions("IFC2X3", {
+	"IfcDerivedUnit.Dimensions": calc_IfcDerivedUnit_Dimensions,
+	"IfcSIUnit.Dimensions": calc_IfcSIUnit_Dimensions,
 });
