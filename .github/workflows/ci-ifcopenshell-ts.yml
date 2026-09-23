@@ -373,7 +373,21 @@ jobs:
         if: matrix.os == 'windows' && steps.cache-core.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          cmake -S cmake -B build -G "Visual Studio 17 2022" -A ${{ matrix.vsArch }} `
+          # No explicit `-G` generator name (previously hardcoded "Visual Studio 17
+          # 2022"): GitHub is migrating the `windows-11-arm` runner image's default
+          # Visual Studio from 2022 to 2026, rolling out 2026-09-21 through 2026-09-30
+          # (actions/runner-images#14602) - once a given runner instance is migrated and
+          # no longer has VS2022 installed at all, a hardcoded "Visual Studio 17 2022"
+          # generator name fails outright with "could not find any instance of Visual
+          # Studio" (confirmed: 5 identical failures across unrelated commits, all on
+          # `windows-11-arm` specifically, matching a partial/in-progress rollout - some
+          # runner instances still have VS2022, some don't yet). Omitting `-G` lets CMake
+          # auto-detect and select whichever Visual Studio generator actually matches
+          # what's installed on that specific runner instance, working correctly whether
+          # it's VS2022 or VS2026 (or both, mid-rollout) - the same fix applies equally to
+          # the `windows-2022` (x64) runner, which isn't part of this migration but gains
+          # nothing by pinning a generator version either.
+          cmake -S cmake -B build -A ${{ matrix.vsArch }} `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkgTriplet }} `
             -DCMAKE_INSTALL_PREFIX="$env:INSTALL_PREFIX" `
