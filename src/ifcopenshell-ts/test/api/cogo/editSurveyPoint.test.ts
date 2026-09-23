@@ -6,7 +6,7 @@
 // succeeds in real Python because `IfcCartesianPoint.Dim` (a real EXPRESS DERIVED
 // attribute) resolves there.
 //
-// **Updated by Phase EX-2's first chunk** (planning/ifcopenshell-ts/
+// **Updated by Phase EX-2's IFC2X3 first chunk** (planning/ifcopenshell-ts/
 // 70-express-rules-plan.md): `calc_IfcCartesianPoint_Dim` is one of that chunk's own
 // 15 ported functions, now wired into `EntityInstance.get()`'s DERIVE-dispatch path
 // (`src/express/rules/ifc2x3.ts`/`src/express/dispatch.ts`) -- `IfcCartesianPoint.Dim`
@@ -16,20 +16,25 @@
 // version of this comment, in version control, for the full "BLOCKED" writeup this
 // replaces). `editSurveyPoint.ts`'s own header comment is updated the same way.
 //
+// **Updated again by Phase EX-2's IFC4 first chunk** (`src/express/rules/ifc4.ts`):
+// that chunk independently ported the exact same 15 function names for IFC4 (confirmed
+// byte-identical real Python source for `calc_IfcCartesianPoint_Dim` specifically), so
+// `Dim` now resolves for IFC4 too -- the "still BLOCKED" branch below now applies to
+// IFC4X3 only (genuinely still unported).
+//
 // Real Python's own fixture builds its precondition via `add_survey_point`, which is
 // STILL blocked in this port by the SAME foundational kind of gap, via a DIFFERENT
-// derived attribute this chunk does NOT port (`IfcGeometricRepresentationSubContext
+// derived attribute no chunk has ported yet (`IfcGeometricRepresentationSubContext
 // .WorldCoordinateSystem` -- see `addSurveyPoint.ts`'s own header comment, unchanged) --
 // so, matching `assignSurveyPoint.test.ts`'s own established precedent, this fixture is
 // still built directly with `file.createEntity(...)` calls instead of via
 // `addSurveyPoint`.
 //
 // Not gated to IFC4X3 (unlike `addSurveyPoint.test.ts`): `IfcCartesianPoint.Dim`'s
-// formula is schema-independent (this chunk's own scope is IFC2X3 only, but
-// `Coordinates`/`Dim`'s shape is identical across all 3 schemas) -- runs across every
-// `AVAILABLE_SCHEMAS` entry, though only IFC2X3 actually resolves `Dim` via a real
-// ported function today; IFC4/IFC4X3 pick up the identical `calc_IfcCartesianPoint_Dim`
-// formula once a future chunk ports it for those schemas too.
+// formula is schema-independent (`Coordinates`/`Dim`'s shape is identical across all 3
+// schemas) -- runs across every `AVAILABLE_SCHEMAS` entry; IFC2X3 and IFC4 both resolve
+// `Dim` via their own real ported `calc_IfcCartesianPoint_Dim` today, IFC4X3 picks up
+// the identical formula once a future chunk ports it for that schema too.
 
 import { describe, expect, test } from "vitest";
 import { editSurveyPoint } from "../../../src/api/cogo/editSurveyPoint";
@@ -57,20 +62,21 @@ describe.each(AVAILABLE_SCHEMAS)("api.cogo.editSurveyPoint (%s)", (schema) => {
 		return { file, annotation, point };
 	}
 
-	if (schema === "IFC2X3") {
-		// `calc_IfcCartesianPoint_Dim` is ported for IFC2X3 only so far (Phase EX-2's
-		// first chunk) -- `Dim` resolves, restoring real Python's own assertion.
+	if (schema === "IFC2X3" || schema === "IFC4") {
+		// `calc_IfcCartesianPoint_Dim` is ported for IFC2X3 (Phase EX-2's first chunk)
+		// and IFC4 (IFC4's own first chunk) -- `Dim` resolves, restoring real Python's
+		// own assertion.
 		test("editing a survey point's location", () => {
 			const { annotation, point } = buildFixture();
 			editSurveyPoint(annotation, 20.0, 30.0);
 			expect((point as unknown as { Coordinates: number[] }).Coordinates).toEqual([20.0, 30.0]);
 		});
 	} else {
-		// IFC4/IFC4X3's own `calc_IfcCartesianPoint_Dim` (byte-for-byte the same formula
-		// in real Python) is NOT ported yet (future Phase EX-2 chunks, per
-		// `70-express-rules-plan.md`'s own IFC2X3-first sequencing) -- `Dim` still
-		// throws exactly as it did before this chunk, for these two schemas only.
-		test("editing a survey point's location -- still BLOCKED for this schema (Dim not yet ported for IFC4/IFC4X3)", () => {
+		// IFC4X3's own `calc_IfcCartesianPoint_Dim` (byte-for-byte the same formula in
+		// real Python) is NOT ported yet (a future Phase EX-2 chunk, per
+		// `70-express-rules-plan.md`'s own smallest-schema-first sequencing) -- `Dim`
+		// still throws exactly as it did before, for this schema only.
+		test("editing a survey point's location -- still BLOCKED for this schema (Dim not yet ported for IFC4X3)", () => {
 			const { annotation } = buildFixture();
 			expect(() => editSurveyPoint(annotation, 20.0, 30.0)).toThrow(/has no attribute 'Dim'/);
 		});

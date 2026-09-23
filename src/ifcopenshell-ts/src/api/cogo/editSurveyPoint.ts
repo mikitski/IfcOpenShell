@@ -7,9 +7,9 @@
 // Not a usecase: takes an `entity_instance` directly (no `file` parameter at all) --
 // see `./addSurveyPoint.ts`'s own header comment for the same finding, applied here.
 //
-// --- UPDATE (Phase EX-2's first chunk, planning/ifcopenshell-ts/
-//     70-express-rules-plan.md): the DERIVED-attribute gap below is now closed FOR
-//     `IfcCartesianPoint.Dim` SPECIFICALLY (IFC2X3 only so far) ---
+// --- UPDATE (Phase EX-2, planning/ifcopenshell-ts/70-express-rules-plan.md): the
+//     DERIVED-attribute gap below is now closed FOR `IfcCartesianPoint.Dim`
+//     SPECIFICALLY, on IFC2X3 (first chunk) AND IFC4 (IFC4's own first chunk) ---
 //
 // Real Python's FIRST line reads `annotation.Representation.Representations[0]
 // .Items[0].Dim`. `IfcCartesianPoint.Dim` is a real EXPRESS DERIVED attribute
@@ -24,19 +24,21 @@
 // all -- a pre-existing, disclosed, cross-cutting `entityInstance.ts` gap (`TODOS.md`'s
 // "`.get("Dim")` unconditionally throws for any entity" family of entries, first
 // surfaced by `util.representation.guessType`'s `Curve2D`/`Curve3D`/`Surface2D`/
-// `Surface3D` branches). Phase EX-2's first chunk ported `calc_IfcCartesianPoint_Dim`
+// `Surface3D` branches). Phase EX-2's IFC2X3 first chunk ported `calc_IfcCartesianPoint_Dim`
 // (among 14 other `calc_*` DERIVE functions) and wired the dispatch mechanism into
 // `EntityInstance.get()` (`src/express/dispatch.ts`/`src/express/rules/ifc2x3.ts`) --
-// `Dim` now resolves correctly for any `IfcCartesianPoint` in an IFC2X3 file, so this
-// function's own first statement (reading `Items[0].Dim`) now succeeds on IFC2X3.
-// Still throws for IFC4/IFC4X3 until a future chunk ports the identical formula for
-// those schemas too (same plan doc, IFC2X3-first sequencing) -- and several OTHER
-// callers this gap's own `TODOS.md` entry lists (`util/shapeBuilder.ts`'s
-// `.profile()`/`createSweptDiskSolid()`, several `api.geometry` files) may depend on
-// `Dim`/other DERIVE attributes on entity types this chunk did NOT port (e.g. solids/
-// curves/surfaces, not `IfcCartesianPoint`) and remain blocked -- this is a narrow,
-// additive fix for this one function's own specific dependency, not a general claim
-// that the whole gap family is closed.
+// IFC4's own first chunk (`src/express/rules/ifc4.ts`) then independently ported the
+// exact same 15 function names (confirmed byte-identical real Python source for
+// `calc_IfcCartesianPoint_Dim` specifically) for IFC4 too. `Dim` now resolves correctly
+// for any `IfcCartesianPoint` in an IFC2X3 OR IFC4 file, so this function's own first
+// statement (reading `Items[0].Dim`) now succeeds on both. Still throws for IFC4X3
+// until a future chunk ports the identical formula for that schema too (same plan doc,
+// smallest-schema-first sequencing) -- and several OTHER callers this gap's own
+// `TODOS.md` entry lists (`util/shapeBuilder.ts`'s `.profile()`/`createSweptDiskSolid()`,
+// several `api.geometry` files) may depend on `Dim`/other DERIVE attributes on entity
+// types these chunks did NOT port (e.g. solids/curves/surfaces, not `IfcCartesianPoint`)
+// and remain blocked -- this is a narrow, additive fix for this one function's own
+// specific dependency, not a general claim that the whole gap family is closed.
 //
 // Note: `addSurveyPoint` (this module's own fixture-building sibling, and real
 // Python's own test fixture builder) remains blocked by the SAME general kind of gap,
@@ -52,9 +54,9 @@ import type { EntityInstance } from "../../entityInstance";
  * Edits the location of a previously defined survey point (Python:
  * `ifcopenshell.api.cogo.edit_survey_point`).
  *
- * Works on IFC2X3 (`IfcCartesianPoint.Dim` is ported there, Phase EX-2's first chunk);
- * still throws on IFC4/IFC4X3 until a future chunk ports the same DERIVE formula for
- * those schemas too -- see this file's own header comment.
+ * Works on IFC2X3 and IFC4 (`IfcCartesianPoint.Dim` is ported for both, Phase EX-2's
+ * respective first chunks); still throws on IFC4X3 until a future chunk ports the same
+ * DERIVE formula for that schema too -- see this file's own header comment.
  *
  * @param annotation The survey point annotation (an `IfcAnnotation`, as returned by
  *   `addSurveyPoint`).
