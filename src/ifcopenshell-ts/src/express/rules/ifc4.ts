@@ -122,7 +122,11 @@ function getScratchFile(): IfcFile {
 	return scratchFile;
 }
 
-function ifcDirection(directionRatios: readonly number[]): EntityInstance {
+// Exported since Phase EX-4, IFC4 chunk 3 (`whereRules/ifc4.ts`) -- reused there by
+// `IfcExtrudedAreaSolid_ValidExtrusionDirection`'s own real `IfcDirection(DirectionRatios=[0.0,
+// 0.0, 1.0])` scratch-constant construction, exactly mirroring chunk 1's own identical
+// `ifcCrossProduct` export precedent immediately below.
+export function ifcDirection(directionRatios: readonly number[]): EntityInstance {
 	return getScratchFile().createEntity("IfcDirection", [...directionRatios]);
 }
 
@@ -284,8 +288,12 @@ export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | 
 	return ifcVector(arg1 as EntityInstance, 0.0);
 }
 
-/** Python: `IfcDotProduct` (`IFC4.py`) -- byte-identical to IFC2X3's own. */
-function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
+/**
+ * Python: `IfcDotProduct` (`IFC4.py`) -- byte-identical to IFC2X3's own. Exported since
+ * Phase EX-4, IFC4 chunk 3 (`whereRules/ifc4.ts`) -- reused there by
+ * `IfcExtrudedAreaSolid_ValidExtrusionDirection`, same rationale as `ifcDirection` above.
+ */
+export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
 	if (!exists(arg1) || !exists(arg2)) return null;
 	if (expressGetAttr(arg1, "Dim", INDETERMINATE) !== expressGetAttr(arg2, "Dim", INDETERMINATE)) return null;
 	const vec1 = ifcNormalise(arg1);

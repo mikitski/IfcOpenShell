@@ -1994,9 +1994,806 @@ describe("IfcDraughtingPreDefinedCurveFont.PreDefinedCurveFontNames", () => {
 	});
 });
 
-// Sanity check on IFC4's total scope after chunk 2: 220 rules registered (100 from chunk 1
-// + this chunk's own 120, all `SCOPE = 'entity'`), matching both files' own combined
-// `registerSchemaRules("IFC4", [...])` array lengths.
-test("exactly 220 IFC4 WHERE-rules are registered after chunk 2", () => {
-	expect(getSchemaRules("IFC4")).toHaveLength(220);
+// =============================================================================
+// Phase EX-4, IFC4 chunk 3: original, hand-rolled coverage for the 120 WHERE-rule classes
+// this chunk adds to `src/express/whereRules/ifc4.ts` (real source lines 6627-7852,
+// `IfcDuctFittingType_CorrectPredefinedType` through `IfcLine_SameDim`) -- same conventions
+// as chunks 1/2's own tests above: data-driven `describe.each` blocks for the two dominant
+// shapes (`correctPredefinedType`/`correctTypeAssigned`), individual `describe` blocks for
+// every other rule, `create`/`set`/`typeAssign`/`edgeLoopBound`/`direction3D`/`point3D`
+// all reused directly from chunks 1/2's own module-scope helpers above (this file is one
+// shared module, not per-chunk).
+// =============================================================================
+
+interface CorrectPredefinedTypeCaseChunk3 {
+	readonly typeName: string;
+	readonly escapeAttr: string;
+	readonly optional: boolean;
+}
+
+// Hand-derived directly from `whereRules/ifc4.ts`'s own chunk 3 `correctPredefinedType(...)`
+// call sites (real source lines 6627-7852) -- `optional` matches that file's own
+// `predefinedTypeOptional` argument at each site exactly. Includes this chunk's own two
+// newly-confirmed escape-attribute values, `"ProcessType"` (`IfcEventType`) and
+// `"ResourceType"` (`IfcLaborResourceType`).
+const correctPredefinedTypeCasesChunk3: readonly CorrectPredefinedTypeCaseChunk3[] = [
+	{ typeName: "IfcDuctFittingType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcDuctSegment", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcDuctSegmentType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcDuctSilencer", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcDuctSilencerType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricAppliance", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricApplianceType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricDistributionBoard", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricDistributionBoardType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricFlowStorageDevice", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricFlowStorageDeviceType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricGenerator", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricGeneratorType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricMotor", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricMotorType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElectricTimeControl", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElectricTimeControlType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcElementAssembly", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcElementAssemblyType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcEngine", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcEngineType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcEvaporativeCooler", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcEvaporativeCoolerType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcEvaporator", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcEvaporatorType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcEvent", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcEventType", escapeAttr: "ProcessType", optional: false },
+	{ typeName: "IfcFan", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFanType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFastener", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFastenerType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFilter", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFilterType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFireSuppressionTerminal", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFireSuppressionTerminalType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFlowInstrument", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFlowInstrumentType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFlowMeter", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFlowMeterType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFooting", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFootingType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcFurniture", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcFurnitureType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcGeographicElement", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcGeographicElementType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcHeatExchanger", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcHeatExchangerType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcHumidifier", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcHumidifierType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcInterceptor", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcInterceptorType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcJunctionBox", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcJunctionBoxType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcLaborResource", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcLaborResourceType", escapeAttr: "ResourceType", optional: false },
+	{ typeName: "IfcLamp", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcLampType", escapeAttr: "ElementType", optional: false },
+	{ typeName: "IfcLightFixture", escapeAttr: "ObjectType", optional: true },
+	{ typeName: "IfcLightFixtureType", escapeAttr: "ElementType", optional: false },
+];
+
+describe.each(correctPredefinedTypeCasesChunk3)(
+	"$typeName.CorrectPredefinedType (chunk 3)",
+	({ typeName, escapeAttr, optional }) => {
+		test("pass: PredefinedType is a non-USERDEFINED enum value", () => {
+			const inst = create(typeName);
+			set(inst, "PredefinedType", "NOTDEFINED");
+			expectPass(typeName, "CorrectPredefinedType", inst);
+		});
+		test("pass: PredefinedType is USERDEFINED and the escape attribute is given", () => {
+			const inst = create(typeName);
+			set(inst, "PredefinedType", "USERDEFINED");
+			set(inst, escapeAttr, "a custom value");
+			expectPass(typeName, "CorrectPredefinedType", inst);
+		});
+		test("fail: PredefinedType is USERDEFINED but the escape attribute is missing", () => {
+			const inst = create(typeName);
+			set(inst, "PredefinedType", "USERDEFINED");
+			expectFail(typeName, "CorrectPredefinedType", inst);
+		});
+		if (optional) {
+			test("pass: PredefinedType is not given at all (optional on this entity)", () => {
+				const inst = create(typeName);
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+		}
+	},
+);
+
+interface CorrectTypeAssignedCaseChunk3 {
+	readonly typeName: string;
+	readonly expectedTypeName: string;
+}
+
+// Hand-derived directly from `whereRules/ifc4.ts`'s own chunk 3 `correctTypeAssigned(...)`
+// call sites (real source lines 6647-7842). `IfcEvent`/`IfcEventType`, despite having
+// `RULE_NAME`s of `CorrectTypeAssigned`/`CorrectEventTriggerType`, do NOT use this shape at
+// all (see this chunk's own header comment) and are covered by their own individual
+// `describe` blocks below instead.
+const correctTypeAssignedCasesChunk3: readonly CorrectTypeAssignedCaseChunk3[] = [
+	{ typeName: "IfcDuctSegment", expectedTypeName: "IfcDuctSegmentType" },
+	{ typeName: "IfcDuctSilencer", expectedTypeName: "IfcDuctSilencerType" },
+	{ typeName: "IfcElectricAppliance", expectedTypeName: "IfcElectricApplianceType" },
+	{ typeName: "IfcElectricDistributionBoard", expectedTypeName: "IfcElectricDistributionBoardType" },
+	{ typeName: "IfcElectricFlowStorageDevice", expectedTypeName: "IfcElectricFlowStorageDeviceType" },
+	{ typeName: "IfcElectricGenerator", expectedTypeName: "IfcElectricGeneratorType" },
+	{ typeName: "IfcElectricMotor", expectedTypeName: "IfcElectricMotorType" },
+	{ typeName: "IfcElectricTimeControl", expectedTypeName: "IfcElectricTimeControlType" },
+	{ typeName: "IfcElementAssembly", expectedTypeName: "IfcElementAssemblyType" },
+	{ typeName: "IfcEngine", expectedTypeName: "IfcEngineType" },
+	{ typeName: "IfcEvaporativeCooler", expectedTypeName: "IfcEvaporativeCoolerType" },
+	{ typeName: "IfcEvaporator", expectedTypeName: "IfcEvaporatorType" },
+	{ typeName: "IfcFan", expectedTypeName: "IfcFanType" },
+	{ typeName: "IfcFastener", expectedTypeName: "IfcFastenerType" },
+	{ typeName: "IfcFilter", expectedTypeName: "IfcFilterType" },
+	{ typeName: "IfcFireSuppressionTerminal", expectedTypeName: "IfcFireSuppressionTerminalType" },
+	{ typeName: "IfcFlowInstrument", expectedTypeName: "IfcFlowInstrumentType" },
+	{ typeName: "IfcFlowMeter", expectedTypeName: "IfcFlowMeterType" },
+	{ typeName: "IfcFooting", expectedTypeName: "IfcFootingType" },
+	{ typeName: "IfcFurniture", expectedTypeName: "IfcFurnitureType" },
+	{ typeName: "IfcGeographicElement", expectedTypeName: "IfcGeographicElementType" },
+	{ typeName: "IfcHeatExchanger", expectedTypeName: "IfcHeatExchangerType" },
+	{ typeName: "IfcHumidifier", expectedTypeName: "IfcHumidifierType" },
+	{ typeName: "IfcInterceptor", expectedTypeName: "IfcInterceptorType" },
+	{ typeName: "IfcJunctionBox", expectedTypeName: "IfcJunctionBoxType" },
+	{ typeName: "IfcLamp", expectedTypeName: "IfcLampType" },
+	{ typeName: "IfcLightFixture", expectedTypeName: "IfcLightFixtureType" },
+];
+
+describe.each(correctTypeAssignedCasesChunk3)(
+	"$typeName.CorrectTypeAssigned (chunk 3)",
+	({ typeName, expectedTypeName }) => {
+		test("pass: no IsTypedBy at all", () => {
+			const inst = create(typeName);
+			expectPass(typeName, "CorrectTypeAssigned", inst);
+		});
+		test("pass: IsTypedBy's RelatingType is the expected *Type", () => {
+			const inst = create(typeName);
+			typeAssign(inst, create(expectedTypeName));
+			expectPass(typeName, "CorrectTypeAssigned", inst);
+		});
+		test("fail: IsTypedBy's RelatingType is a mismatched *Type", () => {
+			const inst = create(typeName);
+			// `IfcActuatorType` (chunk 1) is a real, always-available *Type entity not equal to
+			// any `expectedTypeName` this chunk's own cases use.
+			typeAssign(inst, create("IfcActuatorType"));
+			expectFail(typeName, "CorrectTypeAssigned", inst);
+		});
+	},
+);
+
+describe("IfcEdgeLoop", () => {
+	// Every vertex gets its OWN distinct `VertexGeometry` (a distinctly-coordinated
+	// `IfcCartesianPoint`) -- `settings.compareInstancesByValue` is on for this whole test
+	// file (`beforeAll` above), so two BLANK `IfcVertexPoint` instances (no attributes set)
+	// would otherwise compare as structurally EQUAL despite being different objects,
+	// silently defeating any "these are different vertices" fixture.
+	let vertexCounter = 0;
+	function vertex(): EntityInstance {
+		vertexCounter += 1;
+		const v = create("IfcVertexPoint");
+		set(v, "VertexGeometry", point3D([vertexCounter, 0, 0]));
+		return v;
+	}
+
+	// `Orientation` MUST be `true` -- `IfcOrientedEdge.EdgeStart`/`EdgeEnd` are themselves
+	// DERIVE attributes (`calc_IfcOrientedEdge_EdgeStart`/`_EdgeEnd`, Phase EX-2) that swap
+	// `EdgeElement.EdgeStart`/`EdgeEnd` when `Orientation` is `false` -- leaving it unset
+	// would silently reverse every edge's own endpoints.
+	function edgeLoopFromEndpoints(pairs: Array<[EntityInstance, EntityInstance]>): EntityInstance {
+		const orientedEdges = pairs.map(([start, end]) => {
+			const edge = create("IfcEdge");
+			set(edge, "EdgeStart", start);
+			set(edge, "EdgeEnd", end);
+			const oe = create("IfcOrientedEdge");
+			set(oe, "EdgeElement", edge);
+			set(oe, "Orientation", true);
+			return oe;
+		});
+		const loop = create("IfcEdgeLoop");
+		set(loop, "EdgeList", orientedEdges);
+		return loop;
+	}
+
+	test("IsClosed pass: first EdgeStart equals last EdgeEnd", () => {
+		const a = vertex();
+		const b = vertex();
+		const c = vertex();
+		const loop = edgeLoopFromEndpoints([
+			[a, b],
+			[b, c],
+			[c, a],
+		]);
+		expectPass("IfcEdgeLoop", "IsClosed", loop);
+	});
+
+	test("IsClosed fail: first EdgeStart does not equal last EdgeEnd", () => {
+		const a = vertex();
+		const b = vertex();
+		const c = vertex();
+		const d = vertex();
+		const loop = edgeLoopFromEndpoints([
+			[a, b],
+			[b, c],
+			[c, d],
+		]);
+		expectFail("IfcEdgeLoop", "IsClosed", loop);
+	});
+
+	test("IsContinuous pass: each edge's EdgeEnd equals the next edge's EdgeStart", () => {
+		const a = vertex();
+		const b = vertex();
+		const c = vertex();
+		const loop = edgeLoopFromEndpoints([
+			[a, b],
+			[b, c],
+		]);
+		expectPass("IfcEdgeLoop", "IsContinuous", loop);
+	});
+
+	test("IsContinuous fail: a gap between consecutive edges", () => {
+		const a = vertex();
+		const b = vertex();
+		const c = vertex();
+		const d = vertex();
+		const loop = edgeLoopFromEndpoints([
+			[a, b],
+			[c, d],
+		]);
+		expectFail("IfcEdgeLoop", "IsContinuous", loop);
+	});
+});
+
+describe("IfcElementQuantity.UniqueQuantityNames", () => {
+	function quantity(name: string): EntityInstance {
+		const q = create("IfcQuantityCount");
+		set(q, "Name", name);
+		return q;
+	}
+
+	test("pass: every quantity has a distinct Name", () => {
+		const eq = create("IfcElementQuantity");
+		set(eq, "Quantities", [quantity("Width"), quantity("Height")]);
+		expectPass("IfcElementQuantity", "UniqueQuantityNames", eq);
+	});
+
+	test("fail: two quantities share the same Name", () => {
+		const eq = create("IfcElementQuantity");
+		set(eq, "Quantities", [quantity("Width"), quantity("Width")]);
+		expectFail("IfcElementQuantity", "UniqueQuantityNames", eq);
+	});
+});
+
+describe("IfcEvent.CorrectTypeAssigned (real body: EventTriggerType escape-attribute check, not IsTypedBy)", () => {
+	test("pass: EventTriggerType is not given at all", () => {
+		expectPass("IfcEvent", "CorrectTypeAssigned", create("IfcEvent"));
+	});
+	test("pass: EventTriggerType is a non-USERDEFINED enum value", () => {
+		const event = create("IfcEvent");
+		set(event, "EventTriggerType", "EVENTRULE");
+		expectPass("IfcEvent", "CorrectTypeAssigned", event);
+	});
+	test("pass: EventTriggerType is USERDEFINED and UserDefinedEventTriggerType is given", () => {
+		const event = create("IfcEvent");
+		set(event, "EventTriggerType", "USERDEFINED");
+		set(event, "UserDefinedEventTriggerType", "Something");
+		expectPass("IfcEvent", "CorrectTypeAssigned", event);
+	});
+	test("fail: EventTriggerType is USERDEFINED but UserDefinedEventTriggerType is missing", () => {
+		const event = create("IfcEvent");
+		set(event, "EventTriggerType", "USERDEFINED");
+		expectFail("IfcEvent", "CorrectTypeAssigned", event);
+	});
+});
+
+describe("IfcEventType.CorrectEventTriggerType", () => {
+	test("pass: EventTriggerType is a non-USERDEFINED enum value", () => {
+		const eventType = create("IfcEventType");
+		set(eventType, "EventTriggerType", "EVENTRULE");
+		expectPass("IfcEventType", "CorrectEventTriggerType", eventType);
+	});
+	test("pass: EventTriggerType is USERDEFINED and UserDefinedEventTriggerType is given", () => {
+		const eventType = create("IfcEventType");
+		set(eventType, "EventTriggerType", "USERDEFINED");
+		set(eventType, "UserDefinedEventTriggerType", "Something");
+		expectPass("IfcEventType", "CorrectEventTriggerType", eventType);
+	});
+	test("fail: EventTriggerType is USERDEFINED but UserDefinedEventTriggerType is missing", () => {
+		const eventType = create("IfcEventType");
+		set(eventType, "EventTriggerType", "USERDEFINED");
+		expectFail("IfcEventType", "CorrectEventTriggerType", eventType);
+	});
+});
+
+describe("IfcExternalReference.WR1", () => {
+	test("pass: Identification given", () => {
+		const ref = create("IfcExternalReference");
+		set(ref, "Identification", "REF-1");
+		expectPass("IfcExternalReference", "WR1", ref);
+	});
+	test("pass: Location given", () => {
+		const ref = create("IfcExternalReference");
+		set(ref, "Location", "http://example.com");
+		expectPass("IfcExternalReference", "WR1", ref);
+	});
+	test("pass: Name given", () => {
+		const ref = create("IfcExternalReference");
+		set(ref, "Name", "My Reference");
+		expectPass("IfcExternalReference", "WR1", ref);
+	});
+	test("fail: none given", () => {
+		expectFail("IfcExternalReference", "WR1", create("IfcExternalReference"));
+	});
+});
+
+describe("IfcExtrudedAreaSolid.ValidExtrusionDirection", () => {
+	test("pass: ExtrudedDirection is not perpendicular to Z", () => {
+		const solid = create("IfcExtrudedAreaSolid");
+		set(solid, "ExtrudedDirection", direction3D([0, 0, 1]));
+		expectPass("IfcExtrudedAreaSolid", "ValidExtrusionDirection", solid);
+	});
+	test("fail: ExtrudedDirection is perpendicular to Z", () => {
+		const solid = create("IfcExtrudedAreaSolid");
+		set(solid, "ExtrudedDirection", direction3D([1, 0, 0]));
+		expectFail("IfcExtrudedAreaSolid", "ValidExtrusionDirection", solid);
+	});
+});
+
+describe("IfcExtrudedAreaSolidTapered.CorrectProfileAssignment", () => {
+	test("pass: both sides are the same kind of IfcParameterizedProfileDef", () => {
+		const solid = create("IfcExtrudedAreaSolidTapered");
+		const start = create("IfcCircleProfileDef");
+		set(start, "ProfileType", "AREA");
+		set(start, "Radius", 1);
+		const end = create("IfcCircleProfileDef");
+		set(end, "ProfileType", "AREA");
+		set(end, "Radius", 2);
+		set(solid, "SweptArea", start);
+		set(solid, "EndSweptArea", end);
+		expectPass("IfcExtrudedAreaSolidTapered", "CorrectProfileAssignment", solid);
+	});
+	test("pass: EndSweptArea is an IfcDerivedProfileDef whose ParentProfile matches SweptArea", () => {
+		const solid = create("IfcExtrudedAreaSolidTapered");
+		const start = create("IfcCircleProfileDef");
+		set(start, "ProfileType", "AREA");
+		set(start, "Radius", 1);
+		const derived = create("IfcDerivedProfileDef");
+		set(derived, "ParentProfile", start);
+		set(solid, "SweptArea", start);
+		set(solid, "EndSweptArea", derived);
+		expectPass("IfcExtrudedAreaSolidTapered", "CorrectProfileAssignment", solid);
+	});
+	test("fail: mismatched, unrelated profile kinds", () => {
+		const solid = create("IfcExtrudedAreaSolidTapered");
+		const start = create("IfcCircleProfileDef");
+		set(start, "ProfileType", "AREA");
+		set(start, "Radius", 1);
+		const end = create("IfcRectangleProfileDef");
+		set(end, "ProfileType", "AREA");
+		set(end, "XDim", 1);
+		set(end, "YDim", 1);
+		set(solid, "SweptArea", start);
+		set(solid, "EndSweptArea", end);
+		expectFail("IfcExtrudedAreaSolidTapered", "CorrectProfileAssignment", solid);
+	});
+});
+
+describe("IfcFace.HasOuterBound", () => {
+	function faceOuterBound(): EntityInstance {
+		return create("IfcFaceOuterBound");
+	}
+	function faceBound(): EntityInstance {
+		return create("IfcFaceBound");
+	}
+
+	test("pass: no bounds at all", () => {
+		const face = create("IfcFace");
+		set(face, "Bounds", []);
+		expectPass("IfcFace", "HasOuterBound", face);
+	});
+	test("pass: exactly one IfcFaceOuterBound", () => {
+		const face = create("IfcFace");
+		set(face, "Bounds", [faceOuterBound(), faceBound()]);
+		expectPass("IfcFace", "HasOuterBound", face);
+	});
+	test("fail: two IfcFaceOuterBound members", () => {
+		const face = create("IfcFace");
+		set(face, "Bounds", [faceOuterBound(), faceOuterBound()]);
+		expectFail("IfcFace", "HasOuterBound", face);
+	});
+});
+
+describe("IfcFeatureElementSubtraction", () => {
+	// `HasOpenings`/`FillsVoids` are INVERSE attributes -- not settable directly via
+	// `.set()` (confirmed: `EntityInstance.set` resolves through `get_argument_index`,
+	// which only knows real forward attributes). Populate them the real way, by creating
+	// the actual relationship instance pointing back at the feature (`IfcRelVoidsElement.
+	// RelatingBuildingElement` / `IfcRelFillsElement.RelatedBuildingElement`, both
+	// confirmed directly against real schema introspection).
+	test("HasNoSubtraction pass/fail", () => {
+		const feature = create("IfcOpeningElement");
+		expectPass("IfcFeatureElementSubtraction", "HasNoSubtraction", feature);
+
+		const badFeature = create("IfcOpeningElement");
+		const rel = create("IfcRelVoidsElement");
+		set(rel, "RelatingBuildingElement", badFeature);
+		expectFail("IfcFeatureElementSubtraction", "HasNoSubtraction", badFeature);
+	});
+	test("IsNotFilling pass/fail", () => {
+		const feature = create("IfcOpeningElement");
+		expectPass("IfcFeatureElementSubtraction", "IsNotFilling", feature);
+
+		const badFeature = create("IfcOpeningElement");
+		const rel = create("IfcRelFillsElement");
+		set(rel, "RelatedBuildingElement", badFeature);
+		expectFail("IfcFeatureElementSubtraction", "IsNotFilling", badFeature);
+	});
+});
+
+describe("IfcFillAreaStyle", () => {
+	test("MaxOneColour: always passes (IfcColour is a SELECT type -- see this file's own header comment / whereRules/ifc4.ts's ifcCorrectFillAreaStyle doc comment)", () => {
+		const style = create("IfcFillAreaStyle");
+		set(style, "FillStyles", [create("IfcColourRgb"), create("IfcColourRgb"), create("IfcColourRgb")]);
+		expectPass("IfcFillAreaStyle", "MaxOneColour", style);
+	});
+	test("MaxOneExtHatchStyle pass/fail", () => {
+		const style = create("IfcFillAreaStyle");
+		set(style, "FillStyles", [create("IfcExternallyDefinedHatchStyle")]);
+		expectPass("IfcFillAreaStyle", "MaxOneExtHatchStyle", style);
+
+		const badStyle = create("IfcFillAreaStyle");
+		set(badStyle, "FillStyles", [create("IfcExternallyDefinedHatchStyle"), create("IfcExternallyDefinedHatchStyle")]);
+		expectFail("IfcFillAreaStyle", "MaxOneExtHatchStyle", badStyle);
+	});
+	test("ConsistentHatchStyleDef pass: hatching alone", () => {
+		const style = create("IfcFillAreaStyle");
+		set(style, "FillStyles", [create("IfcFillAreaStyleHatching")]);
+		expectPass("IfcFillAreaStyle", "ConsistentHatchStyleDef", style);
+	});
+	test("ConsistentHatchStyleDef fail: both hatching and tiles", () => {
+		const style = create("IfcFillAreaStyle");
+		set(style, "FillStyles", [create("IfcFillAreaStyleHatching"), create("IfcFillAreaStyleTiles")]);
+		expectFail("IfcFillAreaStyle", "ConsistentHatchStyleDef", style);
+	});
+});
+
+describe("IfcFillAreaStyleHatching", () => {
+	test("PatternStart2D pass/fail", () => {
+		const hatching = create("IfcFillAreaStyleHatching");
+		expectPass("IfcFillAreaStyleHatching", "PatternStart2D", hatching); // not given -- passes
+
+		const okHatching = create("IfcFillAreaStyleHatching");
+		set(okHatching, "PatternStart", point2D([0, 0]));
+		expectPass("IfcFillAreaStyleHatching", "PatternStart2D", okHatching);
+
+		const badHatching = create("IfcFillAreaStyleHatching");
+		set(badHatching, "PatternStart", point3D([0, 0, 0]));
+		expectFail("IfcFillAreaStyleHatching", "PatternStart2D", badHatching);
+	});
+	test("RefHatchLine2D pass/fail", () => {
+		const hatching = create("IfcFillAreaStyleHatching");
+		expectPass("IfcFillAreaStyleHatching", "RefHatchLine2D", hatching); // not given -- passes
+
+		const okHatching = create("IfcFillAreaStyleHatching");
+		set(okHatching, "PointOfReferenceHatchLine", point2D([0, 0]));
+		expectPass("IfcFillAreaStyleHatching", "RefHatchLine2D", okHatching);
+
+		const badHatching = create("IfcFillAreaStyleHatching");
+		set(badHatching, "PointOfReferenceHatchLine", point3D([0, 0, 0]));
+		expectFail("IfcFillAreaStyleHatching", "RefHatchLine2D", badHatching);
+	});
+});
+
+describe("IfcFixedReferenceSweptAreaSolid.DirectrixBounded", () => {
+	test("pass: StartParam and EndParam both given", () => {
+		const solid = create("IfcFixedReferenceSweptAreaSolid");
+		set(solid, "Directrix", create("IfcLine"));
+		set(solid, "StartParam", 0);
+		set(solid, "EndParam", 1);
+		expectPass("IfcFixedReferenceSweptAreaSolid", "DirectrixBounded", solid);
+	});
+	test("pass: Directrix is an IfcConic (e.g. IfcCircle), neither param given", () => {
+		const solid = create("IfcFixedReferenceSweptAreaSolid");
+		set(solid, "Directrix", create("IfcCircle"));
+		expectPass("IfcFixedReferenceSweptAreaSolid", "DirectrixBounded", solid);
+	});
+	test("fail: Directrix is an unbounded IfcLine, neither param given", () => {
+		const solid = create("IfcFixedReferenceSweptAreaSolid");
+		set(solid, "Directrix", create("IfcLine"));
+		expectFail("IfcFixedReferenceSweptAreaSolid", "DirectrixBounded", solid);
+	});
+});
+
+describe("IfcGeometricCurveSet.NoSurfaces", () => {
+	test("pass: only curves/points", () => {
+		const set_ = create("IfcGeometricCurveSet");
+		set(set_, "Elements", [create("IfcLine"), point3D([0, 0, 0])]);
+		expectPass("IfcGeometricCurveSet", "NoSurfaces", set_);
+	});
+	test("fail: a surface is included", () => {
+		const set_ = create("IfcGeometricCurveSet");
+		set(set_, "Elements", [planeSurface()]);
+		expectFail("IfcGeometricCurveSet", "NoSurfaces", set_);
+	});
+});
+
+describe("IfcGeometricRepresentationContext.North2D", () => {
+	test("pass: TrueNorth not given", () => {
+		expectPass("IfcGeometricRepresentationContext", "North2D", create("IfcGeometricRepresentationContext"));
+	});
+	test("pass: TrueNorth has 2 DirectionRatios", () => {
+		const ctx = create("IfcGeometricRepresentationContext");
+		set(ctx, "TrueNorth", direction3D([1, 0]));
+		expectPass("IfcGeometricRepresentationContext", "North2D", ctx);
+	});
+	test("fail: TrueNorth has 3 DirectionRatios", () => {
+		const ctx = create("IfcGeometricRepresentationContext");
+		set(ctx, "TrueNorth", direction3D([1, 0, 0]));
+		expectFail("IfcGeometricRepresentationContext", "North2D", ctx);
+	});
+});
+
+describe("IfcGeometricRepresentationSubContext", () => {
+	test("ParentNoSub pass/fail", () => {
+		const sub = create("IfcGeometricRepresentationSubContext");
+		set(sub, "ParentContext", create("IfcGeometricRepresentationContext"));
+		expectPass("IfcGeometricRepresentationSubContext", "ParentNoSub", sub);
+
+		const badSub = create("IfcGeometricRepresentationSubContext");
+		set(badSub, "ParentContext", create("IfcGeometricRepresentationSubContext"));
+		expectFail("IfcGeometricRepresentationSubContext", "ParentNoSub", badSub);
+	});
+	test("UserTargetProvided pass/fail", () => {
+		const sub = create("IfcGeometricRepresentationSubContext");
+		set(sub, "TargetView", "MODEL_VIEW");
+		expectPass("IfcGeometricRepresentationSubContext", "UserTargetProvided", sub);
+
+		const userDefinedSub = create("IfcGeometricRepresentationSubContext");
+		set(userDefinedSub, "TargetView", "USERDEFINED");
+		set(userDefinedSub, "UserDefinedTargetView", "Custom");
+		expectPass("IfcGeometricRepresentationSubContext", "UserTargetProvided", userDefinedSub);
+
+		const badSub = create("IfcGeometricRepresentationSubContext");
+		set(badSub, "TargetView", "USERDEFINED");
+		expectFail("IfcGeometricRepresentationSubContext", "UserTargetProvided", badSub);
+	});
+	test("NoCoordOperation pass/fail", () => {
+		// `HasCoordinateOperation` is an INVERSE attribute (of `IfcCoordinateOperation.
+		// SourceCRS`, confirmed directly against real schema introspection) -- not settable
+		// directly; populate it the real way via an actual `IfcMapConversion` instance.
+		const sub = create("IfcGeometricRepresentationSubContext");
+		expectPass("IfcGeometricRepresentationSubContext", "NoCoordOperation", sub);
+
+		const badSub = create("IfcGeometricRepresentationSubContext");
+		const mapConversion = create("IfcMapConversion");
+		set(mapConversion, "SourceCRS", badSub);
+		expectFail("IfcGeometricRepresentationSubContext", "NoCoordOperation", badSub);
+	});
+});
+
+describe("IfcGeometricSet.ConsistentDim", () => {
+	test("pass: every Elements member shares the first's Dim", () => {
+		const gs = create("IfcGeometricSet");
+		set(gs, "Elements", [point3D([0, 0, 0]), point3D([1, 1, 1])]);
+		expectPass("IfcGeometricSet", "ConsistentDim", gs);
+	});
+	test("fail: a mismatched Dim", () => {
+		const gs = create("IfcGeometricSet");
+		set(gs, "Elements", [point3D([0, 0, 0]), point2D([1, 1])]);
+		expectFail("IfcGeometricSet", "ConsistentDim", gs);
+	});
+});
+
+describe("IfcGrid.HasPlacement", () => {
+	test("pass/fail", () => {
+		const grid = create("IfcGrid");
+		set(grid, "ObjectPlacement", create("IfcLocalPlacement"));
+		expectPass("IfcGrid", "HasPlacement", grid);
+		expectFail("IfcGrid", "HasPlacement", create("IfcGrid"));
+	});
+});
+
+describe("IfcGridAxis", () => {
+	test("WR1 pass/fail", () => {
+		const axis = create("IfcGridAxis");
+		set(axis, "AxisCurve", polyline2D());
+		expectPass("IfcGridAxis", "WR1", axis);
+
+		const badAxis = create("IfcGridAxis");
+		set(badAxis, "AxisCurve", polyline3D());
+		expectFail("IfcGridAxis", "WR1", badAxis);
+	});
+	// `PartOfU`/`PartOfV`/`PartOfW` are INVERSE attributes (of `IfcGrid.UAxes`/`VAxes`/
+	// `WAxes`, confirmed directly against real schema introspection) -- not settable
+	// directly; populate them the real way via an actual `IfcGrid` instance referencing
+	// the axis from one of its own forward `*Axes` attributes.
+	test("WR2 pass: exactly one of PartOfU/V/W has a member", () => {
+		const axis = create("IfcGridAxis");
+		const grid = create("IfcGrid");
+		set(grid, "UAxes", [axis]);
+		expectPass("IfcGridAxis", "WR2", axis);
+	});
+	test("WR2 fail: none of PartOfU/V/W has a member", () => {
+		const axis = create("IfcGridAxis");
+		expectFail("IfcGridAxis", "WR2", axis);
+	});
+});
+
+describe("IfcIShapeProfileDef", () => {
+	function baseProfile(): EntityInstance {
+		const p = create("IfcIShapeProfileDef");
+		set(p, "ProfileType", "AREA");
+		set(p, "OverallWidth", 100);
+		set(p, "OverallDepth", 200);
+		set(p, "WebThickness", 10);
+		set(p, "FlangeThickness", 20);
+		return p;
+	}
+
+	test("ValidFlangeThickness pass/fail", () => {
+		expectPass("IfcIShapeProfileDef", "ValidFlangeThickness", baseProfile());
+
+		const badProfile = baseProfile();
+		set(badProfile, "FlangeThickness", 150);
+		expectFail("IfcIShapeProfileDef", "ValidFlangeThickness", badProfile);
+	});
+	test("ValidWebThickness pass/fail", () => {
+		expectPass("IfcIShapeProfileDef", "ValidWebThickness", baseProfile());
+
+		const badProfile = baseProfile();
+		set(badProfile, "WebThickness", 200);
+		expectFail("IfcIShapeProfileDef", "ValidWebThickness", badProfile);
+	});
+	test("ValidFilletRadius pass/fail", () => {
+		const profile = baseProfile();
+		expectPass("IfcIShapeProfileDef", "ValidFilletRadius", profile); // not given -- passes
+
+		const okProfile = baseProfile();
+		set(okProfile, "FilletRadius", 5);
+		expectPass("IfcIShapeProfileDef", "ValidFilletRadius", okProfile);
+
+		const badProfile = baseProfile();
+		set(badProfile, "FilletRadius", 1000);
+		expectFail("IfcIShapeProfileDef", "ValidFilletRadius", badProfile);
+	});
+});
+
+describe("IfcIndexedPolyCurve.Consecutive", () => {
+	test("pass: no segments at all", () => {
+		const curve = create("IfcIndexedPolyCurve");
+		set(curve, "Segments", []);
+		expectPass("IfcIndexedPolyCurve", "Consecutive", curve);
+	});
+	test("pass: consecutive segments share their common point index", () => {
+		const curve = create("IfcIndexedPolyCurve");
+		set(curve, "Segments", [
+			[1, 2],
+			[2, 3],
+		]);
+		expectPass("IfcIndexedPolyCurve", "Consecutive", curve);
+	});
+	test("fail: a gap between consecutive segments' point indices", () => {
+		const curve = create("IfcIndexedPolyCurve");
+		set(curve, "Segments", [
+			[1, 2],
+			[3, 4],
+		]);
+		expectFail("IfcIndexedPolyCurve", "Consecutive", curve);
+	});
+});
+
+describe("IfcIntersectionCurve", () => {
+	// `pcurveOn` (chunk 2's own module-scope helper above) builds a real `IfcPcurve` with
+	// both `BasisSurface` and `ReferenceCurve` set -- reused as-is.
+	test("TwoPCurves pass/fail", () => {
+		const curve = create("IfcIntersectionCurve");
+		set(curve, "AssociatedGeometry", [pcurveOn(planeSurface()), pcurveOn(planeSurface())]);
+		expectPass("IfcIntersectionCurve", "TwoPCurves", curve);
+
+		const badCurve = create("IfcIntersectionCurve");
+		set(badCurve, "AssociatedGeometry", [pcurveOn(planeSurface())]);
+		expectFail("IfcIntersectionCurve", "TwoPCurves", badCurve);
+	});
+	test("DistinctSurfaces pass/fail", () => {
+		// Each surface gets its own distinct `Position` -- `settings.compareInstancesByValue`
+		// is on for this whole test file, so two BLANK `IfcPlane` instances (no attributes
+		// set) would otherwise compare as structurally EQUAL despite being different objects.
+		function distinctPlaneAt(x: number): EntityInstance {
+			const plane = planeSurface();
+			const placement = create("IfcAxis2Placement3D");
+			set(placement, "Location", point3D([x, 0, 0]));
+			set(plane, "Position", placement);
+			return plane;
+		}
+
+		const surfaceA = distinctPlaneAt(1);
+		const surfaceB = distinctPlaneAt(2);
+		const curve = create("IfcIntersectionCurve");
+		set(curve, "AssociatedGeometry", [pcurveOn(surfaceA), pcurveOn(surfaceB)]);
+		expectPass("IfcIntersectionCurve", "DistinctSurfaces", curve);
+
+		const sameSurface = distinctPlaneAt(3);
+		const badCurve = create("IfcIntersectionCurve");
+		set(badCurve, "AssociatedGeometry", [pcurveOn(sameSurface), pcurveOn(sameSurface)]);
+		expectFail("IfcIntersectionCurve", "DistinctSurfaces", badCurve);
+	});
+});
+
+describe("IfcLShapeProfileDef.ValidThickness", () => {
+	test("pass: Thickness less than Depth, Width not given", () => {
+		const profile = create("IfcLShapeProfileDef");
+		set(profile, "ProfileType", "AREA");
+		set(profile, "Depth", 100);
+		set(profile, "Thickness", 10);
+		expectPass("IfcLShapeProfileDef", "ValidThickness", profile);
+	});
+	test("pass: Thickness less than both Depth and Width", () => {
+		const profile = create("IfcLShapeProfileDef");
+		set(profile, "ProfileType", "AREA");
+		set(profile, "Depth", 100);
+		set(profile, "Width", 80);
+		set(profile, "Thickness", 10);
+		expectPass("IfcLShapeProfileDef", "ValidThickness", profile);
+	});
+	test("fail: Thickness not less than Depth", () => {
+		const profile = create("IfcLShapeProfileDef");
+		set(profile, "ProfileType", "AREA");
+		set(profile, "Depth", 10);
+		set(profile, "Thickness", 10);
+		expectFail("IfcLShapeProfileDef", "ValidThickness", profile);
+	});
+	test("fail: Thickness not less than Width", () => {
+		const profile = create("IfcLShapeProfileDef");
+		set(profile, "ProfileType", "AREA");
+		set(profile, "Depth", 100);
+		set(profile, "Width", 10);
+		set(profile, "Thickness", 10);
+		expectFail("IfcLShapeProfileDef", "ValidThickness", profile);
+	});
+});
+
+describe("IfcLine.SameDim", () => {
+	test("pass: Dir.Dim equals Pnt.Dim", () => {
+		const line = create("IfcLine");
+		set(line, "Pnt", point3D([0, 0, 0]));
+		set(
+			line,
+			"Dir",
+			(() => {
+				const vec = create("IfcVector");
+				set(vec, "Orientation", direction3D([1, 0, 0]));
+				set(vec, "Magnitude", 1);
+				return vec;
+			})(),
+		);
+		expectPass("IfcLine", "SameDim", line);
+	});
+	test("fail: Dir.Dim differs from Pnt.Dim", () => {
+		const line = create("IfcLine");
+		set(line, "Pnt", point3D([0, 0, 0]));
+		set(
+			line,
+			"Dir",
+			(() => {
+				const vec = create("IfcVector");
+				set(vec, "Orientation", direction3D([1, 0]));
+				set(vec, "Magnitude", 1);
+				return vec;
+			})(),
+		);
+		expectFail("IfcLine", "SameDim", line);
+	});
+});
+
+// Sanity check on IFC4's total scope after chunk 3: 340 rules registered (100 from chunk 1 +
+// 120 from chunk 2 + this chunk's own 120, all `SCOPE = 'entity'`), matching all three
+// files' own combined `registerSchemaRules("IFC4", [...])` array lengths.
+test("exactly 340 IFC4 WHERE-rules are registered after chunk 3", () => {
+	expect(getSchemaRules("IFC4")).toHaveLength(340);
 });
