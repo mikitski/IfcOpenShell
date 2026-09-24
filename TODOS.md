@@ -4309,3 +4309,48 @@ chunk 6 (the final IFC4 WHERE-rule chunk, `whereRules/ifc4.ts`) -- same `IfcTrim
 construct, same vitest-worker-segfault symptom, same workaround (`file.createEntity("IfcParameterValue",
 value)`). Confirms this is a genuine cross-schema native-layer gap (IFC2X3 and IFC4 share the same
 underlying attribute-marshaling code), not something specific to one schema's own generated bindings.
+
+### `util/schema.ts`'s `getSupertypes()`/`isA()` may not fully reflect a real subtype relationship for at least one IFC4X3_ADD2 entity (`IfcGrid`/`IfcPositioningElement`)
+
+**Found:** 2026-09-24, while independently re-verifying Phase EX-4's IFC4X3_ADD2 chunk 4 (PR #237,
+`whereRules/ifc4x3.ts`). That chunk's own dispatched agent found and disclosed a genuine schema-hierarchy
+change: IFC4's own `IfcGrid_HasPlacement` WHERE-rule has no IFC4X3_ADD2 counterpart, replaced by a wholly
+new `IfcPositioningElement` entity with its own `HasPlacement` rule -- and claimed `IfcGrid` now
+dispatches against it, meaning `IfcGrid` is a real schema subtype of `IfcPositioningElement` in ADD2.
+
+**Independently reproduced the core claim from scratch** (not just trusted): building a real, bare
+`IfcGrid` instance (no `ObjectPlacement`) in a fresh `IFC4X3_ADD2` file and running it through the real
+`executeRules(file)` engine produces exactly one violation, whose message reads `Rule
+IfcPositioningElement.HasPlacement violated` -- not any `IfcGrid`-named rule. This is the same production
+`byType()`-backed dispatch mechanism the entire rest of this port already depends on, so the underlying
+schema fact (IfcGrid is-a IfcPositioningElement in ADD2) is treated as confirmed.
+
+**The discrepancy:** a parallel check using `util/schema.ts`'s own already-shipped `getDeclaration()` +
+`getSupertypes()` (which walks the `entity.supertype()` pointer chain) on the SAME `IfcGrid` instance in
+the SAME schema returned `IfcGrid -> IfcProduct -> IfcObject -> IfcObjectDefinition -> IfcRoot` --
+`IfcPositioningElement` does not appear anywhere in that chain. A direct `isA(declaration,
+"IfcPositioningElement")` call (`util/schema.ts`'s own thin wrapper around the native
+`is__with_name`) also returned `false`, even though `isA(declaration, "IfcProduct")` on the same
+declaration correctly returned `true` (confirming `is__with_name` itself does real hierarchy-aware
+matching in the ordinary case, not just exact-name matching).
+
+**Not yet root-caused.** Suspected shape: EXPRESS permits an entity to declare more than one direct
+supertype (multiple inheritance via a `SUPERTYPE OF`/`SUBTYPE OF (...)` list); if IFC4X3_ADD2 added
+`IfcPositioningElement` as an ADDITIONAL supertype of `IfcGrid` alongside its pre-existing `IfcProduct`
+lineage, a `.supertype()` pointer walk that only ever follows a single "primary" parent (as
+`getSupertypes()`'s own header comment describes: "Walks `.supertype()` repeatedly until `None`/`null`")
+would silently miss the second lineage entirely, while the real native `byType()`/`is_a()` C++
+implementation (which IfcOpenShell's own core has always needed to get right for ordinary schema
+correctness) presumably accounts for all declared supertypes correctly. Not confirmed against the real
+EXPRESS schema source for `IfcGrid` in IFC4X3_ADD2 -- that would be the next concrete step for whoever
+picks this up.
+
+**Impact:** any future code relying on `getSupertypes()`/`isA()` (both already-shipped, general-purpose
+helpers, not specific to the WHERE-rules work) to answer "is X a subtype of Y" for an entity with more
+than one direct EXPRESS supertype would get a false negative. The WHERE-rules engine itself is NOT
+affected, since it dispatches via real `byType()`, not these helpers.
+
+**Depends on / blocked by:** nothing blocks other work in the meantime -- no code in this port currently
+relies on `getSupertypes()`/`isA()` returning a complete answer for a multiply-inherited entity as far as
+this finding's own investigation went (not exhaustively audited). This entry tracks the open question for
+whoever next needs a full "is this really a subtype" check outside the rule engine's own `byType()` path.
