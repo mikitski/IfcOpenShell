@@ -3739,6 +3739,21 @@ describe("IfcPropertyTableValue", () => {
 		set(mismatched, "DefinedValues", [create("IfcLabel"), create("IfcLabel")]);
 		expectFail("IfcPropertyTableValue", "WR21", mismatched);
 	});
+	// Regression test: real Python's own poison-propagating `==` makes `sizeof(given) ==
+	// sizeof(INDETERMINATE)` evaluate to `INDETERMINATE`, and `assert (...) is not False`
+	// then PASSES for this "exactly one given" case -- a previous version of this rule
+	// collapsed that `Tri` result to a hard boolean before `||`-ing it with the
+	// both-absent guard, wrongly throwing here instead. Found and fixed while dispatching
+	// Phase EX-4's IFC4X3_ADD2 chunk 5, which ports this same rule.
+	test("WR21 pass: exactly one of DefiningValues/DefinedValues given (real Python propagates INDETERMINATE, passes)", () => {
+		const onlyDefining = create("IfcPropertyTableValue");
+		set(onlyDefining, "DefiningValues", [create("IfcLabel")]);
+		expectPass("IfcPropertyTableValue", "WR21", onlyDefining);
+
+		const onlyDefined = create("IfcPropertyTableValue");
+		set(onlyDefined, "DefinedValues", [create("IfcLabel")]);
+		expectPass("IfcPropertyTableValue", "WR21", onlyDefined);
+	});
 	test("WR22 pass/fail: if given, every DefiningValues member must share the first member's own type", () => {
 		const tv = create("IfcPropertyTableValue");
 		set(tv, "DefiningValues", [create("IfcLabel"), create("IfcLabel")]);
