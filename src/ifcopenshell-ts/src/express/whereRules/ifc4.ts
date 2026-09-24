@@ -193,6 +193,7 @@ import { type RuleDefinition, registerSchemaRules } from "../ruleDispatch";
 import { ifcCrossProduct } from "../rules/ifc4";
 import {
 	EXPRESS_ONE_BASED_INDEXING,
+	ExpressSet,
 	INDETERMINATE,
 	type Tri,
 	assertWhereRule,
@@ -201,9 +202,11 @@ import {
 	expressGetItem,
 	isIndeterminate,
 	pyAnd,
+	pyNot,
 	pyOr,
 	sizeof,
 	triEq,
+	triGe,
 	triGt,
 	triLe,
 	triLt,
@@ -1518,4 +1521,1584 @@ registerSchemaRules("IFC4", [
 	IfcBuildingElementPart_CorrectPredefinedType,
 	IfcBuildingElementPart_CorrectTypeAssigned,
 	IfcBuildingElementPartType_CorrectPredefinedType,
+]);
+
+// =============================================================================
+// Phase EX-4, IFC4 chunk 2 (planning/ifcopenshell-ts/70-express-rules-plan.md, "the large
+// chunk" -- WHERE-rule classes + `rule_executor.py`): the NEXT 120 `SCOPE = 'entity'` rules,
+// continuing directly from chunk 1's own last-ported rule with zero gap or overlap --
+// `IfcBuildingElementProxy_HasObjectName` (real source line 5361) through
+// `IfcDuctFitting_CorrectTypeAssigned` (line 6617) in `src/ifcopenshell-python/
+// ifcopenshell/express/rules/IFC4.py`. **Independently re-verified, not trusted from the
+// dispatching task brief's own citation alone**: re-ran the same `^class (\w+)` +
+// `SCOPE = '(\w+)'`-matching approach chunk 1's own header comment describes, confirmed
+// exactly 120 `SCOPE = 'entity'` classes in this range, `IfcBuildingElementPartType_
+// CorrectPredefinedType` (chunk 1's own last rule, real source position 75 of 652) is
+// immediately followed by `IfcBuildingElementProxy_HasObjectName` (position 76, this
+// chunk's own first rule) with no gap, and this chunk's own last rule (`IfcDuctFitting_
+// CorrectTypeAssigned`, position 195) is immediately followed by `IfcDuctFittingType_
+// CorrectPredefinedType` (position 196, real source line 6627) -- explicitly excluded,
+// reserved for chunk 3. IFC4 now stands at 220 of 679 total WHERE-rule classes (100 from
+// chunk 1 + this chunk's own 120), all `SCOPE = 'entity'` (100/652 entity-scope from chunk
+// 1's own 75, now 195/652).
+//
+// =============================================================================
+// Shared shapes REUSED from chunk 1 (no new logic, just more call sites)
+// =============================================================================
+//
+// **`correctTypeAssigned`** -- 23 occurrences in this chunk (`IfcBuildingElementProxy`
+// through `IfcDuctFitting`). One quirk, disclosed: `IfcDoor_CorrectStyleAssigned` (real
+// source line 6507) has the exact same body shape (`sizeof(IsTypedBy) == 0 or
+// 'ifc4.ifcdoortype' in typeof(...)`) but its own real `RULE_NAME` is `'CorrectStyleAssigned'`,
+// NOT the usual `'CorrectTypeAssigned'` -- registered below under its own real rule name
+// (`entityRule("IfcDoor", "CorrectStyleAssigned", ...)`), confirmed directly against real
+// source rather than assumed from the shape match alone.
+//
+// **`correctPredefinedType`** -- 52 occurrences in this chunk. **A new escape-attribute
+// value, confirmed for the first time in this chunk**: `"ResourceType"` (4 occurrences --
+// `IfcConstructionEquipmentResourceType`/`IfcConstructionMaterialResourceType`/
+// `IfcConstructionProductResourceType`/`IfcCrewResourceType`, all "*Type" resource
+// entities), alongside the already-established `"ObjectType"` (occurrence entities) and
+// `"ElementType"` ("*Type" element entities) -- confirms chunk 1's own header-comment
+// hypothesis ("`ProcessType`/`ResourceType` expected in later chunks").
+//
+// **`optionalAttrDimEquals`** -- 5 more occurrences (`IfcCartesianTransformationOperator2D_
+// Axis1Is2D`/`Axis2Is2D`, `IfcCartesianTransformationOperator3D_Axis1Is3D`/`Axis2Is3D`/
+// `Axis3Is3D`).
+//
+// **`userDefinedOrHasAttribute`** -- 2 more occurrences (`IfcConstraint_WR11`'s own
+// `ConstraintGrade`/`UserDefinedGrade`, `IfcDerivedUnit_WR2`'s own `UnitType`/
+// `UserDefinedType`).
+//
+// **A real, disclosed non-reuse**: `IfcCartesianTransformationOperator2D_DimEqual2`/
+// `IfcCartesianTransformationOperator3D_DimIs3D` read `Dim == 2`/`Dim == 3` directly off
+// `self` (a DERIVE attribute, `calc_IfcCartesianTransformationOperator_Dim`) -- NOT
+// `attrDimEquals` (that helper checks a nested `self.<attr>.Dim`, not `self.Dim` itself).
+// Written as bespoke one-liners instead of misusing that helper.
+//
+// =============================================================================
+// New shared shapes factored in this chunk
+// =============================================================================
+//
+// **`attrGreaterThanZero`** (4 occurrences: `IfcCartesianTransformationOperator_
+// ScaleGreaterZero`'s own `Scl`, `IfcCartesianTransformationOperator2DnonUniform_
+// Scale2GreaterZero`'s own `Scl2`, `IfcCartesianTransformationOperator3DnonUniform_
+// Scale2GreaterZero`/`Scale3GreaterZero`'s own `Scl2`/`Scl3`) -- Python: `X > 0.0`, `X` a
+// mandatory REAL attribute.
+//
+// **`allShareFirstAttr`** -- "every member of a list attribute shares the first member's
+// own value at some other attribute" (Python: `sizeof([temp for temp in X if temp.Y !=
+// X[0].Y]) == 0`). Chunk 1's own `IfcBSplineCurve_SameDim` already has this exact shape
+// inlined (NOT retrofitted here, per this project's own "don't touch already-merged prior
+// chunks" precedent); this chunk's own `IfcCompositeCurve_SameDim`/
+// `IfcCompositeProfileDef_InvariantProfileType` are the 2nd and 3rd occurrences across the
+// whole file -- meeting the 3-occurrence factoring threshold, factored here.
+//
+// **`containsSelfReference`** (2 occurrences: `IfcComplexProperty_WR21`,
+// `IfcComplexPropertyTemplate_NoSelfReference`) -- Python: `sizeof([temp for temp in X if
+// self == temp]) == 0`.
+//
+// **`definesTypeIsDoorTypeOrStyle`** (2 occurrences, byte-identical real bodies:
+// `IfcDoorLiningProperties_WR35`, `IfcDoorPanelProperties_ApplicableToType`) -- Python:
+// `exists(lambda: DefinesType[0]) and ('ifc4.ifcdoortype' in typeof(DefinesType[0]) or
+// 'ifc4.ifcdoorstyle' in typeof(DefinesType[0]))`.
+//
+// **`uniquePropertyLikeNames`, plus its two real-named thin wrappers `ifcUniquePropertyName`/
+// `ifcUniquePropertyTemplateNames`** (new rule-file-local EXPRESS helpers, real source lines
+// 12139/12155) -- two real, distinct top-level Python functions with byte-identical bodies
+// (confirmed directly): build an `express_set` union of every member's own `Name`, then
+// check that set's size equals the list's own length (every member has a distinct Name).
+// Called by `IfcComplexProperty_WR22`/`IfcComplexPropertyTemplate_UniquePropertyNames`
+// respectively -- each ported rule calls its own real-named wrapper, not a merged function,
+// keeping every call site a literal match of its real source.
+//
+// =============================================================================
+// No new real upstream Python bugs found in this chunk's own 120 rules
+// =============================================================================
+//
+// Every rule in this chunk was read directly against its own real source body (not assumed
+// from name/shape alone); none exhibit chunk 1's own `IfcAdvancedBrepWithVoids_
+// VoidsHaveAdvancedFaces`-style inverted double-negative or any other confirmed defect.
+// `IfcCompositeCurve_CurveContinuous`'s own `discontinuous` bare-name reference (real
+// Python's `enum_namespace`-exported lowercase alias for `IfcTransitionCode.DISCONTINUOUS`)
+// is ported as the plain uppercase enum-member string `"DISCONTINUOUS"`, matching every
+// other ported rule's own enum-comparison convention (e.g. chunk 1's `"USERDEFINED"`/
+// `"AREA"`) -- a disclosed, mechanical substitution, not a behavior change.
+// =============================================================================
+
+/**
+ * Shared shape (4 occurrences in this chunk) -- Python: `X > 0.0`, `X` a mandatory REAL
+ * attribute read directly off `self`. See this file's own header comment.
+ */
+function attrGreaterThanZero(self: EntityInstance, attrName: string): Tri {
+	return triGt(expressGetAttr(self, attrName, INDETERMINATE), 0.0);
+}
+
+/**
+ * Shared shape -- Python: `sizeof([temp for temp in X if temp.Y != X[0].Y]) == 0` (every
+ * member of list attribute `listAttrName` shares the first member's own `attrName` value).
+ * See this file's own header comment for the 3-occurrence provenance (chunk 1's own
+ * `IfcBSplineCurve_SameDim`, not retrofitted, plus this chunk's own 2 new call sites).
+ */
+function allShareFirstAttr(self: EntityInstance, listAttrName: string, attrName: string): boolean {
+	const list = expressGetAttr(self, listAttrName, INDETERMINATE);
+	const items = isIndeterminate(list) ? [] : (list as EntityInstance[]);
+	const first = expressGetItem(items, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const firstValue = expressGetAttr(first, attrName, INDETERMINATE);
+	const violating = items.filter(
+		(item) => triNe(expressGetAttr(item, attrName, INDETERMINATE), firstValue) === true,
+	).length;
+	return violating === 0;
+}
+
+/**
+ * Shared shape (2 occurrences in this chunk) -- Python: `sizeof([temp for temp in X if self
+ * == temp]) == 0`. `self == temp` is a genuine entity-instance comparison (`triEq`, not a
+ * bare `===` -- see `runtimeShim.ts`'s own header comment on why).
+ */
+function containsSelfReference(self: EntityInstance, listAttrName: string): boolean {
+	const list = expressGetAttr(self, listAttrName, INDETERMINATE);
+	const items = isIndeterminate(list) ? [] : (list as EntityInstance[]);
+	const count = items.filter((temp) => triEq(self, temp) === true).length;
+	return count === 0;
+}
+
+/**
+ * Shared shape (2 occurrences, byte-identical real bodies) -- Python:
+ * `exists(lambda: express_getitem(DefinesType, 0, INDETERMINATE)) and ('ifc4.ifcdoortype' in
+ * typeof(...) or 'ifc4.ifcdoorstyle' in typeof(...))`. `DefinesType[0]` is re-evaluated
+ * multiple times in the real generated body (never cached) -- ported the same way (`first()`
+ * called multiple times) for literal fidelity, not just structural equivalence.
+ */
+function definesTypeIsDoorTypeOrStyle(self: EntityInstance): boolean {
+	const first = () =>
+		expressGetItem(expressGetAttr(self, "DefinesType", INDETERMINATE), 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	return exists(first) && (typeOfAttr(first()).has("ifc4.ifcdoortype") || typeOfAttr(first()).has("ifc4.ifcdoorstyle"));
+}
+
+/**
+ * Python: `IfcUniquePropertyName(properties)` (real source line 12139) /
+ * `IfcUniquePropertyTemplateNames(properties)` (line 12155) -- two real, distinct top-level
+ * EXPRESS-library helper functions with byte-identical bodies (confirmed directly): build an
+ * `express_set` union of every member's own `Name`, then check that set's size equals the
+ * list's own length. See this file's own header comment.
+ */
+function uniquePropertyLikeNames(properties: unknown): boolean {
+	const items = isIndeterminate(properties) ? [] : (properties as EntityInstance[]);
+	let names = new ExpressSet<unknown>();
+	for (const item of items) {
+		names = names.plus(expressGetAttr(item, "Name", INDETERMINATE));
+	}
+	return names.size === items.length;
+}
+
+/** Python: `IfcUniquePropertyName` (line 12139) -- see `uniquePropertyLikeNames` above. */
+function ifcUniquePropertyName(properties: unknown): boolean {
+	return uniquePropertyLikeNames(properties);
+}
+
+/** Python: `IfcUniquePropertyTemplateNames` (line 12155) -- see `uniquePropertyLikeNames` above. */
+function ifcUniquePropertyTemplateNames(properties: unknown): boolean {
+	return uniquePropertyLikeNames(properties);
+}
+
+// =============================================================================
+// SCOPE = 'entity' rules (real source lines 5361-6617, this chunk's own 120).
+// =============================================================================
+
+// `IfcBuildingElementProxy_HasObjectName` (line 5361): `exists(Name)`.
+const IfcBuildingElementProxy_HasObjectName = entityRule("IfcBuildingElementProxy", "HasObjectName", (self) => {
+	assertWhereRule(exists(expressGetAttr(self, "Name", INDETERMINATE)), "IfcBuildingElementProxy.Name must be given.");
+});
+
+// `IfcBuildingElementProxy_CorrectPredefinedType` (line 5370).
+const IfcBuildingElementProxy_CorrectPredefinedType = entityRule(
+	"IfcBuildingElementProxy",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcBuildingElementProxy: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcBuildingElementProxy_CorrectTypeAssigned` (line 5380).
+const IfcBuildingElementProxy_CorrectTypeAssigned = entityRule(
+	"IfcBuildingElementProxy",
+	"CorrectTypeAssigned",
+	(self) => {
+		assertWhereRule(
+			correctTypeAssigned(self, "IfcBuildingElementProxyType"),
+			"IfcBuildingElementProxy: if IsTypedBy is given, its RelatingType must be an IfcBuildingElementProxyType.",
+		);
+	},
+);
+
+// `IfcBuildingElementProxyType_CorrectPredefinedType` (line 5390).
+const IfcBuildingElementProxyType_CorrectPredefinedType = entityRule(
+	"IfcBuildingElementProxyType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcBuildingElementProxyType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcBurner_CorrectPredefinedType` (line 5400).
+const IfcBurner_CorrectPredefinedType = entityRule("IfcBurner", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcBurner: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcBurner_CorrectTypeAssigned` (line 5410).
+const IfcBurner_CorrectTypeAssigned = entityRule("IfcBurner", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcBurnerType"),
+		"IfcBurner: if IsTypedBy is given, its RelatingType must be an IfcBurnerType.",
+	);
+});
+
+// `IfcBurnerType_CorrectPredefinedType` (line 5420).
+const IfcBurnerType_CorrectPredefinedType = entityRule("IfcBurnerType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcBurnerType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCShapeProfileDef_ValidGirth` (line 5430): `Girth < Depth / 2.0`.
+const IfcCShapeProfileDef_ValidGirth = entityRule("IfcCShapeProfileDef", "ValidGirth", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE) as number;
+	const girth = expressGetAttr(self, "Girth", INDETERMINATE);
+	assertWhereRule(triLt(girth, depth / 2.0), "IfcCShapeProfileDef.Girth must be less than half of Depth.");
+});
+
+// `IfcCShapeProfileDef_ValidInternalFilletRadius` (line 5441): `not
+// exists(InternalFilletRadius) or (InternalFilletRadius <= Width / 2.0 - WallThickness and
+// InternalFilletRadius <= Depth / 2.0 - WallThickness)` -- same shape as chunk 1's own
+// `IfcAsymmetricIShapeProfileDef_ValidBottomFilletRadius`/`ValidTopFilletRadius`, just with
+// two conjoined bounds instead of one.
+const IfcCShapeProfileDef_ValidInternalFilletRadius = entityRule(
+	"IfcCShapeProfileDef",
+	"ValidInternalFilletRadius",
+	(self) => {
+		const depth = expressGetAttr(self, "Depth", INDETERMINATE) as number;
+		const width = expressGetAttr(self, "Width", INDETERMINATE) as number;
+		const wallThickness = expressGetAttr(self, "WallThickness", INDETERMINATE) as number;
+		const internalFilletRadius = expressGetAttr(self, "InternalFilletRadius", INDETERMINATE);
+		assertWhereRule(
+			pyOr(!exists(internalFilletRadius), () =>
+				pyAnd(triLe(internalFilletRadius, width / 2.0 - wallThickness), () =>
+					triLe(internalFilletRadius, depth / 2.0 - wallThickness),
+				),
+			),
+			"IfcCShapeProfileDef: if InternalFilletRadius is given, it must be at most half of (Width - WallThickness) and at most half of (Depth - WallThickness).",
+		);
+	},
+);
+
+// `IfcCShapeProfileDef_ValidWallThickness` (line 5454): `WallThickness < Width / 2.0 and
+// WallThickness < Depth / 2.0`.
+const IfcCShapeProfileDef_ValidWallThickness = entityRule("IfcCShapeProfileDef", "ValidWallThickness", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE) as number;
+	const width = expressGetAttr(self, "Width", INDETERMINATE) as number;
+	const wallThickness = expressGetAttr(self, "WallThickness", INDETERMINATE);
+	assertWhereRule(
+		pyAnd(triLt(wallThickness, width / 2.0), () => triLt(wallThickness, depth / 2.0)),
+		"IfcCShapeProfileDef.WallThickness must be less than half of both Width and Depth.",
+	);
+});
+
+// `IfcCableCarrierFitting_CorrectPredefinedType` (line 5466).
+const IfcCableCarrierFitting_CorrectPredefinedType = entityRule(
+	"IfcCableCarrierFitting",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcCableCarrierFitting: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcCableCarrierFitting_CorrectTypeAssigned` (line 5476).
+const IfcCableCarrierFitting_CorrectTypeAssigned = entityRule(
+	"IfcCableCarrierFitting",
+	"CorrectTypeAssigned",
+	(self) => {
+		assertWhereRule(
+			correctTypeAssigned(self, "IfcCableCarrierFittingType"),
+			"IfcCableCarrierFitting: if IsTypedBy is given, its RelatingType must be an IfcCableCarrierFittingType.",
+		);
+	},
+);
+
+// `IfcCableCarrierFittingType_CorrectPredefinedType` (line 5486).
+const IfcCableCarrierFittingType_CorrectPredefinedType = entityRule(
+	"IfcCableCarrierFittingType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcCableCarrierFittingType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcCableCarrierSegment_CorrectPredefinedType` (line 5496).
+const IfcCableCarrierSegment_CorrectPredefinedType = entityRule(
+	"IfcCableCarrierSegment",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcCableCarrierSegment: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcCableCarrierSegment_CorrectTypeAssigned` (line 5506).
+const IfcCableCarrierSegment_CorrectTypeAssigned = entityRule(
+	"IfcCableCarrierSegment",
+	"CorrectTypeAssigned",
+	(self) => {
+		assertWhereRule(
+			correctTypeAssigned(self, "IfcCableCarrierSegmentType"),
+			"IfcCableCarrierSegment: if IsTypedBy is given, its RelatingType must be an IfcCableCarrierSegmentType.",
+		);
+	},
+);
+
+// `IfcCableCarrierSegmentType_CorrectPredefinedType` (line 5516).
+const IfcCableCarrierSegmentType_CorrectPredefinedType = entityRule(
+	"IfcCableCarrierSegmentType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcCableCarrierSegmentType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcCableFitting_CorrectPredefinedType` (line 5526).
+const IfcCableFitting_CorrectPredefinedType = entityRule("IfcCableFitting", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCableFitting: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCableFitting_CorrectTypeAssigned` (line 5536).
+const IfcCableFitting_CorrectTypeAssigned = entityRule("IfcCableFitting", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCableFittingType"),
+		"IfcCableFitting: if IsTypedBy is given, its RelatingType must be an IfcCableFittingType.",
+	);
+});
+
+// `IfcCableFittingType_CorrectPredefinedType` (line 5546).
+const IfcCableFittingType_CorrectPredefinedType = entityRule("IfcCableFittingType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCableFittingType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCableSegment_CorrectPredefinedType` (line 5556).
+const IfcCableSegment_CorrectPredefinedType = entityRule("IfcCableSegment", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCableSegment: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCableSegment_CorrectTypeAssigned` (line 5566).
+const IfcCableSegment_CorrectTypeAssigned = entityRule("IfcCableSegment", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCableSegmentType"),
+		"IfcCableSegment: if IsTypedBy is given, its RelatingType must be an IfcCableSegmentType.",
+	);
+});
+
+// `IfcCableSegmentType_CorrectPredefinedType` (line 5576).
+const IfcCableSegmentType_CorrectPredefinedType = entityRule("IfcCableSegmentType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCableSegmentType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCartesianPoint_CP2Dor3D` (line 5586): `hiindex(Coordinates) >= 2` -- `hiindex` is a
+// real alias of `sizeof`/`expressLen` (`runtimeShim.ts`'s own `hiIndex = expressLen`), used
+// here exactly as real Python's own generated body does.
+const IfcCartesianPoint_CP2Dor3D = entityRule("IfcCartesianPoint", "CP2Dor3D", (self) => {
+	const coordinates = expressGetAttr(self, "Coordinates", INDETERMINATE);
+	assertWhereRule(triGe(sizeof(coordinates), 2), "IfcCartesianPoint.Coordinates must have at least 2 elements.");
+});
+
+// `IfcCartesianTransformationOperator_ScaleGreaterZero` (line 5603): `Scl > 0.0`.
+const IfcCartesianTransformationOperator_ScaleGreaterZero = entityRule(
+	"IfcCartesianTransformationOperator",
+	"ScaleGreaterZero",
+	(self) => {
+		assertWhereRule(attrGreaterThanZero(self, "Scl"), "IfcCartesianTransformationOperator.Scl must be greater than 0.");
+	},
+);
+
+// `IfcCartesianTransformationOperator2D_DimEqual2` (line 5621): `Dim == 2` -- reads `self`'s
+// own (DERIVE, `calc_IfcCartesianTransformationOperator_Dim`) `Dim` attribute directly, NOT
+// a nested `X.Dim` -- deliberately NOT `attrDimEquals` (that helper expects an attribute
+// whose OWN `.Dim` is checked, not `self.Dim` itself).
+const IfcCartesianTransformationOperator2D_DimEqual2 = entityRule(
+	"IfcCartesianTransformationOperator2D",
+	"DimEqual2",
+	(self) => {
+		assertWhereRule(
+			triEq(expressGetAttr(self, "Dim", INDETERMINATE), 2),
+			"IfcCartesianTransformationOperator2D.Dim must equal 2.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator2D_Axis1Is2D` (line 5630): `not exists(Axis1) or
+// Axis1.Dim == 2`.
+const IfcCartesianTransformationOperator2D_Axis1Is2D = entityRule(
+	"IfcCartesianTransformationOperator2D",
+	"Axis1Is2D",
+	(self) => {
+		assertWhereRule(
+			optionalAttrDimEquals(self, "Axis1", 2),
+			"IfcCartesianTransformationOperator2D: if Axis1 is given, its Dim must equal 2.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator2D_Axis2Is2D` (line 5639): `not exists(Axis2) or
+// Axis2.Dim == 2`.
+const IfcCartesianTransformationOperator2D_Axis2Is2D = entityRule(
+	"IfcCartesianTransformationOperator2D",
+	"Axis2Is2D",
+	(self) => {
+		assertWhereRule(
+			optionalAttrDimEquals(self, "Axis2", 2),
+			"IfcCartesianTransformationOperator2D: if Axis2 is given, its Dim must equal 2.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator2DnonUniform_Scale2GreaterZero` (line 5651): `Scl2 > 0.0`.
+const IfcCartesianTransformationOperator2DnonUniform_Scale2GreaterZero = entityRule(
+	"IfcCartesianTransformationOperator2DnonUniform",
+	"Scale2GreaterZero",
+	(self) => {
+		assertWhereRule(
+			attrGreaterThanZero(self, "Scl2"),
+			"IfcCartesianTransformationOperator2DnonUniform.Scl2 must be greater than 0.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3D_DimIs3D` (line 5665): `Dim == 3` -- same
+// `self.Dim`-not-`attrDimEquals` note as `IfcCartesianTransformationOperator2D_DimEqual2`
+// above.
+const IfcCartesianTransformationOperator3D_DimIs3D = entityRule(
+	"IfcCartesianTransformationOperator3D",
+	"DimIs3D",
+	(self) => {
+		assertWhereRule(
+			triEq(expressGetAttr(self, "Dim", INDETERMINATE), 3),
+			"IfcCartesianTransformationOperator3D.Dim must equal 3.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3D_Axis1Is3D` (line 5674): `not exists(Axis1) or
+// Axis1.Dim == 3`.
+const IfcCartesianTransformationOperator3D_Axis1Is3D = entityRule(
+	"IfcCartesianTransformationOperator3D",
+	"Axis1Is3D",
+	(self) => {
+		assertWhereRule(
+			optionalAttrDimEquals(self, "Axis1", 3),
+			"IfcCartesianTransformationOperator3D: if Axis1 is given, its Dim must equal 3.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3D_Axis2Is3D` (line 5683): `not exists(Axis2) or
+// Axis2.Dim == 3`.
+const IfcCartesianTransformationOperator3D_Axis2Is3D = entityRule(
+	"IfcCartesianTransformationOperator3D",
+	"Axis2Is3D",
+	(self) => {
+		assertWhereRule(
+			optionalAttrDimEquals(self, "Axis2", 3),
+			"IfcCartesianTransformationOperator3D: if Axis2 is given, its Dim must equal 3.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3D_Axis3Is3D` (line 5692): `not exists(Axis3) or
+// Axis3.Dim == 3`.
+const IfcCartesianTransformationOperator3D_Axis3Is3D = entityRule(
+	"IfcCartesianTransformationOperator3D",
+	"Axis3Is3D",
+	(self) => {
+		assertWhereRule(
+			optionalAttrDimEquals(self, "Axis3", 3),
+			"IfcCartesianTransformationOperator3D: if Axis3 is given, its Dim must equal 3.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3DnonUniform_Scale2GreaterZero` (line 5706): `Scl2 > 0.0`.
+const IfcCartesianTransformationOperator3DnonUniform_Scale2GreaterZero = entityRule(
+	"IfcCartesianTransformationOperator3DnonUniform",
+	"Scale2GreaterZero",
+	(self) => {
+		assertWhereRule(
+			attrGreaterThanZero(self, "Scl2"),
+			"IfcCartesianTransformationOperator3DnonUniform.Scl2 must be greater than 0.",
+		);
+	},
+);
+
+// `IfcCartesianTransformationOperator3DnonUniform_Scale3GreaterZero` (line 5716): `Scl3 > 0.0`.
+const IfcCartesianTransformationOperator3DnonUniform_Scale3GreaterZero = entityRule(
+	"IfcCartesianTransformationOperator3DnonUniform",
+	"Scale3GreaterZero",
+	(self) => {
+		assertWhereRule(
+			attrGreaterThanZero(self, "Scl3"),
+			"IfcCartesianTransformationOperator3DnonUniform.Scl3 must be greater than 0.",
+		);
+	},
+);
+
+// `IfcChiller_CorrectPredefinedType` (line 5734).
+const IfcChiller_CorrectPredefinedType = entityRule("IfcChiller", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcChiller: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcChiller_CorrectTypeAssigned` (line 5744).
+const IfcChiller_CorrectTypeAssigned = entityRule("IfcChiller", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcChillerType"),
+		"IfcChiller: if IsTypedBy is given, its RelatingType must be an IfcChillerType.",
+	);
+});
+
+// `IfcChillerType_CorrectPredefinedType` (line 5754).
+const IfcChillerType_CorrectPredefinedType = entityRule("IfcChillerType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcChillerType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcChimney_CorrectPredefinedType` (line 5764).
+const IfcChimney_CorrectPredefinedType = entityRule("IfcChimney", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcChimney: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcChimney_CorrectTypeAssigned` (line 5774).
+const IfcChimney_CorrectTypeAssigned = entityRule("IfcChimney", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcChimneyType"),
+		"IfcChimney: if IsTypedBy is given, its RelatingType must be an IfcChimneyType.",
+	);
+});
+
+// `IfcChimneyType_CorrectPredefinedType` (line 5784).
+const IfcChimneyType_CorrectPredefinedType = entityRule("IfcChimneyType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcChimneyType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCircleHollowProfileDef_WR1` (line 5794): `WallThickness < Radius`.
+const IfcCircleHollowProfileDef_WR1 = entityRule("IfcCircleHollowProfileDef", "WR1", (self) => {
+	const wallThickness = expressGetAttr(self, "WallThickness", INDETERMINATE);
+	const radius = expressGetAttr(self, "Radius", INDETERMINATE);
+	assertWhereRule(triLt(wallThickness, radius), "IfcCircleHollowProfileDef.WallThickness must be less than Radius.");
+});
+
+// `IfcCoil_CorrectPredefinedType` (line 5804).
+const IfcCoil_CorrectPredefinedType = entityRule("IfcCoil", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCoil: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCoil_CorrectTypeAssigned` (line 5814).
+const IfcCoil_CorrectTypeAssigned = entityRule("IfcCoil", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCoilType"),
+		"IfcCoil: if IsTypedBy is given, its RelatingType must be an IfcCoilType.",
+	);
+});
+
+// `IfcCoilType_CorrectPredefinedType` (line 5824).
+const IfcCoilType_CorrectPredefinedType = entityRule("IfcCoilType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCoilType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcColumn_CorrectPredefinedType` (line 5834).
+const IfcColumn_CorrectPredefinedType = entityRule("IfcColumn", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcColumn: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcColumn_CorrectTypeAssigned` (line 5844).
+const IfcColumn_CorrectTypeAssigned = entityRule("IfcColumn", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcColumnType"),
+		"IfcColumn: if IsTypedBy is given, its RelatingType must be an IfcColumnType.",
+	);
+});
+
+// `IfcColumnStandardCase_HasMaterialProfileSetUsage` (line 5854): byte-identical shape to
+// chunk 1's own `IfcBeamStandardCase_HasMaterialProfileSetUsage` (not retrofitted into a
+// shared helper there or here -- a 2nd, disclosed occurrence, not yet a 3rd).
+const IfcColumnStandardCase_HasMaterialProfileSetUsage = entityRule(
+	"IfcColumnStandardCase",
+	"HasMaterialProfileSetUsage",
+	(self) => {
+		const refs = usedIn(self, "ifc4.ifcrelassociates.relatedobjects");
+		const count = refs.filter(
+			(temp) =>
+				typeOfAttr(temp).has("ifc4.ifcrelassociatesmaterial") &&
+				typeOfAttr(expressGetAttr(temp, "RelatingMaterial", INDETERMINATE)).has("ifc4.ifcmaterialprofilesetusage"),
+		).length;
+		assertWhereRule(
+			count === 1,
+			"IfcColumnStandardCase: must be associated with exactly one IfcRelAssociatesMaterial whose RelatingMaterial is an IfcMaterialProfileSetUsage.",
+		);
+	},
+);
+
+// `IfcColumnType_CorrectPredefinedType` (line 5863).
+const IfcColumnType_CorrectPredefinedType = entityRule("IfcColumnType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcColumnType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCommunicationsAppliance_CorrectPredefinedType` (line 5873).
+const IfcCommunicationsAppliance_CorrectPredefinedType = entityRule(
+	"IfcCommunicationsAppliance",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcCommunicationsAppliance: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcCommunicationsAppliance_CorrectTypeAssigned` (line 5883).
+const IfcCommunicationsAppliance_CorrectTypeAssigned = entityRule(
+	"IfcCommunicationsAppliance",
+	"CorrectTypeAssigned",
+	(self) => {
+		assertWhereRule(
+			correctTypeAssigned(self, "IfcCommunicationsApplianceType"),
+			"IfcCommunicationsAppliance: if IsTypedBy is given, its RelatingType must be an IfcCommunicationsApplianceType.",
+		);
+	},
+);
+
+// `IfcCommunicationsApplianceType_CorrectPredefinedType` (line 5893).
+const IfcCommunicationsApplianceType_CorrectPredefinedType = entityRule(
+	"IfcCommunicationsApplianceType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcCommunicationsApplianceType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcComplexProperty_WR21` (line 5903): `sizeof([temp for temp in HasProperties if self ==
+// temp]) == 0`.
+const IfcComplexProperty_WR21 = entityRule("IfcComplexProperty", "WR21", (self) => {
+	assertWhereRule(
+		containsSelfReference(self, "HasProperties"),
+		"IfcComplexProperty.HasProperties must not contain self.",
+	);
+});
+
+// `IfcComplexProperty_WR22` (line 5913): `IfcUniquePropertyName(HasProperties)`.
+const IfcComplexProperty_WR22 = entityRule("IfcComplexProperty", "WR22", (self) => {
+	const hasProperties = expressGetAttr(self, "HasProperties", INDETERMINATE);
+	assertWhereRule(
+		ifcUniquePropertyName(hasProperties),
+		"IfcComplexProperty.HasProperties: every member must have a distinct Name.",
+	);
+});
+
+// `IfcComplexPropertyTemplate_UniquePropertyNames` (line 5923):
+// `IfcUniquePropertyTemplateNames(HasPropertyTemplates)`.
+const IfcComplexPropertyTemplate_UniquePropertyNames = entityRule(
+	"IfcComplexPropertyTemplate",
+	"UniquePropertyNames",
+	(self) => {
+		const hasPropertyTemplates = expressGetAttr(self, "HasPropertyTemplates", INDETERMINATE);
+		assertWhereRule(
+			ifcUniquePropertyTemplateNames(hasPropertyTemplates),
+			"IfcComplexPropertyTemplate.HasPropertyTemplates: every member must have a distinct Name.",
+		);
+	},
+);
+
+// `IfcComplexPropertyTemplate_NoSelfReference` (line 5933): `sizeof([temp for temp in
+// HasPropertyTemplates if self == temp]) == 0` -- same shape as `IfcComplexProperty_WR21`
+// above (2nd occurrence, factored as `containsSelfReference`).
+const IfcComplexPropertyTemplate_NoSelfReference = entityRule(
+	"IfcComplexPropertyTemplate",
+	"NoSelfReference",
+	(self) => {
+		assertWhereRule(
+			containsSelfReference(self, "HasPropertyTemplates"),
+			"IfcComplexPropertyTemplate.HasPropertyTemplates must not contain self.",
+		);
+	},
+);
+
+// `IfcCompositeCurve_CurveContinuous` (line 5943): `(not ClosedCurve and sizeof([temp for
+// temp in Segments if temp.Transition == discontinuous]) == 1) or (ClosedCurve and
+// sizeof([...]) == 0)` -- `discontinuous` is the bare, lowercase `IfcTransitionCode.
+// DISCONTINUOUS` enum member real Python's `enum_namespace` re-exports at module scope
+// (see this file's own header comment on why that mechanism isn't ported -- every other
+// ported rule's enum comparisons already use the plain uppercase member-name string
+// directly, e.g. `"USERDEFINED"`/`"AREA"`; same substitution here: `"DISCONTINUOUS"`).
+// `ClosedCurve` is a DERIVE attribute (`calc_IfcCompositeCurve_ClosedCurve`, Phase EX-2) --
+// `not ClosedCurve` uses `pyNot` per this file's own "how to read a rule" convention. The
+// two branches share the identical filter predicate; computed once here (a disclosed,
+// behavior-preserving simplification -- real Python's own generated body repeats the
+// comprehension verbatim instead of caching it).
+const IfcCompositeCurve_CurveContinuous = entityRule("IfcCompositeCurve", "CurveContinuous", (self) => {
+	const segments = expressGetAttr(self, "Segments", INDETERMINATE);
+	const items = isIndeterminate(segments) ? [] : (segments as EntityInstance[]);
+	const closedCurve = expressGetAttr(self, "ClosedCurve", INDETERMINATE) as Tri;
+	const discontinuousCount = items.filter(
+		(temp) => triEq(expressGetAttr(temp, "Transition", INDETERMINATE), "DISCONTINUOUS") === true,
+	).length;
+	assertWhereRule(
+		pyOr(
+			pyAnd(pyNot(closedCurve), () => triEq(discontinuousCount, 1)),
+			() => pyAnd(closedCurve, () => triEq(discontinuousCount, 0)),
+		),
+		"IfcCompositeCurve: an open curve must have exactly one DISCONTINUOUS-transition segment, a closed curve must have none.",
+	);
+});
+
+// `IfcCompositeCurve_SameDim` (line 5954): `sizeof([temp for temp in Segments if temp.Dim !=
+// Segments[0].Dim]) == 0` -- the same "every member shares the first member's own attribute
+// value" shape as chunk 1's own `IfcBSplineCurve_SameDim` (not retrofitted there) and this
+// chunk's own `IfcCompositeProfileDef_InvariantProfileType` below -- 3 occurrences across
+// the file now (the 3-occurrence threshold this project's own task brief calls for),
+// factored here as `allShareFirstAttr`.
+const IfcCompositeCurve_SameDim = entityRule("IfcCompositeCurve", "SameDim", (self) => {
+	assertWhereRule(
+		allShareFirstAttr(self, "Segments", "Dim"),
+		"IfcCompositeCurve: every Segments member must share the first member's Dim.",
+	);
+});
+
+// `IfcCompositeCurveOnSurface_SameSurface` (line 5973): `sizeof(BasisSurface) > 0` --
+// `BasisSurface` is the DERIVE attribute (`calc_IfcCompositeCurveOnSurface_BasisSurface` ->
+// `IfcGetBasisSurface`, Phase EX-2 -- itself flagged as containing a real, disclosed
+// upstream bug for some call shapes; this rule's own check is unaffected either way, a
+// bare `sizeof(...) > 0`).
+const IfcCompositeCurveOnSurface_SameSurface = entityRule("IfcCompositeCurveOnSurface", "SameSurface", (self) => {
+	const basisSurface = expressGetAttr(self, "BasisSurface", INDETERMINATE);
+	assertWhereRule(triGt(sizeof(basisSurface), 0), "IfcCompositeCurveOnSurface.BasisSurface must be non-empty.");
+});
+
+// `IfcCompositeCurveSegment_ParentIsBoundedCurve` (line 5986): `'ifc4.ifcboundedcurve' in
+// typeof(ParentCurve)`.
+const IfcCompositeCurveSegment_ParentIsBoundedCurve = entityRule(
+	"IfcCompositeCurveSegment",
+	"ParentIsBoundedCurve",
+	(self) => {
+		const parentCurve = expressGetAttr(self, "ParentCurve", INDETERMINATE);
+		assertWhereRule(
+			typeOfAttr(parentCurve).has("ifc4.ifcboundedcurve"),
+			"IfcCompositeCurveSegment.ParentCurve must be an IfcBoundedCurve.",
+		);
+	},
+);
+
+// `IfcCompositeProfileDef_InvariantProfileType` (line 6000): `sizeof([temp for temp in
+// Profiles if temp.ProfileType != Profiles[0].ProfileType]) == 0` -- see
+// `IfcCompositeCurve_SameDim`'s own comment above for why this is factored as
+// `allShareFirstAttr` (this is the 3rd of the 3 occurrences that met the threshold).
+const IfcCompositeProfileDef_InvariantProfileType = entityRule(
+	"IfcCompositeProfileDef",
+	"InvariantProfileType",
+	(self) => {
+		assertWhereRule(
+			allShareFirstAttr(self, "Profiles", "ProfileType"),
+			"IfcCompositeProfileDef: every Profiles member must share the first member's ProfileType.",
+		);
+	},
+);
+
+// `IfcCompositeProfileDef_NoRecursion` (line 6010): `sizeof([temp for temp in Profiles if
+// 'ifc4.ifccompositeprofiledef' in typeof(temp)]) == 0`.
+const IfcCompositeProfileDef_NoRecursion = entityRule("IfcCompositeProfileDef", "NoRecursion", (self) => {
+	const profiles = expressGetAttr(self, "Profiles", INDETERMINATE);
+	const items = isIndeterminate(profiles) ? [] : (profiles as EntityInstance[]);
+	const violating = items.filter((temp) => typeOfAttr(temp).has("ifc4.ifccompositeprofiledef")).length;
+	assertWhereRule(violating === 0, "IfcCompositeProfileDef.Profiles must not contain another IfcCompositeProfileDef.");
+});
+
+// `IfcCompressor_CorrectPredefinedType` (line 6020).
+const IfcCompressor_CorrectPredefinedType = entityRule("IfcCompressor", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCompressor: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCompressor_CorrectTypeAssigned` (line 6030).
+const IfcCompressor_CorrectTypeAssigned = entityRule("IfcCompressor", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCompressorType"),
+		"IfcCompressor: if IsTypedBy is given, its RelatingType must be an IfcCompressorType.",
+	);
+});
+
+// `IfcCompressorType_CorrectPredefinedType` (line 6040).
+const IfcCompressorType_CorrectPredefinedType = entityRule("IfcCompressorType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCompressorType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCondenser_CorrectPredefinedType` (line 6050).
+const IfcCondenser_CorrectPredefinedType = entityRule("IfcCondenser", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCondenser: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCondenser_CorrectTypeAssigned` (line 6060).
+const IfcCondenser_CorrectTypeAssigned = entityRule("IfcCondenser", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCondenserType"),
+		"IfcCondenser: if IsTypedBy is given, its RelatingType must be an IfcCondenserType.",
+	);
+});
+
+// `IfcCondenserType_CorrectPredefinedType` (line 6070).
+const IfcCondenserType_CorrectPredefinedType = entityRule("IfcCondenserType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCondenserType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcConstraint_WR11` (line 6080): `ConstraintGrade != USERDEFINED or (ConstraintGrade ==
+// USERDEFINED and exists(UserDefinedGrade))` -- the mandatory-attribute
+// `userDefinedOrHasAttribute` shape already established in this file (chunk 1).
+const IfcConstraint_WR11 = entityRule("IfcConstraint", "WR11", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "ConstraintGrade", "UserDefinedGrade"),
+		"IfcConstraint: if ConstraintGrade is USERDEFINED, UserDefinedGrade must be given.",
+	);
+});
+
+// `IfcConstructionEquipmentResource_CorrectPredefinedType` (line 6090).
+const IfcConstructionEquipmentResource_CorrectPredefinedType = entityRule(
+	"IfcConstructionEquipmentResource",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcConstructionEquipmentResource: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcConstructionEquipmentResourceType_CorrectPredefinedType` (line 6100).
+const IfcConstructionEquipmentResourceType_CorrectPredefinedType = entityRule(
+	"IfcConstructionEquipmentResourceType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ResourceType", false),
+			"IfcConstructionEquipmentResourceType: if PredefinedType is USERDEFINED, ResourceType must be given.",
+		);
+	},
+);
+
+// `IfcConstructionMaterialResource_CorrectPredefinedType` (line 6110).
+const IfcConstructionMaterialResource_CorrectPredefinedType = entityRule(
+	"IfcConstructionMaterialResource",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcConstructionMaterialResource: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcConstructionMaterialResourceType_CorrectPredefinedType` (line 6120).
+const IfcConstructionMaterialResourceType_CorrectPredefinedType = entityRule(
+	"IfcConstructionMaterialResourceType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ResourceType", false),
+			"IfcConstructionMaterialResourceType: if PredefinedType is USERDEFINED, ResourceType must be given.",
+		);
+	},
+);
+
+// `IfcConstructionProductResource_CorrectPredefinedType` (line 6130).
+const IfcConstructionProductResource_CorrectPredefinedType = entityRule(
+	"IfcConstructionProductResource",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcConstructionProductResource: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcConstructionProductResourceType_CorrectPredefinedType` (line 6140).
+const IfcConstructionProductResourceType_CorrectPredefinedType = entityRule(
+	"IfcConstructionProductResourceType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ResourceType", false),
+			"IfcConstructionProductResourceType: if PredefinedType is USERDEFINED, ResourceType must be given.",
+		);
+	},
+);
+
+// `IfcController_CorrectPredefinedType` (line 6150).
+const IfcController_CorrectPredefinedType = entityRule("IfcController", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcController: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcController_CorrectTypeAssigned` (line 6160).
+const IfcController_CorrectTypeAssigned = entityRule("IfcController", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcControllerType"),
+		"IfcController: if IsTypedBy is given, its RelatingType must be an IfcControllerType.",
+	);
+});
+
+// `IfcControllerType_CorrectPredefinedType` (line 6170).
+const IfcControllerType_CorrectPredefinedType = entityRule("IfcControllerType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcControllerType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCooledBeam_CorrectPredefinedType` (line 6180).
+const IfcCooledBeam_CorrectPredefinedType = entityRule("IfcCooledBeam", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCooledBeam: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCooledBeam_CorrectTypeAssigned` (line 6190).
+const IfcCooledBeam_CorrectTypeAssigned = entityRule("IfcCooledBeam", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCooledBeamType"),
+		"IfcCooledBeam: if IsTypedBy is given, its RelatingType must be an IfcCooledBeamType.",
+	);
+});
+
+// `IfcCooledBeamType_CorrectPredefinedType` (line 6200).
+const IfcCooledBeamType_CorrectPredefinedType = entityRule("IfcCooledBeamType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCooledBeamType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCoolingTower_CorrectPredefinedType` (line 6210).
+const IfcCoolingTower_CorrectPredefinedType = entityRule("IfcCoolingTower", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCoolingTower: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCoolingTower_CorrectTypeAssigned` (line 6220).
+const IfcCoolingTower_CorrectTypeAssigned = entityRule("IfcCoolingTower", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCoolingTowerType"),
+		"IfcCoolingTower: if IsTypedBy is given, its RelatingType must be an IfcCoolingTowerType.",
+	);
+});
+
+// `IfcCoolingTowerType_CorrectPredefinedType` (line 6230).
+const IfcCoolingTowerType_CorrectPredefinedType = entityRule("IfcCoolingTowerType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCoolingTowerType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCovering_CorrectPredefinedType` (line 6240).
+const IfcCovering_CorrectPredefinedType = entityRule("IfcCovering", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCovering: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCovering_CorrectTypeAssigned` (line 6250).
+const IfcCovering_CorrectTypeAssigned = entityRule("IfcCovering", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCoveringType"),
+		"IfcCovering: if IsTypedBy is given, its RelatingType must be an IfcCoveringType.",
+	);
+});
+
+// `IfcCoveringType_CorrectPredefinedType` (line 6260).
+const IfcCoveringType_CorrectPredefinedType = entityRule("IfcCoveringType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCoveringType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCrewResource_CorrectPredefinedType` (line 6270).
+const IfcCrewResource_CorrectPredefinedType = entityRule("IfcCrewResource", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCrewResource: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCrewResourceType_CorrectPredefinedType` (line 6280).
+const IfcCrewResourceType_CorrectPredefinedType = entityRule("IfcCrewResourceType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ResourceType", false),
+		"IfcCrewResourceType: if PredefinedType is USERDEFINED, ResourceType must be given.",
+	);
+});
+
+// `IfcCurtainWall_CorrectPredefinedType` (line 6293).
+const IfcCurtainWall_CorrectPredefinedType = entityRule("IfcCurtainWall", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcCurtainWall: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcCurtainWall_CorrectTypeAssigned` (line 6303).
+const IfcCurtainWall_CorrectTypeAssigned = entityRule("IfcCurtainWall", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcCurtainWallType"),
+		"IfcCurtainWall: if IsTypedBy is given, its RelatingType must be an IfcCurtainWallType.",
+	);
+});
+
+// `IfcCurtainWallType_CorrectPredefinedType` (line 6313).
+const IfcCurtainWallType_CorrectPredefinedType = entityRule("IfcCurtainWallType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcCurtainWallType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcCurveStyle_MeasureOfWidth` (line 6326): `not exists(CurveWidth) or
+// 'ifc4.ifcpositivelengthmeasure' in typeof(CurveWidth) or ('ifc4.ifcdescriptivemeasure' in
+// typeof(CurveWidth) and CurveWidth == 'by layer')`.
+const IfcCurveStyle_MeasureOfWidth = entityRule("IfcCurveStyle", "MeasureOfWidth", (self) => {
+	const curveWidth = expressGetAttr(self, "CurveWidth", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(curveWidth), () =>
+			pyOr(typeOfAttr(curveWidth).has("ifc4.ifcpositivelengthmeasure"), () =>
+				pyAnd(typeOfAttr(curveWidth).has("ifc4.ifcdescriptivemeasure"), () => triEq(curveWidth, "by layer")),
+			),
+		),
+		"IfcCurveStyle: if CurveWidth is given, it must be an IfcPositiveLengthMeasure, or an IfcDescriptiveMeasure equal to 'by layer'.",
+	);
+});
+
+// `IfcCurveStyle_IdentifiableCurveStyle` (line 6336): `exists(CurveFont) or
+// exists(CurveWidth) or exists(CurveColour)`.
+const IfcCurveStyle_IdentifiableCurveStyle = entityRule("IfcCurveStyle", "IdentifiableCurveStyle", (self) => {
+	const curveFont = expressGetAttr(self, "CurveFont", INDETERMINATE);
+	const curveWidth = expressGetAttr(self, "CurveWidth", INDETERMINATE);
+	const curveColour = expressGetAttr(self, "CurveColour", INDETERMINATE);
+	assertWhereRule(
+		exists(curveFont) || exists(curveWidth) || exists(curveColour),
+		"IfcCurveStyle: at least one of CurveFont, CurveWidth, CurveColour must be given.",
+	);
+});
+
+// `IfcCurveStyleFontPattern_VisibleLengthGreaterEqualZero` (line 6348):
+// `VisibleSegmentLength >= 0.0`.
+const IfcCurveStyleFontPattern_VisibleLengthGreaterEqualZero = entityRule(
+	"IfcCurveStyleFontPattern",
+	"VisibleLengthGreaterEqualZero",
+	(self) => {
+		const visibleSegmentLength = expressGetAttr(self, "VisibleSegmentLength", INDETERMINATE);
+		assertWhereRule(
+			triGe(visibleSegmentLength, 0.0),
+			"IfcCurveStyleFontPattern.VisibleSegmentLength must be greater than or equal to 0.",
+		);
+	},
+);
+
+// `IfcDamper_CorrectPredefinedType` (line 6358).
+const IfcDamper_CorrectPredefinedType = entityRule("IfcDamper", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcDamper: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcDamper_CorrectTypeAssigned` (line 6368).
+const IfcDamper_CorrectTypeAssigned = entityRule("IfcDamper", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcDamperType"),
+		"IfcDamper: if IsTypedBy is given, its RelatingType must be an IfcDamperType.",
+	);
+});
+
+// `IfcDamperType_CorrectPredefinedType` (line 6378).
+const IfcDamperType_CorrectPredefinedType = entityRule("IfcDamperType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcDamperType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcDerivedProfileDef_InvariantProfileType` (line 6388): `ProfileType ==
+// ParentProfile.ProfileType`.
+const IfcDerivedProfileDef_InvariantProfileType = entityRule("IfcDerivedProfileDef", "InvariantProfileType", (self) => {
+	const parentProfile = expressGetAttr(self, "ParentProfile", INDETERMINATE);
+	assertWhereRule(
+		triEq(
+			expressGetAttr(self, "ProfileType", INDETERMINATE),
+			expressGetAttr(parentProfile, "ProfileType", INDETERMINATE),
+		),
+		"IfcDerivedProfileDef.ProfileType must equal ParentProfile.ProfileType.",
+	);
+});
+
+// `IfcDerivedUnit_WR1` (line 6398): `sizeof(Elements) > 1 or (sizeof(Elements) == 1 and
+// Elements[0].Exponent != 1)`.
+const IfcDerivedUnit_WR1 = entityRule("IfcDerivedUnit", "WR1", (self) => {
+	const elements = expressGetAttr(self, "Elements", INDETERMINATE);
+	assertWhereRule(
+		pyOr(triGt(sizeof(elements), 1), () =>
+			pyAnd(triEq(sizeof(elements), 1), () =>
+				triNe(
+					expressGetAttr(
+						expressGetItem(elements, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+						"Exponent",
+						INDETERMINATE,
+					),
+					1,
+				),
+			),
+		),
+		"IfcDerivedUnit: must have more than one Elements member, or exactly one whose Exponent is not 1.",
+	);
+});
+
+// `IfcDerivedUnit_WR2` (line 6408): `UnitType != USERDEFINED or (UnitType == USERDEFINED
+// and exists(UserDefinedType))` -- the mandatory-attribute `userDefinedOrHasAttribute`
+// shape.
+const IfcDerivedUnit_WR2 = entityRule("IfcDerivedUnit", "WR2", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "UnitType", "UserDefinedType"),
+		"IfcDerivedUnit: if UnitType is USERDEFINED, UserDefinedType must be given.",
+	);
+});
+
+// `IfcDirection_MagnitudeGreaterZero` (line 6422): `sizeof([tmp for tmp in DirectionRatios
+// if tmp != 0.0]) > 0` -- `DirectionRatios` members are mandatory `REAL`s (never
+// indeterminate when the list itself is non-empty), so a plain `!==` suffices.
+const IfcDirection_MagnitudeGreaterZero = entityRule("IfcDirection", "MagnitudeGreaterZero", (self) => {
+	const directionRatios = expressGetAttr(self, "DirectionRatios", INDETERMINATE);
+	const items = isIndeterminate(directionRatios) ? [] : (directionRatios as number[]);
+	const nonZeroCount = items.filter((tmp) => tmp !== 0.0).length;
+	assertWhereRule(nonZeroCount > 0, "IfcDirection.DirectionRatios must have at least one non-zero component.");
+});
+
+// `IfcDiscreteAccessory_CorrectPredefinedType` (line 6436).
+const IfcDiscreteAccessory_CorrectPredefinedType = entityRule(
+	"IfcDiscreteAccessory",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcDiscreteAccessory: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcDiscreteAccessory_CorrectTypeAssigned` (line 6446).
+const IfcDiscreteAccessory_CorrectTypeAssigned = entityRule("IfcDiscreteAccessory", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcDiscreteAccessoryType"),
+		"IfcDiscreteAccessory: if IsTypedBy is given, its RelatingType must be an IfcDiscreteAccessoryType.",
+	);
+});
+
+// `IfcDiscreteAccessoryType_CorrectPredefinedType` (line 6456).
+const IfcDiscreteAccessoryType_CorrectPredefinedType = entityRule(
+	"IfcDiscreteAccessoryType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcDiscreteAccessoryType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcDistributionChamberElement_CorrectPredefinedType` (line 6466).
+const IfcDistributionChamberElement_CorrectPredefinedType = entityRule(
+	"IfcDistributionChamberElement",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ObjectType", true),
+			"IfcDistributionChamberElement: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+		);
+	},
+);
+
+// `IfcDistributionChamberElement_CorrectTypeAssigned` (line 6476).
+const IfcDistributionChamberElement_CorrectTypeAssigned = entityRule(
+	"IfcDistributionChamberElement",
+	"CorrectTypeAssigned",
+	(self) => {
+		assertWhereRule(
+			correctTypeAssigned(self, "IfcDistributionChamberElementType"),
+			"IfcDistributionChamberElement: if IsTypedBy is given, its RelatingType must be an IfcDistributionChamberElementType.",
+		);
+	},
+);
+
+// `IfcDistributionChamberElementType_CorrectPredefinedType` (line 6486).
+const IfcDistributionChamberElementType_CorrectPredefinedType = entityRule(
+	"IfcDistributionChamberElementType",
+	"CorrectPredefinedType",
+	(self) => {
+		assertWhereRule(
+			correctPredefinedType(self, "ElementType", false),
+			"IfcDistributionChamberElementType: if PredefinedType is USERDEFINED, ElementType must be given.",
+		);
+	},
+);
+
+// `IfcDocumentReference_WR1` (line 6496): `exists(Name) ^ exists(ReferencedDocument)` --
+// both operands are already-definite booleans (`exists()` never returns `Tri`), so this is
+// a plain JS `!==` (matching chunk 1's own reduction precedent for `^` between two `exists()`
+// calls, e.g. `IfcAxis2Placement3D_AxisAndRefDirProvision`) -- exactly one of the two must
+// be given.
+const IfcDocumentReference_WR1 = entityRule("IfcDocumentReference", "WR1", (self) => {
+	const name = expressGetAttr(self, "Name", INDETERMINATE);
+	const referencedDocument = expressGetAttr(self, "ReferencedDocument", INDETERMINATE);
+	assertWhereRule(
+		exists(name) !== exists(referencedDocument),
+		"IfcDocumentReference: exactly one of Name or ReferencedDocument must be given.",
+	);
+});
+
+// `IfcDoor_CorrectStyleAssigned` (line 6507) (real `RULE_NAME` is `'CorrectStyleAssigned'`, not the usual `'CorrectTypeAssigned'` -- registered under its own real name, body shape is identical).
+const IfcDoor_CorrectStyleAssigned = entityRule("IfcDoor", "CorrectStyleAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcDoorType"),
+		"IfcDoor: if IsTypedBy is given, its RelatingType must be an IfcDoorType.",
+	);
+});
+
+// `IfcDoorLiningProperties_WR31` (line 6517): `not (exists(LiningDepth) and (not
+// exists(LiningThickness)))` -- a plain implication, `LiningDepth` given implies
+// `LiningThickness` given: `!exists(LiningDepth) or exists(LiningThickness)`.
+const IfcDoorLiningProperties_WR31 = entityRule("IfcDoorLiningProperties", "WR31", (self) => {
+	const liningDepth = expressGetAttr(self, "LiningDepth", INDETERMINATE);
+	const liningThickness = expressGetAttr(self, "LiningThickness", INDETERMINATE);
+	assertWhereRule(
+		!exists(liningDepth) || exists(liningThickness),
+		"IfcDoorLiningProperties: if LiningDepth is given, LiningThickness must be given.",
+	);
+});
+
+// `IfcDoorLiningProperties_WR32` (line 6528): `not (exists(ThresholdDepth) and (not
+// exists(ThresholdThickness)))` -- same implication shape as WR31 above.
+const IfcDoorLiningProperties_WR32 = entityRule("IfcDoorLiningProperties", "WR32", (self) => {
+	const thresholdDepth = expressGetAttr(self, "ThresholdDepth", INDETERMINATE);
+	const thresholdThickness = expressGetAttr(self, "ThresholdThickness", INDETERMINATE);
+	assertWhereRule(
+		!exists(thresholdDepth) || exists(thresholdThickness),
+		"IfcDoorLiningProperties: if ThresholdDepth is given, ThresholdThickness must be given.",
+	);
+});
+
+// `IfcDoorLiningProperties_WR33` (line 6539): `(exists(TransomOffset) and
+// exists(TransomThickness)) ^ (not exists(TransomOffset) and (not
+// exists(TransomThickness)))` -- from first principles: let A = exists(TransomOffset), B =
+// exists(TransomThickness). The expression is `(A && B) XOR (!A && !B)`, which is true
+// exactly when A and B agree (both true, or both false) -- i.e. it reduces to `A === B`,
+// the same XNOR reduction chunk 1's own `IfcAxis2Placement3D_AxisAndRefDirProvision`
+// already established for a differently-shaped (but equivalent-intent) real source
+// expression.
+const IfcDoorLiningProperties_WR33 = entityRule("IfcDoorLiningProperties", "WR33", (self) => {
+	const transomOffset = expressGetAttr(self, "TransomOffset", INDETERMINATE);
+	const transomThickness = expressGetAttr(self, "TransomThickness", INDETERMINATE);
+	assertWhereRule(
+		exists(transomOffset) === exists(transomThickness),
+		"IfcDoorLiningProperties: TransomOffset and TransomThickness must either both be given or both be omitted.",
+	);
+});
+
+// `IfcDoorLiningProperties_WR34` (line 6550): `(exists(CasingDepth) and
+// exists(CasingThickness)) ^ (not exists(CasingDepth) and (not exists(CasingThickness)))` --
+// same XNOR reduction as WR33 above (`A === B`).
+const IfcDoorLiningProperties_WR34 = entityRule("IfcDoorLiningProperties", "WR34", (self) => {
+	const casingDepth = expressGetAttr(self, "CasingDepth", INDETERMINATE);
+	const casingThickness = expressGetAttr(self, "CasingThickness", INDETERMINATE);
+	assertWhereRule(
+		exists(casingDepth) === exists(casingThickness),
+		"IfcDoorLiningProperties: CasingDepth and CasingThickness must either both be given or both be omitted.",
+	);
+});
+
+// `IfcDoorLiningProperties_WR35` (line 6561): `exists(lambda: DefinesType[0]) and
+// ('ifc4.ifcdoortype' in typeof(DefinesType[0]) or 'ifc4.ifcdoorstyle' in
+// typeof(DefinesType[0]))` -- byte-identical to `IfcDoorPanelProperties_ApplicableToType`
+// below, factored as `definesTypeIsDoorTypeOrStyle`.
+const IfcDoorLiningProperties_WR35 = entityRule("IfcDoorLiningProperties", "WR35", (self) => {
+	assertWhereRule(
+		definesTypeIsDoorTypeOrStyle(self),
+		"IfcDoorLiningProperties: DefinesType[0] must be an IfcDoorType or IfcDoorStyle.",
+	);
+});
+
+// `IfcDoorPanelProperties_ApplicableToType` (line 6570): byte-identical body to
+// `IfcDoorLiningProperties_WR35` above -- see that rule's own comment.
+const IfcDoorPanelProperties_ApplicableToType = entityRule("IfcDoorPanelProperties", "ApplicableToType", (self) => {
+	assertWhereRule(
+		definesTypeIsDoorTypeOrStyle(self),
+		"IfcDoorPanelProperties: DefinesType[0] must be an IfcDoorType or IfcDoorStyle.",
+	);
+});
+
+// `IfcDoorType_CorrectPredefinedType` (line 6579).
+const IfcDoorType_CorrectPredefinedType = entityRule("IfcDoorType", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ElementType", false),
+		"IfcDoorType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcDraughtingPreDefinedColour_PreDefinedColourNames` (line 6589):
+// `express_getattr(Name, 'lower', INDETERMINATE)() in [...]` -- real Python's own generic
+// `getattr(obj, name, default)` resolving to the plain Python string's own bound `.lower()`
+// method (since `Name` is a plain string here, not an `entity_instance`) and calling it --
+// ported directly as `.toLowerCase()`, this port's own established equivalent for every
+// other `self.toLowerCase()`-shaped type-scope rule (e.g. chunk 1's `IfcFontStyle_WR1`),
+// just reading a named attribute first instead of taking the bare value as `self`.
+const IfcDraughtingPreDefinedColour_PreDefinedColourNames = entityRule(
+	"IfcDraughtingPreDefinedColour",
+	"PreDefinedColourNames",
+	(self) => {
+		const name = expressGetAttr(self, "Name", INDETERMINATE) as string;
+		assertWhereRule(
+			["black", "red", "green", "blue", "yellow", "magenta", "cyan", "white", "by layer"].includes(name.toLowerCase()),
+			"IfcDraughtingPreDefinedColour.Name must be one of the 9 documented colour keywords (case-insensitive).",
+		);
+	},
+);
+
+// `IfcDraughtingPreDefinedCurveFont_PreDefinedCurveFontNames` (line 6598): same
+// `.lower()`-on-`Name` shape as `IfcDraughtingPreDefinedColour_PreDefinedColourNames` above,
+// different keyword list.
+const IfcDraughtingPreDefinedCurveFont_PreDefinedCurveFontNames = entityRule(
+	"IfcDraughtingPreDefinedCurveFont",
+	"PreDefinedCurveFontNames",
+	(self) => {
+		const name = expressGetAttr(self, "Name", INDETERMINATE) as string;
+		assertWhereRule(
+			["continuous", "chain", "chain double dash", "dashed", "dotted", "by layer"].includes(name.toLowerCase()),
+			"IfcDraughtingPreDefinedCurveFont.Name must be one of the 6 documented curve-font keywords (case-insensitive).",
+		);
+	},
+);
+
+// `IfcDuctFitting_CorrectPredefinedType` (line 6607).
+const IfcDuctFitting_CorrectPredefinedType = entityRule("IfcDuctFitting", "CorrectPredefinedType", (self) => {
+	assertWhereRule(
+		correctPredefinedType(self, "ObjectType", true),
+		"IfcDuctFitting: if PredefinedType is given and USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcDuctFitting_CorrectTypeAssigned` (line 6617).
+const IfcDuctFitting_CorrectTypeAssigned = entityRule("IfcDuctFitting", "CorrectTypeAssigned", (self) => {
+	assertWhereRule(
+		correctTypeAssigned(self, "IfcDuctFittingType"),
+		"IfcDuctFitting: if IsTypedBy is given, its RelatingType must be an IfcDuctFittingType.",
+	);
+});
+
+registerSchemaRules("IFC4", [
+	IfcBuildingElementProxy_HasObjectName,
+	IfcBuildingElementProxy_CorrectPredefinedType,
+	IfcBuildingElementProxy_CorrectTypeAssigned,
+	IfcBuildingElementProxyType_CorrectPredefinedType,
+	IfcBurner_CorrectPredefinedType,
+	IfcBurner_CorrectTypeAssigned,
+	IfcBurnerType_CorrectPredefinedType,
+	IfcCShapeProfileDef_ValidGirth,
+	IfcCShapeProfileDef_ValidInternalFilletRadius,
+	IfcCShapeProfileDef_ValidWallThickness,
+	IfcCableCarrierFitting_CorrectPredefinedType,
+	IfcCableCarrierFitting_CorrectTypeAssigned,
+	IfcCableCarrierFittingType_CorrectPredefinedType,
+	IfcCableCarrierSegment_CorrectPredefinedType,
+	IfcCableCarrierSegment_CorrectTypeAssigned,
+	IfcCableCarrierSegmentType_CorrectPredefinedType,
+	IfcCableFitting_CorrectPredefinedType,
+	IfcCableFitting_CorrectTypeAssigned,
+	IfcCableFittingType_CorrectPredefinedType,
+	IfcCableSegment_CorrectPredefinedType,
+	IfcCableSegment_CorrectTypeAssigned,
+	IfcCableSegmentType_CorrectPredefinedType,
+	IfcCartesianPoint_CP2Dor3D,
+	IfcCartesianTransformationOperator_ScaleGreaterZero,
+	IfcCartesianTransformationOperator2D_DimEqual2,
+	IfcCartesianTransformationOperator2D_Axis1Is2D,
+	IfcCartesianTransformationOperator2D_Axis2Is2D,
+	IfcCartesianTransformationOperator2DnonUniform_Scale2GreaterZero,
+	IfcCartesianTransformationOperator3D_DimIs3D,
+	IfcCartesianTransformationOperator3D_Axis1Is3D,
+	IfcCartesianTransformationOperator3D_Axis2Is3D,
+	IfcCartesianTransformationOperator3D_Axis3Is3D,
+	IfcCartesianTransformationOperator3DnonUniform_Scale2GreaterZero,
+	IfcCartesianTransformationOperator3DnonUniform_Scale3GreaterZero,
+	IfcChiller_CorrectPredefinedType,
+	IfcChiller_CorrectTypeAssigned,
+	IfcChillerType_CorrectPredefinedType,
+	IfcChimney_CorrectPredefinedType,
+	IfcChimney_CorrectTypeAssigned,
+	IfcChimneyType_CorrectPredefinedType,
+	IfcCircleHollowProfileDef_WR1,
+	IfcCoil_CorrectPredefinedType,
+	IfcCoil_CorrectTypeAssigned,
+	IfcCoilType_CorrectPredefinedType,
+	IfcColumn_CorrectPredefinedType,
+	IfcColumn_CorrectTypeAssigned,
+	IfcColumnStandardCase_HasMaterialProfileSetUsage,
+	IfcColumnType_CorrectPredefinedType,
+	IfcCommunicationsAppliance_CorrectPredefinedType,
+	IfcCommunicationsAppliance_CorrectTypeAssigned,
+	IfcCommunicationsApplianceType_CorrectPredefinedType,
+	IfcComplexProperty_WR21,
+	IfcComplexProperty_WR22,
+	IfcComplexPropertyTemplate_UniquePropertyNames,
+	IfcComplexPropertyTemplate_NoSelfReference,
+	IfcCompositeCurve_CurveContinuous,
+	IfcCompositeCurve_SameDim,
+	IfcCompositeCurveOnSurface_SameSurface,
+	IfcCompositeCurveSegment_ParentIsBoundedCurve,
+	IfcCompositeProfileDef_InvariantProfileType,
+	IfcCompositeProfileDef_NoRecursion,
+	IfcCompressor_CorrectPredefinedType,
+	IfcCompressor_CorrectTypeAssigned,
+	IfcCompressorType_CorrectPredefinedType,
+	IfcCondenser_CorrectPredefinedType,
+	IfcCondenser_CorrectTypeAssigned,
+	IfcCondenserType_CorrectPredefinedType,
+	IfcConstraint_WR11,
+	IfcConstructionEquipmentResource_CorrectPredefinedType,
+	IfcConstructionEquipmentResourceType_CorrectPredefinedType,
+	IfcConstructionMaterialResource_CorrectPredefinedType,
+	IfcConstructionMaterialResourceType_CorrectPredefinedType,
+	IfcConstructionProductResource_CorrectPredefinedType,
+	IfcConstructionProductResourceType_CorrectPredefinedType,
+	IfcController_CorrectPredefinedType,
+	IfcController_CorrectTypeAssigned,
+	IfcControllerType_CorrectPredefinedType,
+	IfcCooledBeam_CorrectPredefinedType,
+	IfcCooledBeam_CorrectTypeAssigned,
+	IfcCooledBeamType_CorrectPredefinedType,
+	IfcCoolingTower_CorrectPredefinedType,
+	IfcCoolingTower_CorrectTypeAssigned,
+	IfcCoolingTowerType_CorrectPredefinedType,
+	IfcCovering_CorrectPredefinedType,
+	IfcCovering_CorrectTypeAssigned,
+	IfcCoveringType_CorrectPredefinedType,
+	IfcCrewResource_CorrectPredefinedType,
+	IfcCrewResourceType_CorrectPredefinedType,
+	IfcCurtainWall_CorrectPredefinedType,
+	IfcCurtainWall_CorrectTypeAssigned,
+	IfcCurtainWallType_CorrectPredefinedType,
+	IfcCurveStyle_MeasureOfWidth,
+	IfcCurveStyle_IdentifiableCurveStyle,
+	IfcCurveStyleFontPattern_VisibleLengthGreaterEqualZero,
+	IfcDamper_CorrectPredefinedType,
+	IfcDamper_CorrectTypeAssigned,
+	IfcDamperType_CorrectPredefinedType,
+	IfcDerivedProfileDef_InvariantProfileType,
+	IfcDerivedUnit_WR1,
+	IfcDerivedUnit_WR2,
+	IfcDirection_MagnitudeGreaterZero,
+	IfcDiscreteAccessory_CorrectPredefinedType,
+	IfcDiscreteAccessory_CorrectTypeAssigned,
+	IfcDiscreteAccessoryType_CorrectPredefinedType,
+	IfcDistributionChamberElement_CorrectPredefinedType,
+	IfcDistributionChamberElement_CorrectTypeAssigned,
+	IfcDistributionChamberElementType_CorrectPredefinedType,
+	IfcDocumentReference_WR1,
+	IfcDoor_CorrectStyleAssigned,
+	IfcDoorLiningProperties_WR31,
+	IfcDoorLiningProperties_WR32,
+	IfcDoorLiningProperties_WR33,
+	IfcDoorLiningProperties_WR34,
+	IfcDoorLiningProperties_WR35,
+	IfcDoorPanelProperties_ApplicableToType,
+	IfcDoorType_CorrectPredefinedType,
+	IfcDraughtingPreDefinedColour_PreDefinedColourNames,
+	IfcDraughtingPreDefinedCurveFont_PreDefinedCurveFontNames,
+	IfcDuctFitting_CorrectPredefinedType,
+	IfcDuctFitting_CorrectTypeAssigned,
 ]);
