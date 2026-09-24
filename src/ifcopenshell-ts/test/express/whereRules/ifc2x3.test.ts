@@ -3171,6 +3171,1088 @@ describe("IfcQuantityArea.WR21/WR22", () => {
 });
 
 // =============================================================================
+// Phase EX-4 chunk 4: original, hand-rolled coverage for the 85 WHERE-rule classes
+// ported in `src/express/whereRules/ifc2x3.ts`'s own chunk 4 section (`IfcQuantityCount.
+// WR21` through `IfcSweptDiskSolid.WR2`), matching this file's own established style and
+// depth exactly -- at least one pass case and (where a real, constructible failing case
+// exists) one fail case per rule, more where a rule has multiple distinct branches.
+// =============================================================================
+
+function siUnitFor(unitType: string, name: string): EntityInstance {
+	const u = create("IfcSIUnit");
+	(u as unknown as { UnitType: string }).UnitType = unitType;
+	(u as unknown as { Name: string }).Name = name;
+	return u;
+}
+
+function quantityFixture(
+	type: string,
+	valueAttrName: string,
+	value: number,
+	unit: EntityInstance | null = null,
+): EntityInstance {
+	const q = create(type);
+	(q as unknown as Record<string, unknown>).Name = "Q";
+	(q as unknown as Record<string, unknown>)[valueAttrName] = value;
+	(q as unknown as Record<string, unknown>).Unit = unit;
+	return q;
+}
+
+/**
+ * Populates the INVERSE `IsDecomposedBy`/`Decomposes` pair by creating a real forward
+ * `IfcRelAggregates` (or, for one deliberately-wrong-type test case, a different
+ * `IfcRelDecomposes` subtype) relationship -- same established technique as this file's
+ * own pre-existing `IfcConstructionMaterialResource.WR1/WR2` describe block (`ResourceOf`
+ * via a real `IfcRelAssignsToResource`), since neither `IsDecomposedBy` nor `Decomposes`
+ * can be assigned directly (both are computed INVERSE attributes).
+ */
+function decomposeRelationship(
+	relatingObject: EntityInstance,
+	relatedObjects: EntityInstance[],
+	relType = "IfcRelAggregates",
+): EntityInstance {
+	const rel = create(relType);
+	(rel as unknown as { RelatingObject: EntityInstance }).RelatingObject = relatingObject;
+	(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+	return rel;
+}
+
+describe("IfcQuantityCount.WR21", () => {
+	test("pass/fail: CountValue >= 0", () => {
+		expectPass("IfcQuantityCount", "WR21", quantityFixture("IfcQuantityCount", "CountValue", 0));
+		expectFail("IfcQuantityCount", "WR21", quantityFixture("IfcQuantityCount", "CountValue", -1));
+	});
+});
+
+describe("IfcQuantityLength.WR21/WR22", () => {
+	test("WR21 pass: Unit unset", () => {
+		expectPass("IfcQuantityLength", "WR21", quantityFixture("IfcQuantityLength", "LengthValue", 1.0));
+	});
+	test("WR21 pass: Unit.UnitType is LENGTHUNIT", () => {
+		expectPass(
+			"IfcQuantityLength",
+			"WR21",
+			quantityFixture("IfcQuantityLength", "LengthValue", 1.0, siUnitFor("LENGTHUNIT", "METRE")),
+		);
+	});
+	test("WR21 fail: Unit.UnitType is not LENGTHUNIT", () => {
+		expectFail(
+			"IfcQuantityLength",
+			"WR21",
+			quantityFixture("IfcQuantityLength", "LengthValue", 1.0, siUnitFor("MASSUNIT", "GRAM")),
+		);
+	});
+	test("WR22 pass/fail: LengthValue >= 0", () => {
+		expectPass("IfcQuantityLength", "WR22", quantityFixture("IfcQuantityLength", "LengthValue", 0));
+		expectFail("IfcQuantityLength", "WR22", quantityFixture("IfcQuantityLength", "LengthValue", -1));
+	});
+});
+
+describe("IfcQuantityTime.WR21/WR22", () => {
+	test("WR21 pass: Unit unset", () => {
+		expectPass("IfcQuantityTime", "WR21", quantityFixture("IfcQuantityTime", "TimeValue", 1.0));
+	});
+	test("WR21 pass: Unit.UnitType is TIMEUNIT", () => {
+		expectPass(
+			"IfcQuantityTime",
+			"WR21",
+			quantityFixture("IfcQuantityTime", "TimeValue", 1.0, siUnitFor("TIMEUNIT", "SECOND")),
+		);
+	});
+	test("WR21 fail: Unit.UnitType is not TIMEUNIT", () => {
+		expectFail(
+			"IfcQuantityTime",
+			"WR21",
+			quantityFixture("IfcQuantityTime", "TimeValue", 1.0, siUnitFor("LENGTHUNIT", "METRE")),
+		);
+	});
+	test("WR22 pass/fail: TimeValue >= 0", () => {
+		expectPass("IfcQuantityTime", "WR22", quantityFixture("IfcQuantityTime", "TimeValue", 0));
+		expectFail("IfcQuantityTime", "WR22", quantityFixture("IfcQuantityTime", "TimeValue", -1));
+	});
+});
+
+describe("IfcQuantityVolume.WR21/WR22", () => {
+	test("WR21 pass: Unit unset", () => {
+		expectPass("IfcQuantityVolume", "WR21", quantityFixture("IfcQuantityVolume", "VolumeValue", 1.0));
+	});
+	test("WR21 pass: Unit.UnitType is VOLUMEUNIT", () => {
+		expectPass(
+			"IfcQuantityVolume",
+			"WR21",
+			quantityFixture("IfcQuantityVolume", "VolumeValue", 1.0, siUnitFor("VOLUMEUNIT", "CUBIC_METRE")),
+		);
+	});
+	test("WR21 fail: Unit.UnitType is not VOLUMEUNIT", () => {
+		expectFail(
+			"IfcQuantityVolume",
+			"WR21",
+			quantityFixture("IfcQuantityVolume", "VolumeValue", 1.0, siUnitFor("LENGTHUNIT", "METRE")),
+		);
+	});
+	test("WR22 pass/fail: VolumeValue >= 0", () => {
+		expectPass("IfcQuantityVolume", "WR22", quantityFixture("IfcQuantityVolume", "VolumeValue", 0));
+		expectFail("IfcQuantityVolume", "WR22", quantityFixture("IfcQuantityVolume", "VolumeValue", -1));
+	});
+});
+
+describe("IfcQuantityWeight.WR21/WR22", () => {
+	test("WR21 pass: Unit unset", () => {
+		expectPass("IfcQuantityWeight", "WR21", quantityFixture("IfcQuantityWeight", "WeightValue", 1.0));
+	});
+	test("WR21 pass: Unit.UnitType is MASSUNIT", () => {
+		expectPass(
+			"IfcQuantityWeight",
+			"WR21",
+			quantityFixture("IfcQuantityWeight", "WeightValue", 1.0, siUnitFor("MASSUNIT", "GRAM")),
+		);
+	});
+	test("WR21 fail: Unit.UnitType is not MASSUNIT", () => {
+		expectFail(
+			"IfcQuantityWeight",
+			"WR21",
+			quantityFixture("IfcQuantityWeight", "WeightValue", 1.0, siUnitFor("LENGTHUNIT", "METRE")),
+		);
+	});
+	test("WR22 pass/fail: WeightValue >= 0", () => {
+		expectPass("IfcQuantityWeight", "WR22", quantityFixture("IfcQuantityWeight", "WeightValue", 0));
+		expectFail("IfcQuantityWeight", "WR22", quantityFixture("IfcQuantityWeight", "WeightValue", -1));
+	});
+});
+
+describe("IfcRailing.WR61", () => {
+	test("pass: PredefinedType unset", () => {
+		expectPass("IfcRailing", "WR61", create("IfcRailing"));
+	});
+	test("pass: PredefinedType is not USERDEFINED", () => {
+		expectPass("IfcRailing", "WR61", enumFixture("IfcRailing", "PredefinedType", "HANDRAIL", "ObjectType", null));
+	});
+	test("pass: PredefinedType USERDEFINED with ObjectType given", () => {
+		expectPass("IfcRailing", "WR61", enumFixture("IfcRailing", "PredefinedType", "USERDEFINED", "ObjectType", "X"));
+	});
+	test("fail: PredefinedType USERDEFINED without ObjectType", () => {
+		expectFail("IfcRailing", "WR61", enumFixture("IfcRailing", "PredefinedType", "USERDEFINED", "ObjectType", null));
+	});
+});
+
+describe("IfcRamp.WR1 / IfcRoof.WR1 / IfcStair.WR1", () => {
+	test("pass: not decomposed", () => {
+		expectPass("IfcRamp", "WR1", create("IfcRamp"));
+		expectPass("IfcRoof", "WR1", create("IfcRoof"));
+		expectPass("IfcStair", "WR1", create("IfcStair"));
+	});
+	test("pass: decomposed into exactly 1 part, no own Representation", () => {
+		const ramp = create("IfcRamp");
+		decomposeRelationship(ramp, [create("IfcWall")]);
+		expectPass("IfcRamp", "WR1", ramp);
+	});
+	test("fail: decomposed into exactly 1 part, but has its own Representation", () => {
+		const ramp = create("IfcRamp");
+		decomposeRelationship(ramp, [create("IfcWall")]);
+		(ramp as unknown as { Representation: EntityInstance }).Representation = create("IfcProductDefinitionShape");
+		expectFail("IfcRamp", "WR1", ramp);
+	});
+	test("fail: has more than 1 IsDecomposedBy relationship (not '> 1 decomposed part')", () => {
+		// `IsDecomposedBy` counts RELATIONSHIP instances where self is `RelatingObject`,
+		// not the number of decomposed parts inside a single relationship's own
+		// `RelatedObjects` -- confirmed empirically while writing this fixture (a single
+		// `IfcRelAggregates` with 2 `RelatedObjects` members still gives `hiindex(IsDecomposedBy)
+		// == 1`), so this fail case creates 2 SEPARATE relationships instead.
+		const ramp = create("IfcRamp");
+		decomposeRelationship(ramp, [create("IfcWall")]);
+		decomposeRelationship(ramp, [create("IfcSlab")]);
+		expectFail("IfcRamp", "WR1", ramp);
+	});
+});
+
+describe("IfcRationalBezierCurve.WR1/WR2", () => {
+	test("WR1 pass/fail: WeightsData and ControlPointsList have the same size", () => {
+		const curve1 = create("IfcRationalBezierCurve");
+		(curve1 as unknown as { WeightsData: number[] }).WeightsData = [1, 1, 1];
+		(curve1 as unknown as { ControlPointsList: EntityInstance[] }).ControlPointsList = [
+			point([0, 0]),
+			point([1, 0]),
+			point([2, 0]),
+		];
+		expectPass("IfcRationalBezierCurve", "WR1", curve1);
+
+		const curve2 = create("IfcRationalBezierCurve");
+		(curve2 as unknown as { WeightsData: number[] }).WeightsData = [1, 1];
+		(curve2 as unknown as { ControlPointsList: EntityInstance[] }).ControlPointsList = [
+			point([0, 0]),
+			point([1, 0]),
+			point([2, 0]),
+		];
+		expectFail("IfcRationalBezierCurve", "WR1", curve2);
+	});
+	test("WR2 pass/fail: every (derived) Weights value is greater than 0", () => {
+		// `UpperIndexOnControlPoints` is itself a DERIVE attribute (`calc_IfcBSplineCurve_
+		// UpperIndexOnControlPoints`, `hiindex(ControlPointsList) - 1`), not directly
+		// settable -- confirmed empirically (this port's own `.set()` throws "has no
+		// attribute" for it, matching a genuine DERIVE not being part of the settable
+		// positional-argument list). Populating `ControlPointsList` with 4 members makes it
+		// resolve to 3 automatically.
+		const curve1 = create("IfcRationalBezierCurve");
+		(curve1 as unknown as { ControlPointsList: EntityInstance[] }).ControlPointsList = [
+			point([0, 0]),
+			point([1, 0]),
+			point([2, 0]),
+			point([3, 0]),
+		];
+		(curve1 as unknown as { WeightsData: number[] }).WeightsData = [1, 1, 1, 1];
+		expectPass("IfcRationalBezierCurve", "WR2", curve1);
+
+		const curve2 = create("IfcRationalBezierCurve");
+		(curve2 as unknown as { ControlPointsList: EntityInstance[] }).ControlPointsList = [
+			point([0, 0]),
+			point([1, 0]),
+			point([2, 0]),
+			point([3, 0]),
+		];
+		(curve2 as unknown as { WeightsData: number[] }).WeightsData = [1, 1, 0, 1];
+		expectFail("IfcRationalBezierCurve", "WR2", curve2);
+	});
+});
+
+describe("IfcRectangleHollowProfileDef.WR31/WR32/WR33", () => {
+	function profile(
+		xDim: number,
+		yDim: number,
+		wallThickness: number,
+		outerFilletRadius: number | null,
+		innerFilletRadius: number | null,
+	): EntityInstance {
+		const p = create("IfcRectangleHollowProfileDef");
+		(p as unknown as { XDim: number }).XDim = xDim;
+		(p as unknown as { YDim: number }).YDim = yDim;
+		(p as unknown as { WallThickness: number }).WallThickness = wallThickness;
+		(p as unknown as { OuterFilletRadius: number | null }).OuterFilletRadius = outerFilletRadius;
+		(p as unknown as { InnerFilletRadius: number | null }).InnerFilletRadius = innerFilletRadius;
+		return p;
+	}
+	test("WR31 pass/fail: WallThickness < half of both XDim and YDim", () => {
+		expectPass("IfcRectangleHollowProfileDef", "WR31", profile(10, 10, 2, null, null));
+		expectFail("IfcRectangleHollowProfileDef", "WR31", profile(10, 10, 6, null, null));
+	});
+	test("WR32 pass/fail: OuterFilletRadius (if given) at most half of both XDim and YDim", () => {
+		expectPass("IfcRectangleHollowProfileDef", "WR32", profile(10, 10, 2, null, null));
+		expectPass("IfcRectangleHollowProfileDef", "WR32", profile(10, 10, 2, 5, null));
+		expectFail("IfcRectangleHollowProfileDef", "WR32", profile(10, 10, 2, 6, null));
+	});
+	test("WR33 pass/fail: InnerFilletRadius (if given) at most half of XDim/YDim minus WallThickness", () => {
+		expectPass("IfcRectangleHollowProfileDef", "WR33", profile(10, 10, 2, null, null));
+		expectPass("IfcRectangleHollowProfileDef", "WR33", profile(10, 10, 2, null, 3));
+		expectFail("IfcRectangleHollowProfileDef", "WR33", profile(10, 10, 2, null, 4));
+	});
+});
+
+describe("IfcRectangularTrimmedSurface.WR1/WR2/WR3/WR4", () => {
+	function surface(
+		basisSurface: EntityInstance,
+		u1: number,
+		u2: number,
+		v1: number,
+		v2: number,
+		usense: boolean,
+		vsense: boolean,
+	): EntityInstance {
+		const s = create("IfcRectangularTrimmedSurface");
+		(s as unknown as { BasisSurface: EntityInstance }).BasisSurface = basisSurface;
+		(s as unknown as { U1: number }).U1 = u1;
+		(s as unknown as { U2: number }).U2 = u2;
+		(s as unknown as { V1: number }).V1 = v1;
+		(s as unknown as { V2: number }).V2 = v2;
+		(s as unknown as { Usense: boolean }).Usense = usense;
+		(s as unknown as { Vsense: boolean }).Vsense = vsense;
+		return s;
+	}
+	test("WR1 pass/fail: U1 != U2", () => {
+		expectPass("IfcRectangularTrimmedSurface", "WR1", surface(create("IfcPlane"), 0, 1, 0, 1, true, true));
+		expectFail("IfcRectangularTrimmedSurface", "WR1", surface(create("IfcPlane"), 1, 1, 0, 1, true, true));
+	});
+	test("WR2 pass/fail: V1 != V2", () => {
+		expectPass("IfcRectangularTrimmedSurface", "WR2", surface(create("IfcPlane"), 0, 1, 0, 1, true, true));
+		expectFail("IfcRectangularTrimmedSurface", "WR2", surface(create("IfcPlane"), 0, 1, 1, 1, true, true));
+	});
+	test("WR3 pass: BasisSurface is an elementary surface but not a plane", () => {
+		expectPass("IfcRectangularTrimmedSurface", "WR3", surface(create("IfcElementarySurface"), 0, 1, 0, 1, false, true));
+	});
+	test("WR3 pass: BasisSurface is an IfcSurfaceOfRevolution", () => {
+		expectPass(
+			"IfcRectangularTrimmedSurface",
+			"WR3",
+			surface(create("IfcSurfaceOfRevolution"), 0, 1, 0, 1, false, true),
+		);
+	});
+	test("WR3 pass: BasisSurface is a plane, Usense matches (U2 > U1)", () => {
+		expectPass("IfcRectangularTrimmedSurface", "WR3", surface(create("IfcPlane"), 0, 1, 0, 1, true, true));
+	});
+	test("WR3 fail: BasisSurface is a plane, Usense does not match (U2 > U1)", () => {
+		expectFail("IfcRectangularTrimmedSurface", "WR3", surface(create("IfcPlane"), 0, 1, 0, 1, false, true));
+	});
+	test("WR4 pass/fail: Vsense == (V2 > V1)", () => {
+		expectPass("IfcRectangularTrimmedSurface", "WR4", surface(create("IfcPlane"), 0, 1, 0, 1, true, true));
+		expectFail("IfcRectangularTrimmedSurface", "WR4", surface(create("IfcPlane"), 0, 1, 0, 1, true, false));
+	});
+});
+
+describe("IfcReinforcingBar.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcReinforcingBar", "WR1", enumFixture("IfcReinforcingBar", "BarRole", "MAIN", "ObjectType", null));
+		expectPass(
+			"IfcReinforcingBar",
+			"WR1",
+			enumFixture("IfcReinforcingBar", "BarRole", "USERDEFINED", "ObjectType", "X"),
+		);
+		expectFail(
+			"IfcReinforcingBar",
+			"WR1",
+			enumFixture("IfcReinforcingBar", "BarRole", "USERDEFINED", "ObjectType", null),
+		);
+	});
+});
+
+describe("IfcRelAssigns.WR1", () => {
+	function rel(relatedObjectsType: string | null, relatedObjects: EntityInstance[]): EntityInstance {
+		const r = create("IfcRelAssigns");
+		(r as unknown as { RelatedObjectsType: string | null }).RelatedObjectsType = relatedObjectsType;
+		(r as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+		return r;
+	}
+	test("pass: RelatedObjectsType unset", () => {
+		expectPass("IfcRelAssigns", "WR1", rel(null, [create("IfcWall")]));
+	});
+	test("pass: RelatedObjectsType NOTDEFINED", () => {
+		expectPass("IfcRelAssigns", "WR1", rel("NOTDEFINED", [create("IfcActor")]));
+	});
+	test("pass/fail: RelatedObjectsType PRODUCT", () => {
+		expectPass("IfcRelAssigns", "WR1", rel("PRODUCT", [create("IfcWall")]));
+		expectFail("IfcRelAssigns", "WR1", rel("PRODUCT", [create("IfcActor")]));
+	});
+	test("pass: RelatedObjectsType ACTOR, all members are IfcActor", () => {
+		expectPass("IfcRelAssigns", "WR1", rel("ACTOR", [create("IfcActor")]));
+	});
+	test("pass: RelatedObjectsType GROUP, all members are IfcGroup", () => {
+		expectPass("IfcRelAssigns", "WR1", rel("GROUP", [create("IfcGroup")]));
+	});
+	test("pass: RelatedObjectsType PROJECT, all members are IfcProject", () => {
+		expectPass("IfcRelAssigns", "WR1", rel("PROJECT", [create("IfcProject")]));
+	});
+});
+
+describe("IfcRelAssignsTasks.WR1/WR2/WR3", () => {
+	function rel(relatedObjects: EntityInstance[], relatingControl: EntityInstance | null): EntityInstance {
+		const r = create("IfcRelAssignsTasks");
+		(r as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+		(r as unknown as { RelatingControl: EntityInstance | null }).RelatingControl = relatingControl;
+		return r;
+	}
+	test("WR1 pass/fail: RelatedObjects has exactly 1 member", () => {
+		expectPass("IfcRelAssignsTasks", "WR1", rel([create("IfcTask")], null));
+		expectFail("IfcRelAssignsTasks", "WR1", rel([create("IfcTask"), create("IfcTask")], null));
+	});
+	test("WR2 pass/fail: RelatedObjects[1] is an IfcTask", () => {
+		expectPass("IfcRelAssignsTasks", "WR2", rel([create("IfcTask")], null));
+		expectFail("IfcRelAssignsTasks", "WR2", rel([create("IfcActor")], null));
+	});
+	test("WR3 pass/fail: RelatingControl is an IfcWorkControl", () => {
+		expectPass("IfcRelAssignsTasks", "WR3", rel([], create("IfcWorkPlan")));
+		expectFail("IfcRelAssignsTasks", "WR3", rel([], create("IfcActor")));
+	});
+});
+
+// `relatingObjectNotInRelatedObjects` (whereRules/ifc2x3.ts's own new shared helper) is
+// exercised via all 6 `IfcRelAssignsTo*` entities at once, in a loop, mirroring that
+// helper's own "shared shape" grouping -- an evolution of this file's own pre-existing
+// "IfcConstraintAggregationRelationship.WR11 / IfcConstraintRelationship.WR11" grouping
+// precedent (2 entities sharing 1 body) scaled up to 6.
+describe("IfcRelAssignsToActor.WR1 / IfcRelAssignsToControl.WR1 / IfcRelAssignsToGroup.WR1 / IfcRelAssignsToProcess.WR1 / IfcRelAssignsToProduct.WR1 / IfcRelAssignsToResource.WR1", () => {
+	const cases: Array<[string, string]> = [
+		["IfcRelAssignsToActor", "RelatingActor"],
+		["IfcRelAssignsToControl", "RelatingControl"],
+		["IfcRelAssignsToGroup", "RelatingGroup"],
+		["IfcRelAssignsToProcess", "RelatingProcess"],
+		["IfcRelAssignsToProduct", "RelatingProduct"],
+		["IfcRelAssignsToResource", "RelatingResource"],
+	];
+	test("pass: relating object not in RelatedObjects", () => {
+		for (const [type, relatingAttr] of cases) {
+			const relating = create("IfcActor");
+			const rel = create(type);
+			(rel as unknown as Record<string, unknown>)[relatingAttr] = relating;
+			(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcOrganization")];
+			expectPass(type, "WR1", rel);
+		}
+	});
+	test("fail: relating object also appears in RelatedObjects", () => {
+		for (const [type, relatingAttr] of cases) {
+			const relating = create("IfcActor");
+			const rel = create(type);
+			(rel as unknown as Record<string, unknown>)[relatingAttr] = relating;
+			(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [relating];
+			expectFail(type, "WR1", rel);
+		}
+	});
+});
+
+describe("IfcRelAssociates.WR21", () => {
+	test("pass: every member is an IfcObjectDefinition or IfcPropertyDefinition", () => {
+		const rel = create("IfcRelAssociates");
+		(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [
+			create("IfcProject"),
+			create("IfcPropertySet"),
+		];
+		expectPass("IfcRelAssociates", "WR21", rel);
+	});
+	test("fail: a member is neither", () => {
+		const rel = create("IfcRelAssociates");
+		(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcRelAggregates")];
+		expectFail("IfcRelAssociates", "WR21", rel);
+	});
+});
+
+describe("IfcRelAssociatesMaterial.WR21/WR22", () => {
+	function rel(relatedObjects: EntityInstance[]): EntityInstance {
+		const r = create("IfcRelAssociatesMaterial");
+		(r as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+		return r;
+	}
+	test("WR21 pass: no member is an IfcFeatureElementSubtraction or IfcVirtualElement", () => {
+		expectPass("IfcRelAssociatesMaterial", "WR21", rel([create("IfcWall")]));
+	});
+	test("WR21 fail: a member is an IfcVirtualElement", () => {
+		expectFail("IfcRelAssociatesMaterial", "WR21", rel([create("IfcVirtualElement")]));
+	});
+	test("WR21 fail: a member is an IfcFeatureElementSubtraction", () => {
+		expectFail("IfcRelAssociatesMaterial", "WR21", rel([create("IfcOpeningElement")]));
+	});
+	test("WR22 pass: every member is an IfcProduct or IfcTypeProduct", () => {
+		expectPass("IfcRelAssociatesMaterial", "WR22", rel([create("IfcWall"), create("IfcWallType")]));
+	});
+	test("WR22 fail: a member is neither", () => {
+		expectFail("IfcRelAssociatesMaterial", "WR22", rel([create("IfcActor")]));
+	});
+});
+
+describe("IfcRelConnectsElements.WR31", () => {
+	test("pass/fail: RelatingElement != RelatedElement", () => {
+		const rel1 = create("IfcRelConnectsElements");
+		(rel1 as unknown as { RelatingElement: EntityInstance }).RelatingElement = create("IfcWall");
+		(rel1 as unknown as { RelatedElement: EntityInstance }).RelatedElement = create("IfcSlab");
+		expectPass("IfcRelConnectsElements", "WR31", rel1);
+
+		const shared = create("IfcWall");
+		const rel2 = create("IfcRelConnectsElements");
+		(rel2 as unknown as { RelatingElement: EntityInstance }).RelatingElement = shared;
+		(rel2 as unknown as { RelatedElement: EntityInstance }).RelatedElement = shared;
+		expectFail("IfcRelConnectsElements", "WR31", rel2);
+	});
+});
+
+describe("IfcRelContainedInSpatialStructure.WR31 / IfcRelReferencedInSpatialStructure.WR31", () => {
+	test("pass: no RelatedElements member is an IfcSpatialStructureElement", () => {
+		const rel1 = create("IfcRelContainedInSpatialStructure");
+		(rel1 as unknown as { RelatedElements: EntityInstance[] }).RelatedElements = [create("IfcWall")];
+		expectPass("IfcRelContainedInSpatialStructure", "WR31", rel1);
+
+		const rel2 = create("IfcRelReferencedInSpatialStructure");
+		(rel2 as unknown as { RelatedElements: EntityInstance[] }).RelatedElements = [create("IfcWall")];
+		expectPass("IfcRelReferencedInSpatialStructure", "WR31", rel2);
+	});
+	test("fail: a RelatedElements member is an IfcSpatialStructureElement", () => {
+		const rel1 = create("IfcRelContainedInSpatialStructure");
+		(rel1 as unknown as { RelatedElements: EntityInstance[] }).RelatedElements = [create("IfcBuildingStorey")];
+		expectFail("IfcRelContainedInSpatialStructure", "WR31", rel1);
+
+		const rel2 = create("IfcRelReferencedInSpatialStructure");
+		(rel2 as unknown as { RelatedElements: EntityInstance[] }).RelatedElements = [create("IfcSite")];
+		expectFail("IfcRelReferencedInSpatialStructure", "WR31", rel2);
+	});
+});
+
+describe("IfcRelDecomposes.WR31", () => {
+	test("pass/fail: RelatingObject not in RelatedObjects", () => {
+		const rel1 = create("IfcRelDecomposes");
+		const relating = create("IfcActor");
+		(rel1 as unknown as { RelatingObject: EntityInstance }).RelatingObject = relating;
+		(rel1 as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcOrganization")];
+		expectPass("IfcRelDecomposes", "WR31", rel1);
+
+		const shared = create("IfcActor");
+		const rel2 = create("IfcRelDecomposes");
+		(rel2 as unknown as { RelatingObject: EntityInstance }).RelatingObject = shared;
+		(rel2 as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [shared];
+		expectFail("IfcRelDecomposes", "WR31", rel2);
+	});
+});
+
+describe("IfcRelNests.WR1", () => {
+	test("pass: every RelatedObjects member shares RelatingObject's declared type set", () => {
+		const rel = create("IfcRelNests");
+		(rel as unknown as { RelatingObject: EntityInstance }).RelatingObject = create("IfcWall");
+		(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcWall")];
+		expectPass("IfcRelNests", "WR1", rel);
+	});
+	test("fail: a RelatedObjects member has a different declared type set", () => {
+		const rel = create("IfcRelNests");
+		(rel as unknown as { RelatingObject: EntityInstance }).RelatingObject = create("IfcWall");
+		(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcSlab")];
+		expectFail("IfcRelNests", "WR1", rel);
+	});
+});
+
+describe("IfcRelOverridesProperties.WR1", () => {
+	test("pass/fail: RelatedObjects has exactly 1 member", () => {
+		const rel1 = create("IfcRelOverridesProperties");
+		(rel1 as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [create("IfcWall")];
+		expectPass("IfcRelOverridesProperties", "WR1", rel1);
+
+		const rel2 = create("IfcRelOverridesProperties");
+		(rel2 as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = [];
+		expectFail("IfcRelOverridesProperties", "WR1", rel2);
+	});
+});
+
+describe("IfcRelSchedulesCostItems.WR11/WR12", () => {
+	function rel(relatedObjects: EntityInstance[], relatingControl: EntityInstance | null): EntityInstance {
+		const r = create("IfcRelSchedulesCostItems");
+		(r as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+		(r as unknown as { RelatingControl: EntityInstance | null }).RelatingControl = relatingControl;
+		return r;
+	}
+	test("WR11 pass/fail: every RelatedObjects member is an IfcCostItem", () => {
+		expectPass("IfcRelSchedulesCostItems", "WR11", rel([create("IfcCostItem")], null));
+		expectFail("IfcRelSchedulesCostItems", "WR11", rel([create("IfcActor")], null));
+	});
+	test("WR12 pass/fail: RelatingControl is an IfcCostSchedule", () => {
+		expectPass("IfcRelSchedulesCostItems", "WR12", rel([], create("IfcCostSchedule")));
+		expectFail("IfcRelSchedulesCostItems", "WR12", rel([], create("IfcWorkPlan")));
+	});
+});
+
+describe("IfcRelSequence.WR1", () => {
+	test("pass/fail: RelatingProcess != RelatedProcess", () => {
+		const rel1 = create("IfcRelSequence");
+		(rel1 as unknown as { RelatingProcess: EntityInstance }).RelatingProcess = create("IfcTask");
+		(rel1 as unknown as { RelatedProcess: EntityInstance }).RelatedProcess = create("IfcProcedure");
+		expectPass("IfcRelSequence", "WR1", rel1);
+
+		const shared = create("IfcTask");
+		const rel2 = create("IfcRelSequence");
+		(rel2 as unknown as { RelatingProcess: EntityInstance }).RelatingProcess = shared;
+		(rel2 as unknown as { RelatedProcess: EntityInstance }).RelatedProcess = shared;
+		expectFail("IfcRelSequence", "WR1", rel2);
+	});
+});
+
+describe("IfcRelSpaceBoundary.WR1", () => {
+	function boundary(physicalOrVirtual: string, relatedBuildingElement: EntityInstance | null): EntityInstance {
+		const b = create("IfcRelSpaceBoundary");
+		(b as unknown as { PhysicalOrVirtualBoundary: string }).PhysicalOrVirtualBoundary = physicalOrVirtual;
+		(b as unknown as { RelatedBuildingElement: EntityInstance | null }).RelatedBuildingElement = relatedBuildingElement;
+		return b;
+	}
+	test("pass: Physical with a non-virtual RelatedBuildingElement", () => {
+		expectPass("IfcRelSpaceBoundary", "WR1", boundary("PHYSICAL", create("IfcWall")));
+	});
+	test("fail: Physical with no RelatedBuildingElement", () => {
+		expectFail("IfcRelSpaceBoundary", "WR1", boundary("PHYSICAL", null));
+	});
+	test("fail: Physical with a virtual RelatedBuildingElement", () => {
+		expectFail("IfcRelSpaceBoundary", "WR1", boundary("PHYSICAL", create("IfcVirtualElement")));
+	});
+	test("pass: Virtual with no RelatedBuildingElement", () => {
+		expectPass("IfcRelSpaceBoundary", "WR1", boundary("VIRTUAL", null));
+	});
+	test("pass: Virtual with an IfcVirtualElement", () => {
+		expectPass("IfcRelSpaceBoundary", "WR1", boundary("VIRTUAL", create("IfcVirtualElement")));
+	});
+	test("fail: Virtual with a non-virtual RelatedBuildingElement", () => {
+		expectFail("IfcRelSpaceBoundary", "WR1", boundary("VIRTUAL", create("IfcWall")));
+	});
+	test("pass: NotDefined regardless of RelatedBuildingElement", () => {
+		expectPass("IfcRelSpaceBoundary", "WR1", boundary("NOTDEFINED", null));
+	});
+});
+
+describe("IfcRevolvedAreaSolid.WR31/WR32", () => {
+	function axis1(coords: number[], ratios: number[]): EntityInstance {
+		const a = create("IfcAxis1Placement");
+		(a as unknown as { Location: EntityInstance }).Location = point(coords);
+		(a as unknown as { Axis: EntityInstance }).Axis = direction(ratios);
+		return a;
+	}
+	test("WR31 pass/fail: Axis.Location's 3rd coordinate must equal 0", () => {
+		const solid1 = create("IfcRevolvedAreaSolid");
+		(solid1 as unknown as { Axis: EntityInstance }).Axis = axis1([0, 0, 0], [0, 0, 1]);
+		expectPass("IfcRevolvedAreaSolid", "WR31", solid1);
+
+		const solid2 = create("IfcRevolvedAreaSolid");
+		(solid2 as unknown as { Axis: EntityInstance }).Axis = axis1([0, 0, 5], [0, 0, 1]);
+		expectFail("IfcRevolvedAreaSolid", "WR31", solid2);
+	});
+	test("WR32 pass/fail: Axis.Z's (derived) 3rd direction ratio must equal 0", () => {
+		const solid1 = create("IfcRevolvedAreaSolid");
+		(solid1 as unknown as { Axis: EntityInstance }).Axis = axis1([0, 0, 0], [1, 0, 0]);
+		expectPass("IfcRevolvedAreaSolid", "WR32", solid1);
+
+		const solid2 = create("IfcRevolvedAreaSolid");
+		(solid2 as unknown as { Axis: EntityInstance }).Axis = axis1([0, 0, 0], [0, 0, 1]);
+		expectFail("IfcRevolvedAreaSolid", "WR32", solid2);
+	});
+});
+
+describe("IfcRoundedRectangleProfileDef.WR31", () => {
+	test("pass/fail: RoundingRadius <= half of both XDim and YDim", () => {
+		const p1 = create("IfcRoundedRectangleProfileDef");
+		(p1 as unknown as { XDim: number }).XDim = 10;
+		(p1 as unknown as { YDim: number }).YDim = 10;
+		(p1 as unknown as { RoundingRadius: number }).RoundingRadius = 5;
+		expectPass("IfcRoundedRectangleProfileDef", "WR31", p1);
+
+		const p2 = create("IfcRoundedRectangleProfileDef");
+		(p2 as unknown as { XDim: number }).XDim = 10;
+		(p2 as unknown as { YDim: number }).YDim = 10;
+		(p2 as unknown as { RoundingRadius: number }).RoundingRadius = 6;
+		expectFail("IfcRoundedRectangleProfileDef", "WR31", p2);
+	});
+});
+
+describe("IfcSectionedSpine.WR1/WR2/WR3", () => {
+	function crossSection(profileType: string): EntityInstance {
+		const cs = create("IfcArbitraryClosedProfileDef");
+		(cs as unknown as { ProfileType: string }).ProfileType = profileType;
+		return cs;
+	}
+	test("WR1 pass/fail: CrossSections and CrossSectionPositions have the same size", () => {
+		const spine1 = create("IfcSectionedSpine");
+		(spine1 as unknown as { CrossSections: EntityInstance[] }).CrossSections = [
+			crossSection("AREA"),
+			crossSection("AREA"),
+		];
+		(spine1 as unknown as { CrossSectionPositions: EntityInstance[] }).CrossSectionPositions = [
+			create("IfcAxis2Placement3D"),
+			create("IfcAxis2Placement3D"),
+		];
+		expectPass("IfcSectionedSpine", "WR1", spine1);
+
+		const spine2 = create("IfcSectionedSpine");
+		(spine2 as unknown as { CrossSections: EntityInstance[] }).CrossSections = [crossSection("AREA")];
+		(spine2 as unknown as { CrossSectionPositions: EntityInstance[] }).CrossSectionPositions = [
+			create("IfcAxis2Placement3D"),
+			create("IfcAxis2Placement3D"),
+		];
+		expectFail("IfcSectionedSpine", "WR1", spine2);
+	});
+	test("WR2 pass/fail: every CrossSections member shares the first member's ProfileType", () => {
+		const spine1 = create("IfcSectionedSpine");
+		(spine1 as unknown as { CrossSections: EntityInstance[] }).CrossSections = [
+			crossSection("AREA"),
+			crossSection("AREA"),
+		];
+		expectPass("IfcSectionedSpine", "WR2", spine1);
+
+		const spine2 = create("IfcSectionedSpine");
+		(spine2 as unknown as { CrossSections: EntityInstance[] }).CrossSections = [
+			crossSection("AREA"),
+			crossSection("CURVE"),
+		];
+		expectFail("IfcSectionedSpine", "WR2", spine2);
+	});
+	test("WR3 pass/fail: SpineCurve.Dim must equal 3", () => {
+		const spine1 = create("IfcSectionedSpine");
+		(spine1 as unknown as { SpineCurve: EntityInstance }).SpineCurve = polyline([point([0, 0, 0]), point([1, 0, 0])]);
+		expectPass("IfcSectionedSpine", "WR3", spine1);
+
+		const spine2 = create("IfcSectionedSpine");
+		(spine2 as unknown as { SpineCurve: EntityInstance }).SpineCurve = polyline([point([0, 0]), point([1, 0])]);
+		expectFail("IfcSectionedSpine", "WR3", spine2);
+	});
+});
+
+describe("IfcServiceLifeFactor.WR31", () => {
+	// A genuine, confirmed real-schema finding (not a Python bug, an inherent schema
+	// fact): real `IfcServiceLifeFactor` is a subtype of `IfcResourceLevelInformation`
+	// (`GlobalId`/`OwnerHistory`/`Name`/`Description`/`PredefinedType`/`UpperValue`/
+	// `MostUsedValue`/`LowerValue`, confirmed directly against this port's own native
+	// schema introspection -- NOT a subtype of `IfcObject`), so it has NO `ObjectType`
+	// attribute at all. `express_getattr(self, 'ObjectType', INDETERMINATE)` therefore
+	// always resolves to `INDETERMINATE` in both real Python (`getattr(obj, name,
+	// default)`'s own 3-arg form silently catches the `AttributeError` a genuinely
+	// undeclared attribute name raises) and this port (`expressGetAttr`'s own try/catch,
+	// see its doc comment) -- meaning `exists(ObjectType)` can never be `true`, and this
+	// rule's own `... or exists(ObjectType)` escape hatch is PERMANENTLY unreachable for
+	// any real instance. This port's `.set()` throws immediately for a genuinely
+	// undeclared attribute name (unlike the read path's graceful catch), so a
+	// "USERDEFINED with ObjectType given" pass fixture cannot even be constructed --
+	// only the 2 fixtures below are real, reachable cases.
+	test("pass/fail", () => {
+		const p1 = create("IfcServiceLifeFactor");
+		(p1 as unknown as { PredefinedType: string }).PredefinedType = "A_QUALITYOFCOMPONENTS";
+		expectPass("IfcServiceLifeFactor", "WR31", p1);
+
+		const p2 = create("IfcServiceLifeFactor");
+		(p2 as unknown as { PredefinedType: string }).PredefinedType = "USERDEFINED";
+		expectFail("IfcServiceLifeFactor", "WR31", p2);
+	});
+});
+
+describe("IfcShapeModel.WR11", () => {
+	function shapeAspectFor(target: EntityInstance): void {
+		const aspect = create("IfcShapeAspect");
+		(aspect as unknown as { ShapeRepresentations: EntityInstance[] }).ShapeRepresentations = [target];
+	}
+	function productRepresentationFor(target: EntityInstance): void {
+		const pr = create("IfcProductDefinitionShape");
+		(pr as unknown as { Representations: EntityInstance[] }).Representations = [target];
+	}
+	test("pass: exactly one of OfProductRepresentation/RepresentationMap/OfShapeAspect is set", () => {
+		const model = create("IfcShapeModel");
+		shapeAspectFor(model);
+		expectPass("IfcShapeModel", "WR11", model);
+	});
+	test("fail: none of the three is set", () => {
+		expectFail("IfcShapeModel", "WR11", create("IfcShapeModel"));
+	});
+	test("fail: two of the three are set", () => {
+		const model = create("IfcShapeModel");
+		shapeAspectFor(model);
+		productRepresentationFor(model);
+		expectFail("IfcShapeModel", "WR11", model);
+	});
+});
+
+describe("IfcShapeRepresentation.WR21/WR22/WR23/WR24", () => {
+	test("WR21 pass/fail: ContextOfItems must be an IfcGeometricRepresentationContext", () => {
+		const rep1 = create("IfcShapeRepresentation");
+		(rep1 as unknown as { ContextOfItems: EntityInstance }).ContextOfItems = create(
+			"IfcGeometricRepresentationContext",
+		);
+		expectPass("IfcShapeRepresentation", "WR21", rep1);
+
+		const rep2 = create("IfcShapeRepresentation");
+		(rep2 as unknown as { ContextOfItems: EntityInstance }).ContextOfItems = create("IfcProject");
+		expectFail("IfcShapeRepresentation", "WR21", rep2);
+	});
+	test("WR22 pass/fail: every IfcTopologicalRepresentationItem member of Items is exactly one of IfcVertexPoint/IfcEdgeCurve/IfcFaceSurface", () => {
+		const rep1 = create("IfcShapeRepresentation");
+		(rep1 as unknown as { Items: EntityInstance[] }).Items = [create("IfcVertexPoint")];
+		expectPass("IfcShapeRepresentation", "WR22", rep1);
+
+		const rep2 = create("IfcShapeRepresentation");
+		(rep2 as unknown as { Items: EntityInstance[] }).Items = [create("IfcEdgeLoop")];
+		expectFail("IfcShapeRepresentation", "WR22", rep2);
+	});
+	test("WR23 pass/fail: RepresentationType must be given", () => {
+		const rep1 = create("IfcShapeRepresentation");
+		(rep1 as unknown as { RepresentationType: string }).RepresentationType = "Curve2D";
+		expectPass("IfcShapeRepresentation", "WR23", rep1);
+		expectFail("IfcShapeRepresentation", "WR23", create("IfcShapeRepresentation"));
+	});
+	test("WR24 pass/fail: Items must match the declared RepresentationType (Curve2D branch)", () => {
+		const rep1 = create("IfcShapeRepresentation");
+		(rep1 as unknown as { RepresentationType: string }).RepresentationType = "Curve2D";
+		(rep1 as unknown as { Items: EntityInstance[] }).Items = [polyline([point([0, 0]), point([1, 0])])];
+		expectPass("IfcShapeRepresentation", "WR24", rep1);
+
+		const rep2 = create("IfcShapeRepresentation");
+		(rep2 as unknown as { RepresentationType: string }).RepresentationType = "Curve2D";
+		(rep2 as unknown as { Items: EntityInstance[] }).Items = [polyline([point([0, 0, 0]), point([1, 0, 0])])];
+		expectFail("IfcShapeRepresentation", "WR24", rep2);
+	});
+	test("WR24 pass: an undocumented RepresentationType keyword always passes (INDETERMINATE fallthrough)", () => {
+		const rep = create("IfcShapeRepresentation");
+		(rep as unknown as { RepresentationType: string }).RepresentationType = "SomeUndocumentedKeyword";
+		(rep as unknown as { Items: EntityInstance[] }).Items = [];
+		expectPass("IfcShapeRepresentation", "WR24", rep);
+	});
+});
+
+describe("IfcSlab.WR61", () => {
+	test("pass/fail", () => {
+		expectPass("IfcSlab", "WR61", create("IfcSlab"));
+		expectPass("IfcSlab", "WR61", enumFixture("IfcSlab", "PredefinedType", "FLOOR", "ObjectType", null));
+		expectPass("IfcSlab", "WR61", enumFixture("IfcSlab", "PredefinedType", "USERDEFINED", "ObjectType", "X"));
+		expectFail("IfcSlab", "WR61", enumFixture("IfcSlab", "PredefinedType", "USERDEFINED", "ObjectType", null));
+	});
+});
+
+describe("IfcSpaceHeaterType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcSpaceHeaterType", "WR1", userDefinedFixture("IfcSpaceHeaterType", "CONVECTOR", null));
+		expectFail("IfcSpaceHeaterType", "WR1", userDefinedFixture("IfcSpaceHeaterType", "USERDEFINED", null));
+	});
+});
+
+describe("IfcSpatialStructureElement.WR41", () => {
+	test("pass: decomposed by exactly 1 IfcRelAggregates whose RelatingObject is an IfcProject", () => {
+		const storey = create("IfcBuildingStorey");
+		decomposeRelationship(create("IfcProject"), [storey]);
+		expectPass("IfcSpatialStructureElement", "WR41", storey);
+	});
+	test("pass: decomposed by exactly 1 IfcRelAggregates whose RelatingObject is an IfcSpatialStructureElement", () => {
+		const storey = create("IfcBuildingStorey");
+		decomposeRelationship(create("IfcBuilding"), [storey]);
+		expectPass("IfcSpatialStructureElement", "WR41", storey);
+	});
+	test("fail: not decomposed at all", () => {
+		expectFail("IfcSpatialStructureElement", "WR41", create("IfcBuildingStorey"));
+	});
+	test("fail: decomposed by something other than IfcRelAggregates", () => {
+		const storey = create("IfcBuildingStorey");
+		decomposeRelationship(create("IfcProject"), [storey], "IfcRelNests");
+		expectFail("IfcSpatialStructureElement", "WR41", storey);
+	});
+	test("fail: RelatingObject is neither an IfcProject nor an IfcSpatialStructureElement", () => {
+		const storey = create("IfcBuildingStorey");
+		decomposeRelationship(create("IfcWall"), [storey]);
+		expectFail("IfcSpatialStructureElement", "WR41", storey);
+	});
+});
+
+describe("IfcStructuralLinearAction.WR61 / IfcStructuralPlanarAction.WR61 / IfcStructuralPointAction.WR61 / IfcStructuralPointReaction.WR61", () => {
+	function withAppliedLoad(type: string, appliedLoad: EntityInstance | null): EntityInstance {
+		const e = create(type);
+		(e as unknown as { AppliedLoad: EntityInstance | null }).AppliedLoad = appliedLoad;
+		return e;
+	}
+	test("pass: AppliedLoad is exactly one of the 2 named types", () => {
+		expectPass(
+			"IfcStructuralLinearAction",
+			"WR61",
+			withAppliedLoad("IfcStructuralLinearAction", create("IfcStructuralLoadLinearForce")),
+		);
+		expectPass(
+			"IfcStructuralPlanarAction",
+			"WR61",
+			withAppliedLoad("IfcStructuralPlanarAction", create("IfcStructuralLoadPlanarForce")),
+		);
+		expectPass(
+			"IfcStructuralPointAction",
+			"WR61",
+			withAppliedLoad("IfcStructuralPointAction", create("IfcStructuralLoadSingleForce")),
+		);
+		expectPass(
+			"IfcStructuralPointReaction",
+			"WR61",
+			withAppliedLoad("IfcStructuralPointReaction", create("IfcStructuralLoadSingleDisplacement")),
+		);
+	});
+	test("fail: AppliedLoad is not one of the 2 named types", () => {
+		expectFail("IfcStructuralLinearAction", "WR61", withAppliedLoad("IfcStructuralLinearAction", create("IfcActor")));
+		expectFail("IfcStructuralPlanarAction", "WR61", withAppliedLoad("IfcStructuralPlanarAction", create("IfcActor")));
+		expectFail("IfcStructuralPointAction", "WR61", withAppliedLoad("IfcStructuralPointAction", create("IfcActor")));
+		expectFail("IfcStructuralPointReaction", "WR61", withAppliedLoad("IfcStructuralPointReaction", create("IfcActor")));
+	});
+});
+
+describe("IfcStructuralProfileProperties.WR21/WR22", () => {
+	test("WR21 pass/fail: not exists(ShearDeformationAreaY) or >= 0", () => {
+		expectPass("IfcStructuralProfileProperties", "WR21", create("IfcStructuralProfileProperties"));
+		const bad = create("IfcStructuralProfileProperties");
+		(bad as unknown as { ShearDeformationAreaY: number }).ShearDeformationAreaY = -1;
+		expectFail("IfcStructuralProfileProperties", "WR21", bad);
+	});
+	test("WR22 pass/fail: not exists(ShearDeformationAreaZ) or >= 0", () => {
+		expectPass("IfcStructuralProfileProperties", "WR22", create("IfcStructuralProfileProperties"));
+		const bad = create("IfcStructuralProfileProperties");
+		(bad as unknown as { ShearDeformationAreaZ: number }).ShearDeformationAreaZ = -1;
+		expectFail("IfcStructuralProfileProperties", "WR22", bad);
+	});
+});
+
+describe("IfcStructuralSteelProfileProperties.WR31/WR32", () => {
+	test("WR31 pass/fail: not exists(ShearAreaY) or >= 0", () => {
+		expectPass("IfcStructuralSteelProfileProperties", "WR31", create("IfcStructuralSteelProfileProperties"));
+		const bad = create("IfcStructuralSteelProfileProperties");
+		(bad as unknown as { ShearAreaY: number }).ShearAreaY = -1;
+		expectFail("IfcStructuralSteelProfileProperties", "WR31", bad);
+	});
+	test("WR32 pass/fail: not exists(ShearAreaZ) or >= 0", () => {
+		expectPass("IfcStructuralSteelProfileProperties", "WR32", create("IfcStructuralSteelProfileProperties"));
+		const bad = create("IfcStructuralSteelProfileProperties");
+		(bad as unknown as { ShearAreaZ: number }).ShearAreaZ = -1;
+		expectFail("IfcStructuralSteelProfileProperties", "WR32", bad);
+	});
+});
+
+describe("IfcStructuralSurfaceMemberVarying.WR61/WR62/WR63", () => {
+	function shapeAspectWith(shapeReps: EntityInstance[]): EntityInstance {
+		const aspect = create("IfcShapeAspect");
+		(aspect as unknown as { ShapeRepresentations: EntityInstance[] }).ShapeRepresentations = shapeReps;
+		return aspect;
+	}
+	function shapeRepWithItems(items: EntityInstance[]): EntityInstance {
+		const rep = create("IfcShapeRepresentation");
+		(rep as unknown as { Items: EntityInstance[] }).Items = items;
+		return rep;
+	}
+	test("WR61 pass/fail: Thickness must be given", () => {
+		const m1 = create("IfcStructuralSurfaceMemberVarying");
+		(m1 as unknown as { Thickness: number }).Thickness = 5;
+		expectPass("IfcStructuralSurfaceMemberVarying", "WR61", m1);
+		expectFail("IfcStructuralSurfaceMemberVarying", "WR61", create("IfcStructuralSurfaceMemberVarying"));
+	});
+	test("WR62 pass/fail: every VaryingThicknessLocation.ShapeRepresentations member has exactly 1 Items member", () => {
+		const m1 = create("IfcStructuralSurfaceMemberVarying");
+		(m1 as unknown as { VaryingThicknessLocation: EntityInstance }).VaryingThicknessLocation = shapeAspectWith([
+			shapeRepWithItems([point([0, 0, 0])]),
+		]);
+		expectPass("IfcStructuralSurfaceMemberVarying", "WR62", m1);
+
+		const m2 = create("IfcStructuralSurfaceMemberVarying");
+		(m2 as unknown as { VaryingThicknessLocation: EntityInstance }).VaryingThicknessLocation = shapeAspectWith([
+			shapeRepWithItems([point([0, 0, 0]), point([1, 0, 0])]),
+		]);
+		expectFail("IfcStructuralSurfaceMemberVarying", "WR62", m2);
+	});
+	test("WR63 pass/fail: every VaryingThicknessLocation.ShapeRepresentations member's Items[1] is an IfcCartesianPoint or IfcPointOnSurface", () => {
+		const m1 = create("IfcStructuralSurfaceMemberVarying");
+		(m1 as unknown as { VaryingThicknessLocation: EntityInstance }).VaryingThicknessLocation = shapeAspectWith([
+			shapeRepWithItems([point([0, 0, 0])]),
+		]);
+		expectPass("IfcStructuralSurfaceMemberVarying", "WR63", m1);
+
+		const m2 = create("IfcStructuralSurfaceMemberVarying");
+		(m2 as unknown as { VaryingThicknessLocation: EntityInstance }).VaryingThicknessLocation = shapeAspectWith([
+			shapeRepWithItems([create("IfcPolyLoop")]),
+		]);
+		expectFail("IfcStructuralSurfaceMemberVarying", "WR63", m2);
+	});
+});
+
+describe("IfcStructuredDimensionCallout.WR31", () => {
+	test("pass: a confirmed always-passing dead rule (real upstream lowercase-attribute typo, see whereRules/ifc2x3.ts's own header comment) -- passes regardless of Contents", () => {
+		expectPass("IfcStructuredDimensionCallout", "WR31", create("IfcStructuredDimensionCallout"));
+
+		const callout = create("IfcStructuredDimensionCallout");
+		(callout as unknown as { Contents: EntityInstance[] }).Contents = [create("IfcAnnotationTextOccurrence")];
+		expectPass("IfcStructuredDimensionCallout", "WR31", callout);
+	});
+});
+
+describe("IfcStyledItem.WR11/WR12", () => {
+	test("WR11 pass/fail: Styles must have exactly 1 member", () => {
+		const s1 = create("IfcStyledItem");
+		(s1 as unknown as { Styles: EntityInstance[] }).Styles = [create("IfcActor")];
+		expectPass("IfcStyledItem", "WR11", s1);
+		const s2 = create("IfcStyledItem");
+		(s2 as unknown as { Styles: EntityInstance[] }).Styles = [];
+		expectFail("IfcStyledItem", "WR11", s2);
+	});
+	test("WR12 pass/fail: Item must not itself be an IfcStyledItem", () => {
+		const s1 = create("IfcStyledItem");
+		(s1 as unknown as { Item: EntityInstance }).Item = point([0, 0]);
+		expectPass("IfcStyledItem", "WR12", s1);
+		const s2 = create("IfcStyledItem");
+		(s2 as unknown as { Item: EntityInstance }).Item = create("IfcStyledItem");
+		expectFail("IfcStyledItem", "WR12", s2);
+	});
+});
+
+describe("IfcStyledRepresentation.WR21", () => {
+	test("pass/fail: every Items member must be an IfcStyledItem", () => {
+		const rep1 = create("IfcStyledRepresentation");
+		(rep1 as unknown as { Items: EntityInstance[] }).Items = [create("IfcStyledItem")];
+		expectPass("IfcStyledRepresentation", "WR21", rep1);
+		const rep2 = create("IfcStyledRepresentation");
+		(rep2 as unknown as { Items: EntityInstance[] }).Items = [point([0, 0])];
+		expectFail("IfcStyledRepresentation", "WR21", rep2);
+	});
+});
+
+describe("IfcSurfaceOfLinearExtrusion.WR41", () => {
+	test("pass/fail: Depth > 0", () => {
+		const s1 = create("IfcSurfaceOfLinearExtrusion");
+		(s1 as unknown as { Depth: number }).Depth = 1;
+		expectPass("IfcSurfaceOfLinearExtrusion", "WR41", s1);
+		const s2 = create("IfcSurfaceOfLinearExtrusion");
+		(s2 as unknown as { Depth: number }).Depth = 0;
+		expectFail("IfcSurfaceOfLinearExtrusion", "WR41", s2);
+	});
+});
+
+describe("IfcSurfaceStyle.WR11/WR12/WR13/WR14/WR15", () => {
+	function surfaceStyleWith(styles: EntityInstance[]): EntityInstance {
+		const s = create("IfcSurfaceStyle");
+		(s as unknown as { Styles: EntityInstance[] }).Styles = styles;
+		return s;
+	}
+	test("pass: at most 1 of each named style kind", () => {
+		expectPass("IfcSurfaceStyle", "WR11", surfaceStyleWith([create("IfcSurfaceStyleShading")]));
+		expectPass("IfcSurfaceStyle", "WR12", surfaceStyleWith([create("IfcSurfaceStyleLighting")]));
+		expectPass("IfcSurfaceStyle", "WR13", surfaceStyleWith([create("IfcSurfaceStyleRefraction")]));
+		expectPass("IfcSurfaceStyle", "WR14", surfaceStyleWith([create("IfcSurfaceStyleWithTextures")]));
+		expectPass("IfcSurfaceStyle", "WR15", surfaceStyleWith([create("IfcExternallyDefinedSurfaceStyle")]));
+	});
+	test("fail: more than 1 of the same named style kind", () => {
+		expectFail(
+			"IfcSurfaceStyle",
+			"WR11",
+			surfaceStyleWith([create("IfcSurfaceStyleShading"), create("IfcSurfaceStyleShading")]),
+		);
+		expectFail(
+			"IfcSurfaceStyle",
+			"WR12",
+			surfaceStyleWith([create("IfcSurfaceStyleLighting"), create("IfcSurfaceStyleLighting")]),
+		);
+		expectFail(
+			"IfcSurfaceStyle",
+			"WR13",
+			surfaceStyleWith([create("IfcSurfaceStyleRefraction"), create("IfcSurfaceStyleRefraction")]),
+		);
+		expectFail(
+			"IfcSurfaceStyle",
+			"WR14",
+			surfaceStyleWith([create("IfcSurfaceStyleWithTextures"), create("IfcSurfaceStyleWithTextures")]),
+		);
+		expectFail(
+			"IfcSurfaceStyle",
+			"WR15",
+			surfaceStyleWith([create("IfcExternallyDefinedSurfaceStyle"), create("IfcExternallyDefinedSurfaceStyle")]),
+		);
+	});
+});
+
+describe("IfcSweptAreaSolid.WR22", () => {
+	test("pass/fail: SweptArea.ProfileType must be AREA", () => {
+		const s1 = create("IfcSweptAreaSolid");
+		const profile1 = create("IfcArbitraryClosedProfileDef");
+		(profile1 as unknown as { ProfileType: string }).ProfileType = "AREA";
+		(s1 as unknown as { SweptArea: EntityInstance }).SweptArea = profile1;
+		expectPass("IfcSweptAreaSolid", "WR22", s1);
+
+		const s2 = create("IfcSweptAreaSolid");
+		const profile2 = create("IfcArbitraryClosedProfileDef");
+		(profile2 as unknown as { ProfileType: string }).ProfileType = "CURVE";
+		(s2 as unknown as { SweptArea: EntityInstance }).SweptArea = profile2;
+		expectFail("IfcSweptAreaSolid", "WR22", s2);
+	});
+});
+
+describe("IfcSweptDiskSolid.WR1/WR2", () => {
+	test("WR1 pass/fail: Directrix.Dim must equal 3", () => {
+		const s1 = create("IfcSweptDiskSolid");
+		(s1 as unknown as { Directrix: EntityInstance }).Directrix = polyline([point([0, 0, 0]), point([1, 0, 0])]);
+		expectPass("IfcSweptDiskSolid", "WR1", s1);
+
+		const s2 = create("IfcSweptDiskSolid");
+		(s2 as unknown as { Directrix: EntityInstance }).Directrix = polyline([point([0, 0]), point([1, 0])]);
+		expectFail("IfcSweptDiskSolid", "WR1", s2);
+	});
+	test("WR2 pass/fail: not exists(InnerRadius) or Radius > InnerRadius", () => {
+		const s1 = create("IfcSweptDiskSolid");
+		(s1 as unknown as { Radius: number }).Radius = 5;
+		expectPass("IfcSweptDiskSolid", "WR2", s1);
+
+		const s2 = create("IfcSweptDiskSolid");
+		(s2 as unknown as { Radius: number }).Radius = 5;
+		(s2 as unknown as { InnerRadius: number }).InnerRadius = 6;
+		expectFail("IfcSweptDiskSolid", "WR2", s2);
+	});
+});
+
+// =============================================================================
 // End-to-end wiring: `executeRules(file)` against the REAL registered rules above,
 // on a dedicated, freshly-constructed file (never the shared `file`/`create()` used by
 // every test above, whose accumulated fixtures -- many deliberately invalid, for the
