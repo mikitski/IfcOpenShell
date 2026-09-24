@@ -190,6 +190,49 @@ function ifcCartesianTransformationOperator2D(
 	return getScratchFile().createEntity("IfcCartesianTransformationOperator2D", axis1, axis2, localOrigin, scale);
 }
 
+/**
+ * Exported (Phase EX-4, IFC4 chunk 4, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+ * `express/whereRules/ifc4.ts`'s own `ifcCorrectDimensions` (a rule-file-local
+ * EXPRESS-library helper, not itself a WHERE-rule -- real source line 11439, used by
+ * `IfcNamedUnit_WR1`) needs a bare 7-arg `IfcDimensionalExponents(...)` constructor for
+ * each of its own 29 unit-type branches -- mirrors `rules/ifc2x3.ts`'s own identical
+ * `ifcDimensionalExponents` export precedent exactly. **Doc-comment correction (code-review
+ * finding)**: the rationale is a genuine EXTERNAL-module consumer (`whereRules/ifc4.ts`
+ * itself), not a "second consumer inside this file" the way `ifcCrossProduct`/`ifcDirection`
+ * above were each exported for -- `ifcDeriveDimensionalExponents`/`ifcDimensionsForSiUnit`
+ * below construct the same entity type inline via their own `getScratchFile().
+ * createEntity(...)` calls and never call this exported function themselves; they are
+ * NOT a second consumer of it, only prior art for the same construction idiom. This is
+ * `rules/ifc4.ts`'s first export whose only real caller lives in another file.
+ * **Genuinely different from `ifc2x3.ts`'s own version by exactly one value** (the
+ * `ELECTRICCAPACITANCEUNIT`/`FARAD` branch's `ElectricCurrentExponent`, `2` here vs. `1`
+ * in IFC2X3 -- the same real schema-evolution difference `calc_IfcSIUnit_Dimensions`'s
+ * own `ifcDimensionsForSiUnit` table already disclosed above; NOT re-disclosed as a new
+ * finding, just cross-referenced) -- this is a bare constructor, not a lookup table, so
+ * the difference lives entirely in `ifcCorrectDimensions`'s own call-site literals, not
+ * in this function's body.
+ */
+export function ifcDimensionalExponents(
+	lengthExponent: number,
+	massExponent: number,
+	timeExponent: number,
+	electricCurrentExponent: number,
+	thermodynamicTemperatureExponent: number,
+	amountOfSubstanceExponent: number,
+	luminousIntensityExponent: number,
+): EntityInstance {
+	return getScratchFile().createEntity(
+		"IfcDimensionalExponents",
+		lengthExponent,
+		massExponent,
+		timeExponent,
+		electricCurrentExponent,
+		thermodynamicTemperatureExponent,
+		amountOfSubstanceExponent,
+		luminousIntensityExponent,
+	);
+}
+
 // --- shared EXPRESS library functions (real Python: same module, not `calc_*`
 // functions themselves -- see this file's own header comment) ---
 
