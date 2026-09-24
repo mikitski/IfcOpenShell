@@ -5989,14 +5989,25 @@ const IfcPropertySetTemplate_UniquePropertyNames = entityRule(
 	},
 );
 
-// `IfcPropertyTableValue_WR21` (line 8827): `(not exists(DefiningValues) and not
-// exists(DefinedValues)) or sizeof(DefiningValues) == sizeof(DefinedValues)`.
+// `IfcPropertyTableValue_WR21` (line 8689): `(not exists(DefiningValues) and not
+// exists(DefinedValues)) or sizeof(DefiningValues) == sizeof(DefinedValues)`. CORRECTION
+// (real source line number was previously mis-cited as 8827): confirmed 8689 directly
+// against `IFC4.py`. Also fixes a real bug found and independently re-verified while
+// dispatching Phase EX-4's IFC4X3_ADD2 chunk 5 (which ports this same rule): the
+// previous version collapsed `triEq(...)` to a hard boolean via `=== true` before `||`-
+// ing it with the both-absent guard, discarding the `INDETERMINATE` case real Python's
+// own poison-propagating `==` produces when exactly one of `DefiningValues`/
+// `DefinedValues` is given (`sizeof(existing) == sizeof(INDETERMINATE)` is
+// `INDETERMINATE`, and real Python's `assert (...) is not False` then passes, since
+// `INDETERMINATE is not False`) -- this port's own collapsed version wrongly evaluated
+// to `false` and threw for that case instead. Fixed via `pyOr`'s own lazy-thunk form,
+// preserving `triEq`'s raw `Tri` result exactly as every other correctly-ported
+// `pyOr`/`triEq` combination in this file already does.
 const IfcPropertyTableValue_WR21 = entityRule("IfcPropertyTableValue", "WR21", (self) => {
 	const definingValues = expressGetAttr(self, "DefiningValues", INDETERMINATE);
 	const definedValues = expressGetAttr(self, "DefinedValues", INDETERMINATE);
 	assertWhereRule(
-		(!exists(definingValues) && !exists(definedValues)) ||
-			triEq(sizeof(definingValues), sizeof(definedValues)) === true,
+		pyOr(!exists(definingValues) && !exists(definedValues), () => triEq(sizeof(definingValues), sizeof(definedValues))),
 		"IfcPropertyTableValue: DefiningValues and DefinedValues must both be absent, or both present with equal size.",
 	);
 });
