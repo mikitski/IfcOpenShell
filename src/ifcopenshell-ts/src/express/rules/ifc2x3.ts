@@ -224,7 +224,15 @@ function getScratchFile(): IfcFile {
 	return scratchFile;
 }
 
-function ifcDirection(directionRatios: readonly number[]): EntityInstance {
+/**
+ * Exported (Phase EX-4 chunk 2, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+ * `express/whereRules/ifc2x3.ts`'s own `IfcExtrudedAreaSolid_WR31` needs this exact
+ * function (its own real-source body constructs a scratch `IfcDirection(DirectionRatios=
+ * [0.0, 0.0, 1.0])` to dot-product against `ExtrudedDirection`) -- reused as-is rather
+ * than re-derived, matching this file's own `ifcCrossProduct` precedent immediately
+ * below (same rationale: "export narrowly once a second real consumer exists").
+ */
+export function ifcDirection(directionRatios: readonly number[]): EntityInstance {
 	return getScratchFile().createEntity("IfcDirection", [...directionRatios]);
 }
 
@@ -345,8 +353,14 @@ export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | 
 	return ifcVector(arg1 as EntityInstance, 0.0);
 }
 
-/** Python: `IfcDotProduct` (`IFC2X3.py`). */
-function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
+/**
+ * Python: `IfcDotProduct` (`IFC2X3.py`).
+ *
+ * Exported (Phase EX-4 chunk 2): `express/whereRules/ifc2x3.ts`'s own
+ * `IfcExtrudedAreaSolid_WR31` needs this exact function, same "export narrowly once a
+ * second real consumer exists" precedent as `ifcCrossProduct`/`ifcDirection` above.
+ */
+export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
 	if (!exists(arg1) || !exists(arg2)) return null;
 	if (expressGetAttr(arg1, "Dim", INDETERMINATE) !== expressGetAttr(arg2, "Dim", INDETERMINATE)) return null;
 	const vec1 = ifcNormalise(arg1);
