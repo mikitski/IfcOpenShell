@@ -54,6 +54,18 @@ function findRule(typeName: string, ruleName: string): RuleDefinition {
 	return rule;
 }
 
+/**
+ * Phase EX-4 chunk 5's own lookup helper for the 2 `SCOPE = 'file'` rules -- mirrors
+ * `findRule` above, but keyed by `ruleName` alone (a file-scope `RuleDefinition` has no
+ * `typeName`, per `ruleDispatch.ts`'s own doc comment -- see that file and `fileRule`'s
+ * own doc comment in `whereRules/ifc2x3.ts`).
+ */
+function findFileRule(ruleName: string): RuleDefinition {
+	const rule = getSchemaRules("IFC2X3").find((r) => r.scope === "file" && r.ruleName === ruleName);
+	if (!rule) throw new Error(`File-scope rule not found in registry: ${ruleName}`);
+	return rule;
+}
+
 function expectPass(typeName: string, ruleName: string, target: unknown): void {
 	expect(() => findRule(typeName, ruleName).check(target)).not.toThrow();
 }
@@ -4249,6 +4261,676 @@ describe("IfcSweptDiskSolid.WR1/WR2", () => {
 		(s2 as unknown as { Radius: number }).Radius = 5;
 		(s2 as unknown as { InnerRadius: number }).InnerRadius = 6;
 		expectFail("IfcSweptDiskSolid", "WR2", s2);
+	});
+});
+
+// =============================================================================
+// Phase EX-4 chunk 5: original, hand-rolled coverage for the LAST 42 `SCOPE = 'entity'`
+// WHERE-rule classes (real source lines 6928-7357) PLUS the FIRST-EVER 2 `SCOPE =
+// 'file'` rules in this test file (`IfcRepresentationContextSameWCS`/
+// `IfcSingleProjectInstance`) -- landing these completes ALL 365 IFC2X3 WHERE-rule
+// classes. Same established conventions as chunks 1-4 (each entity/attribute built via
+// `create()` + explicit Proxy-assignment; INVERSE-attribute fixtures built by
+// constructing the real forward relationship entity, reusing this file's own
+// already-established `decomposeRelationship`/`siUnitFor`/`enumFixture`/
+// `userDefinedFixture` helpers where the shape matches exactly).
+// =============================================================================
+
+function tableRow(cells: unknown[], isHeading = false): EntityInstance {
+	const row = create("IfcTableRow");
+	(row as unknown as { RowCells: unknown[] }).RowCells = cells;
+	(row as unknown as { IsHeading: boolean }).IsHeading = isHeading;
+	return row;
+}
+
+/** Populates the INVERSE `HasAssociations` by creating a real `IfcRelAssociatesMaterial`. */
+function associatesMaterial(relatedObjects: EntityInstance[], relatingMaterial?: EntityInstance): EntityInstance {
+	const rel = create("IfcRelAssociatesMaterial");
+	(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+	if (relatingMaterial) (rel as unknown as { RelatingMaterial: EntityInstance }).RelatingMaterial = relatingMaterial;
+	return rel;
+}
+
+/** Populates the INVERSE `IsGroupedBy` (single-valued, per this file's own established `IfcAsset.WR1` precedent) by creating a real `IfcRelAssignsToGroup`. */
+function groupedByRelationship(relatingGroup: EntityInstance, relatedObjects: EntityInstance[]): EntityInstance {
+	const rel = create("IfcRelAssignsToGroup");
+	(rel as unknown as { RelatingGroup: EntityInstance }).RelatingGroup = relatingGroup;
+	(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+	return rel;
+}
+
+/** Populates the INVERSE `ObjectTypeOf` by creating a real `IfcRelDefinesByType`. */
+function objectTypeOfRelationship(relatingType: EntityInstance, relatedObjects: EntityInstance[]): EntityInstance {
+	const rel = create("IfcRelDefinesByType");
+	(rel as unknown as { RelatingType: EntityInstance }).RelatingType = relatingType;
+	(rel as unknown as { RelatedObjects: EntityInstance[] }).RelatedObjects = relatedObjects;
+	return rel;
+}
+
+/**
+ * Populates the INVERSE `AnnotatedSurface` (`IfcTextureMap`, empirically confirmed via
+ * `entity.all_inverse_attributes()` -- see this section's own PR description for the
+ * derivation -- to be the inverse of `IfcAnnotationSurface.TextureCoordinates`) by
+ * creating a real `IfcAnnotationSurface` referencing both `map` and `item`.
+ */
+function annotationSurfaceFor(map: EntityInstance, item: EntityInstance): EntityInstance {
+	const surface = create("IfcAnnotationSurface");
+	(surface as unknown as { TextureCoordinates: EntityInstance }).TextureCoordinates = map;
+	(surface as unknown as { Item: EntityInstance }).Item = item;
+	return surface;
+}
+
+describe("IfcSweptSurface.WR1/WR2", () => {
+	test("WR1 pass/fail: SweptCurve must not be an IfcDerivedProfileDef", () => {
+		expectPass(
+			"IfcSweptSurface",
+			"WR1",
+			(() => {
+				const s = create("IfcSweptSurface");
+				(s as unknown as { SweptCurve: EntityInstance }).SweptCurve = create("IfcArbitraryClosedProfileDef");
+				return s;
+			})(),
+		);
+		expectFail(
+			"IfcSweptSurface",
+			"WR1",
+			(() => {
+				const s = create("IfcSweptSurface");
+				(s as unknown as { SweptCurve: EntityInstance }).SweptCurve = create("IfcDerivedProfileDef");
+				return s;
+			})(),
+		);
+	});
+	test("WR2 pass/fail: SweptCurve.ProfileType must be CURVE", () => {
+		const pass = create("IfcSweptSurface");
+		const passProfile = create("IfcArbitraryOpenProfileDef");
+		(passProfile as unknown as { ProfileType: string }).ProfileType = "CURVE";
+		(pass as unknown as { SweptCurve: EntityInstance }).SweptCurve = passProfile;
+		expectPass("IfcSweptSurface", "WR2", pass);
+
+		const fail = create("IfcSweptSurface");
+		const failProfile = create("IfcArbitraryClosedProfileDef");
+		(failProfile as unknown as { ProfileType: string }).ProfileType = "AREA";
+		(fail as unknown as { SweptCurve: EntityInstance }).SweptCurve = failProfile;
+		expectFail("IfcSweptSurface", "WR2", fail);
+	});
+});
+
+describe("IfcTShapeProfileDef.WR1/WR2", () => {
+	test("WR1 pass/fail: FlangeThickness must be less than Depth", () => {
+		const pass = create("IfcTShapeProfileDef");
+		(pass as unknown as { Depth: number }).Depth = 10;
+		(pass as unknown as { FlangeThickness: number }).FlangeThickness = 5;
+		expectPass("IfcTShapeProfileDef", "WR1", pass);
+
+		const fail = create("IfcTShapeProfileDef");
+		(fail as unknown as { Depth: number }).Depth = 10;
+		(fail as unknown as { FlangeThickness: number }).FlangeThickness = 15;
+		expectFail("IfcTShapeProfileDef", "WR1", fail);
+	});
+	test("WR2 pass/fail: WebThickness must be less than FlangeWidth", () => {
+		const pass = create("IfcTShapeProfileDef");
+		(pass as unknown as { FlangeWidth: number }).FlangeWidth = 10;
+		(pass as unknown as { WebThickness: number }).WebThickness = 5;
+		expectPass("IfcTShapeProfileDef", "WR2", pass);
+
+		const fail = create("IfcTShapeProfileDef");
+		(fail as unknown as { FlangeWidth: number }).FlangeWidth = 10;
+		(fail as unknown as { WebThickness: number }).WebThickness = 15;
+		expectFail("IfcTShapeProfileDef", "WR2", fail);
+	});
+});
+
+describe("IfcTable.WR1/WR2/WR3", () => {
+	test("WR1/WR2 pass/fail: every row's RowCells must have the same length as the first row's", () => {
+		const pass = create("IfcTable");
+		(pass as unknown as { Rows: EntityInstance[] }).Rows = [tableRow([1, 2]), tableRow([3, 4])];
+		expectPass("IfcTable", "WR1", pass);
+		expectPass("IfcTable", "WR2", pass);
+
+		const fail = create("IfcTable");
+		(fail as unknown as { Rows: EntityInstance[] }).Rows = [tableRow([1, 2]), tableRow([3])];
+		expectFail("IfcTable", "WR1", fail);
+		expectFail("IfcTable", "WR2", fail);
+	});
+	test("WR3 pass/fail: NumberOfHeadings (DERIVED from Rows) must be in [0, 1]", () => {
+		const pass = create("IfcTable");
+		(pass as unknown as { Rows: EntityInstance[] }).Rows = [tableRow([1], true), tableRow([2], false)];
+		expectPass("IfcTable", "WR3", pass);
+
+		const fail = create("IfcTable");
+		(fail as unknown as { Rows: EntityInstance[] }).Rows = [tableRow([1], true), tableRow([2], true)];
+		expectFail("IfcTable", "WR3", fail);
+	});
+});
+
+describe("IfcTankType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass(
+			"IfcTankType",
+			"WR1",
+			enumFixture("IfcTankType", "PredefinedType", "PRESSUREVESSEL", "ElementType", null),
+		);
+		expectFail("IfcTankType", "WR1", enumFixture("IfcTankType", "PredefinedType", "USERDEFINED", "ElementType", null));
+	});
+});
+
+describe("IfcTask.WR1/WR2/WR3", () => {
+	test("WR1 pass/fail: every Decomposes relationship must be an IfcRelNests", () => {
+		const pass = create("IfcTask");
+		decomposeRelationship(create("IfcTask"), [pass], "IfcRelNests");
+		expectPass("IfcTask", "WR1", pass);
+
+		const fail = create("IfcTask");
+		decomposeRelationship(create("IfcTask"), [fail], "IfcRelAggregates");
+		expectFail("IfcTask", "WR1", fail);
+	});
+	test("WR2 pass/fail: same shape for IsDecomposedBy", () => {
+		const pass = create("IfcTask");
+		decomposeRelationship(pass, [create("IfcTask")], "IfcRelNests");
+		expectPass("IfcTask", "WR2", pass);
+
+		const fail = create("IfcTask");
+		decomposeRelationship(fail, [create("IfcTask")], "IfcRelAggregates");
+		expectFail("IfcTask", "WR2", fail);
+	});
+	test("WR3 pass/fail: Name must be given", () => {
+		const pass = create("IfcTask");
+		(pass as unknown as { Name: string }).Name = "Task A";
+		expectPass("IfcTask", "WR3", pass);
+		expectFail("IfcTask", "WR3", create("IfcTask"));
+	});
+});
+
+describe("IfcTelecomAddress.WR1", () => {
+	test("pass: TelephoneNumbers given", () => {
+		const pass = create("IfcTelecomAddress");
+		(pass as unknown as { TelephoneNumbers: string[] }).TelephoneNumbers = ["555-1234"];
+		expectPass("IfcTelecomAddress", "WR1", pass);
+	});
+	test("pass: WWWHomePageURL given (last in the real or-chain)", () => {
+		const pass = create("IfcTelecomAddress");
+		(pass as unknown as { WWWHomePageURL: string }).WWWHomePageURL = "https://example.com";
+		expectPass("IfcTelecomAddress", "WR1", pass);
+	});
+	test("fail: none of the 5 given", () => {
+		expectFail("IfcTelecomAddress", "WR1", create("IfcTelecomAddress"));
+	});
+});
+
+describe("IfcTendon.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcTendon", "WR1", enumFixture("IfcTendon", "PredefinedType", "STRAND", "ObjectType", null));
+		expectFail("IfcTendon", "WR1", enumFixture("IfcTendon", "PredefinedType", "USERDEFINED", "ObjectType", null));
+	});
+});
+
+describe("IfcTextLiteralWithExtent.WR31", () => {
+	test("pass/fail: Extent must not be an IfcPlanarBox", () => {
+		const pass = create("IfcTextLiteralWithExtent");
+		(pass as unknown as { Extent: EntityInstance }).Extent = create("IfcPlanarExtent");
+		expectPass("IfcTextLiteralWithExtent", "WR31", pass);
+
+		const fail = create("IfcTextLiteralWithExtent");
+		(fail as unknown as { Extent: EntityInstance }).Extent = create("IfcPlanarBox");
+		expectFail("IfcTextLiteralWithExtent", "WR31", fail);
+	});
+});
+
+describe("IfcTextStyleFontModel.WR31", () => {
+	test("pass: FontSize is an IfcLengthMeasure > 0", () => {
+		const pass = create("IfcTextStyleFontModel");
+		(pass as unknown as { FontSize: EntityInstance }).FontSize = wrappedLength(12);
+		expectPass("IfcTextStyleFontModel", "WR31", pass);
+	});
+	test("fail: FontSize unset", () => {
+		expectFail("IfcTextStyleFontModel", "WR31", create("IfcTextStyleFontModel"));
+	});
+});
+
+describe("IfcTextureMap.WR11", () => {
+	test("pass/fail: AnnotatedSurface[1].Item must be one of the 4 named surface/brep types", () => {
+		const pass = create("IfcTextureMap");
+		annotationSurfaceFor(pass, create("IfcFacetedBrep"));
+		expectPass("IfcTextureMap", "WR11", pass);
+
+		const fail = create("IfcTextureMap");
+		annotationSurfaceFor(fail, create("IfcCartesianPoint"));
+		expectFail("IfcTextureMap", "WR11", fail);
+	});
+});
+
+describe("IfcTimeSeriesSchedule.WR41", () => {
+	test("pass/fail", () => {
+		expectPass(
+			"IfcTimeSeriesSchedule",
+			"WR41",
+			enumFixture("IfcTimeSeriesSchedule", "TimeSeriesScheduleType", "ANNUAL", "ObjectType", null),
+		);
+		expectFail(
+			"IfcTimeSeriesSchedule",
+			"WR41",
+			enumFixture("IfcTimeSeriesSchedule", "TimeSeriesScheduleType", "USERDEFINED", "ObjectType", null),
+		);
+	});
+});
+
+describe("IfcTopologyRepresentation.WR21/WR22/WR23", () => {
+	test("WR21 pass/fail: every Item must be an IfcTopologicalRepresentationItem", () => {
+		const pass = create("IfcTopologyRepresentation");
+		(pass as unknown as { Items: EntityInstance[] }).Items = [create("IfcVertex")];
+		expectPass("IfcTopologyRepresentation", "WR21", pass);
+
+		const fail = create("IfcTopologyRepresentation");
+		(fail as unknown as { Items: EntityInstance[] }).Items = [create("IfcCartesianPoint")];
+		expectFail("IfcTopologyRepresentation", "WR21", fail);
+	});
+	test("WR22 pass/fail: RepresentationType must be given", () => {
+		const pass = create("IfcTopologyRepresentation");
+		(pass as unknown as { RepresentationType: string }).RepresentationType = "Vertex";
+		expectPass("IfcTopologyRepresentation", "WR22", pass);
+		expectFail("IfcTopologyRepresentation", "WR22", create("IfcTopologyRepresentation"));
+	});
+	test("WR23 pass/fail: RepresentationType must be consistent with the actual types of Items", () => {
+		const pass = create("IfcTopologyRepresentation");
+		(pass as unknown as { RepresentationType: string }).RepresentationType = "Vertex";
+		(pass as unknown as { Items: EntityInstance[] }).Items = [create("IfcVertex")];
+		expectPass("IfcTopologyRepresentation", "WR23", pass);
+
+		const fail = create("IfcTopologyRepresentation");
+		(fail as unknown as { RepresentationType: string }).RepresentationType = "Vertex";
+		(fail as unknown as { Items: EntityInstance[] }).Items = [create("IfcFace")];
+		expectFail("IfcTopologyRepresentation", "WR23", fail);
+	});
+});
+
+describe("IfcTrimmedCurve.WR41/WR42/WR43", () => {
+	test("WR41 pass/fail: Trim1 must have 1 element or its 2 elements must differ in type", () => {
+		const pass = create("IfcTrimmedCurve");
+		(pass as unknown as { Trim1: unknown[] }).Trim1 = [point([0, 0])];
+		expectPass("IfcTrimmedCurve", "WR41", pass);
+
+		// A raw JS number mixed into the same aggregate as an `EntityInstance` (`point(...)`)
+		// was empirically found to crash the native addon -- both `Trim1` elements are kept
+		// as wrapped standalone defined-type instances here (`IfcParameterValue`, `Trim1`'s
+		// own other SELECT branch besides `IfcCartesianPoint`), never a bare primitive,
+		// matching this file's own established `wrappedLength`/`wrappedText` convention.
+		const passDiffer = create("IfcTrimmedCurve");
+		(passDiffer as unknown as { Trim1: unknown[] }).Trim1 = [
+			point([0, 0]),
+			file.createEntity("IfcParameterValue", 1.5 as unknown as never),
+		];
+		expectPass("IfcTrimmedCurve", "WR41", passDiffer);
+
+		const fail = create("IfcTrimmedCurve");
+		(fail as unknown as { Trim1: unknown[] }).Trim1 = [point([0, 0]), point([1, 1])];
+		expectFail("IfcTrimmedCurve", "WR41", fail);
+	});
+	test("WR42 pass/fail: same shape for Trim2", () => {
+		const pass = create("IfcTrimmedCurve");
+		(pass as unknown as { Trim2: unknown[] }).Trim2 = [point([0, 0])];
+		expectPass("IfcTrimmedCurve", "WR42", pass);
+
+		const fail = create("IfcTrimmedCurve");
+		(fail as unknown as { Trim2: unknown[] }).Trim2 = [point([0, 0]), point([1, 1])];
+		expectFail("IfcTrimmedCurve", "WR42", fail);
+	});
+	test("WR43 pass/fail: BasisCurve must not be an IfcBoundedCurve", () => {
+		const pass = create("IfcTrimmedCurve");
+		(pass as unknown as { BasisCurve: EntityInstance }).BasisCurve = create("IfcLine");
+		expectPass("IfcTrimmedCurve", "WR43", pass);
+
+		const fail = create("IfcTrimmedCurve");
+		(fail as unknown as { BasisCurve: EntityInstance }).BasisCurve = create("IfcPolyline");
+		expectFail("IfcTrimmedCurve", "WR43", fail);
+	});
+});
+
+describe("IfcTubeBundleType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcTubeBundleType", "WR1", userDefinedFixture("IfcTubeBundleType", "FINNED", null));
+		expectFail("IfcTubeBundleType", "WR1", userDefinedFixture("IfcTubeBundleType", "USERDEFINED", null));
+	});
+});
+
+describe("IfcTypeObject.WR1", () => {
+	test("pass/fail: Name must be given", () => {
+		const pass = create("IfcTypeObject");
+		(pass as unknown as { Name: string }).Name = "A type";
+		expectPass("IfcTypeObject", "WR1", pass);
+		expectFail("IfcTypeObject", "WR1", create("IfcTypeObject"));
+	});
+});
+
+describe("IfcTypeProduct.WR41", () => {
+	test("pass: ObjectTypeOf empty", () => {
+		expectPass("IfcTypeProduct", "WR41", create("IfcWallType"));
+	});
+	test("pass: ObjectTypeOf[1].RelatedObjects are all IfcProduct", () => {
+		const typeProduct = create("IfcWallType");
+		objectTypeOfRelationship(typeProduct, [create("IfcBuildingElementProxy")]);
+		expectPass("IfcTypeProduct", "WR41", typeProduct);
+	});
+	test("fail: ObjectTypeOf[1].RelatedObjects includes a non-IfcProduct", () => {
+		const typeProduct = create("IfcWallType");
+		objectTypeOfRelationship(typeProduct, [create("IfcOwnerHistory")]);
+		expectFail("IfcTypeProduct", "WR41", typeProduct);
+	});
+});
+
+describe("IfcUShapeProfileDef.WR21/WR22", () => {
+	test("WR21 pass/fail: FlangeThickness must be less than half of Depth", () => {
+		const pass = create("IfcUShapeProfileDef");
+		(pass as unknown as { Depth: number }).Depth = 10;
+		(pass as unknown as { FlangeThickness: number }).FlangeThickness = 4;
+		expectPass("IfcUShapeProfileDef", "WR21", pass);
+
+		const fail = create("IfcUShapeProfileDef");
+		(fail as unknown as { Depth: number }).Depth = 10;
+		(fail as unknown as { FlangeThickness: number }).FlangeThickness = 6;
+		expectFail("IfcUShapeProfileDef", "WR21", fail);
+	});
+	test("WR22 pass/fail: WebThickness must be less than FlangeWidth", () => {
+		const pass = create("IfcUShapeProfileDef");
+		(pass as unknown as { FlangeWidth: number }).FlangeWidth = 10;
+		(pass as unknown as { WebThickness: number }).WebThickness = 5;
+		expectPass("IfcUShapeProfileDef", "WR22", pass);
+
+		const fail = create("IfcUShapeProfileDef");
+		(fail as unknown as { FlangeWidth: number }).FlangeWidth = 10;
+		(fail as unknown as { WebThickness: number }).WebThickness = 15;
+		expectFail("IfcUShapeProfileDef", "WR22", fail);
+	});
+});
+
+describe("IfcUnitAssignment.WR01", () => {
+	test("pass: distinct named-unit UnitTypes, at most 1 monetary unit", () => {
+		const ua = create("IfcUnitAssignment");
+		(ua as unknown as { Units: EntityInstance[] }).Units = [
+			siUnitFor("LENGTHUNIT", "METRE"),
+			siUnitFor("MASSUNIT", "GRAM"),
+		];
+		expectPass("IfcUnitAssignment", "WR01", ua);
+	});
+	test("fail: duplicate named-unit UnitType", () => {
+		const ua = create("IfcUnitAssignment");
+		(ua as unknown as { Units: EntityInstance[] }).Units = [
+			siUnitFor("LENGTHUNIT", "METRE"),
+			siUnitFor("LENGTHUNIT", "METRE"),
+		];
+		expectFail("IfcUnitAssignment", "WR01", ua);
+	});
+	test("fail: more than 1 monetary unit", () => {
+		const ua = create("IfcUnitAssignment");
+		const m1 = create("IfcMonetaryUnit");
+		(m1 as unknown as { Currency: string }).Currency = "USD";
+		const m2 = create("IfcMonetaryUnit");
+		(m2 as unknown as { Currency: string }).Currency = "EUR";
+		(ua as unknown as { Units: EntityInstance[] }).Units = [m1, m2];
+		expectFail("IfcUnitAssignment", "WR01", ua);
+	});
+});
+
+describe("IfcUnitaryEquipmentType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcUnitaryEquipmentType", "WR1", userDefinedFixture("IfcUnitaryEquipmentType", "AIRHANDLER", null));
+		expectFail("IfcUnitaryEquipmentType", "WR1", userDefinedFixture("IfcUnitaryEquipmentType", "USERDEFINED", null));
+	});
+});
+
+describe("IfcValveType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcValveType", "WR1", userDefinedFixture("IfcValveType", "GASTAP", null));
+		expectFail("IfcValveType", "WR1", userDefinedFixture("IfcValveType", "USERDEFINED", null));
+	});
+});
+
+describe("IfcVector.WR1", () => {
+	test("pass/fail: Magnitude must be >= 0", () => {
+		const pass = create("IfcVector");
+		(pass as unknown as { Magnitude: number }).Magnitude = 0;
+		expectPass("IfcVector", "WR1", pass);
+
+		const fail = create("IfcVector");
+		(fail as unknown as { Magnitude: number }).Magnitude = -1;
+		expectFail("IfcVector", "WR1", fail);
+	});
+});
+
+describe("IfcVibrationIsolatorType.WR1", () => {
+	test("pass/fail", () => {
+		expectPass("IfcVibrationIsolatorType", "WR1", userDefinedFixture("IfcVibrationIsolatorType", "SPRING", null));
+		expectFail("IfcVibrationIsolatorType", "WR1", userDefinedFixture("IfcVibrationIsolatorType", "USERDEFINED", null));
+	});
+});
+
+describe("IfcWall.WR1", () => {
+	test("pass: at most 1 IfcRelAssociatesMaterial via HasAssociations", () => {
+		const wall = create("IfcWall");
+		associatesMaterial([wall]);
+		expectPass("IfcWall", "WR1", wall);
+	});
+	test("pass: zero associations", () => {
+		expectPass("IfcWall", "WR1", create("IfcWall"));
+	});
+	test("fail: more than 1 IfcRelAssociatesMaterial via HasAssociations", () => {
+		const wall = create("IfcWall");
+		associatesMaterial([wall]);
+		associatesMaterial([wall]);
+		expectFail("IfcWall", "WR1", wall);
+	});
+});
+
+describe("IfcWallStandardCase.WR1", () => {
+	test("pass: exactly one associated IfcRelAssociatesMaterial references an IfcMaterialLayerSetUsage", () => {
+		const wsc = create("IfcWallStandardCase");
+		associatesMaterial([wsc], create("IfcMaterialLayerSetUsage"));
+		expectPass("IfcWallStandardCase", "WR1", wsc);
+	});
+	test("fail: zero matching associations", () => {
+		expectFail("IfcWallStandardCase", "WR1", create("IfcWallStandardCase"));
+	});
+	test("fail: RelatingMaterial is not an IfcMaterialLayerSetUsage", () => {
+		const wsc = create("IfcWallStandardCase");
+		associatesMaterial([wsc], create("IfcMaterialLayerSet"));
+		expectFail("IfcWallStandardCase", "WR1", wsc);
+	});
+});
+
+describe("IfcWindowLiningProperties.WR31/WR32/WR33/WR34", () => {
+	test("WR31 pass/fail: LiningThickness must not be given without LiningDepth", () => {
+		const pass = create("IfcWindowLiningProperties");
+		(pass as unknown as { LiningDepth: number }).LiningDepth = 50;
+		(pass as unknown as { LiningThickness: number }).LiningThickness = 10;
+		expectPass("IfcWindowLiningProperties", "WR31", pass);
+
+		const fail = create("IfcWindowLiningProperties");
+		(fail as unknown as { LiningThickness: number }).LiningThickness = 10;
+		expectFail("IfcWindowLiningProperties", "WR31", fail);
+	});
+	test("WR32 pass/fail: same shape for FirstTransomOffset/SecondTransomOffset", () => {
+		const pass = create("IfcWindowLiningProperties");
+		(pass as unknown as { FirstTransomOffset: number }).FirstTransomOffset = 50;
+		(pass as unknown as { SecondTransomOffset: number }).SecondTransomOffset = 10;
+		expectPass("IfcWindowLiningProperties", "WR32", pass);
+
+		const fail = create("IfcWindowLiningProperties");
+		(fail as unknown as { SecondTransomOffset: number }).SecondTransomOffset = 10;
+		expectFail("IfcWindowLiningProperties", "WR32", fail);
+	});
+	test("WR33 pass/fail: same shape for FirstMullionOffset/SecondMullionOffset", () => {
+		const pass = create("IfcWindowLiningProperties");
+		(pass as unknown as { FirstMullionOffset: number }).FirstMullionOffset = 50;
+		(pass as unknown as { SecondMullionOffset: number }).SecondMullionOffset = 10;
+		expectPass("IfcWindowLiningProperties", "WR33", pass);
+
+		const fail = create("IfcWindowLiningProperties");
+		(fail as unknown as { SecondMullionOffset: number }).SecondMullionOffset = 10;
+		expectFail("IfcWindowLiningProperties", "WR33", fail);
+	});
+	test("WR34 pass/fail: must be associated (via DefinesType) with exactly one IfcWindowStyle", () => {
+		const pass = create("IfcWindowLiningProperties");
+		const windowStyle = create("IfcWindowStyle");
+		(windowStyle as unknown as { HasPropertySets: EntityInstance[] }).HasPropertySets = [pass];
+		expectPass("IfcWindowLiningProperties", "WR34", pass);
+
+		expectFail("IfcWindowLiningProperties", "WR34", create("IfcWindowLiningProperties"));
+	});
+});
+
+describe("IfcWorkControl.WR1", () => {
+	test("pass/fail", () => {
+		expectPass(
+			"IfcWorkControl",
+			"WR1",
+			enumFixture("IfcWorkControl", "WorkControlType", "ACTUAL", "UserDefinedControlType", null),
+		);
+		expectFail(
+			"IfcWorkControl",
+			"WR1",
+			enumFixture("IfcWorkControl", "WorkControlType", "USERDEFINED", "UserDefinedControlType", null),
+		);
+	});
+});
+
+describe("IfcZShapeProfileDef.WR21", () => {
+	test("pass/fail: FlangeThickness must be less than half of Depth", () => {
+		const pass = create("IfcZShapeProfileDef");
+		(pass as unknown as { Depth: number }).Depth = 10;
+		(pass as unknown as { FlangeThickness: number }).FlangeThickness = 4;
+		expectPass("IfcZShapeProfileDef", "WR21", pass);
+
+		const fail = create("IfcZShapeProfileDef");
+		(fail as unknown as { Depth: number }).Depth = 10;
+		(fail as unknown as { FlangeThickness: number }).FlangeThickness = 6;
+		expectFail("IfcZShapeProfileDef", "WR21", fail);
+	});
+});
+
+describe("IfcZone.WR1", () => {
+	test("pass: every grouped RelatedObject is an IfcZone or IfcSpace", () => {
+		const zone = create("IfcZone");
+		groupedByRelationship(zone, [create("IfcSpace"), create("IfcZone")]);
+		expectPass("IfcZone", "WR1", zone);
+	});
+	test("pass: not grouping anything", () => {
+		expectPass("IfcZone", "WR1", create("IfcZone"));
+	});
+	test("fail: a grouped RelatedObject is neither IfcZone nor IfcSpace", () => {
+		const zone = create("IfcZone");
+		groupedByRelationship(zone, [create("IfcWall")]);
+		expectFail("IfcZone", "WR1", zone);
+	});
+});
+
+// =============================================================================
+// SCOPE = 'file' rules -- `check()` receives the whole `IfcFile`, not a single
+// `EntityInstance`. Every fixture here uses a dedicated `blankFile()` (never the shared
+// `file`, whose default template already seeds an `IfcProject`/`IfcGeometricRepresentationContext`
+// that would cross-contaminate a "zero instances" assertion).
+// =============================================================================
+
+function pointOn(f: IfcFile, coords: number[]): EntityInstance {
+	const pt = f.createEntity("IfcCartesianPoint");
+	(pt as unknown as { Coordinates: number[] }).Coordinates = coords;
+	return pt;
+}
+
+function directionOn(f: IfcFile, ratios: number[]): EntityInstance {
+	const dir = f.createEntity("IfcDirection");
+	(dir as unknown as { DirectionRatios: number[] }).DirectionRatios = ratios;
+	return dir;
+}
+
+/** Leaves `Axis`/`RefDirection` unset (defaulting to the +Z axis via `calc_IfcAxis2Placement3D_P`) unless `axisRatios` is given. */
+function axisPlacement3DOn(f: IfcFile, location: number[], axisRatios?: number[]): EntityInstance {
+	const ap = f.createEntity("IfcAxis2Placement3D");
+	(ap as unknown as { Location: EntityInstance }).Location = pointOn(f, location);
+	if (axisRatios) (ap as unknown as { Axis: EntityInstance }).Axis = directionOn(f, axisRatios);
+	return ap;
+}
+
+function geometricContextOn(f: IfcFile, wcs: EntityInstance, precision?: number): EntityInstance {
+	const ctx = f.createEntity("IfcGeometricRepresentationContext");
+	(ctx as unknown as { CoordinateSpaceDimension: number }).CoordinateSpaceDimension = 3;
+	(ctx as unknown as { WorldCoordinateSystem: EntityInstance }).WorldCoordinateSystem = wcs;
+	if (precision !== undefined) (ctx as unknown as { Precision: number }).Precision = precision;
+	return ctx;
+}
+
+describe("IfcSingleProjectInstance (SCOPE = 'file')", () => {
+	test("pass: zero IfcProject instances", () => {
+		const f = blankFile();
+		expect(() => findFileRule("IfcSingleProjectInstance").check(f)).not.toThrow();
+	});
+	test("pass: exactly one IfcProject instance", () => {
+		const f = blankFile();
+		f.createEntity("IfcProject");
+		expect(() => findFileRule("IfcSingleProjectInstance").check(f)).not.toThrow();
+	});
+	test("fail: two IfcProject instances", () => {
+		const f = blankFile();
+		f.createEntity("IfcProject");
+		f.createEntity("IfcProject");
+		expect(() => findFileRule("IfcSingleProjectInstance").check(f)).toThrow();
+	});
+});
+
+describe("IfcRepresentationContextSameWCS (SCOPE = 'file')", () => {
+	function check(f: IfcFile): () => void {
+		return () => findFileRule("IfcRepresentationContextSameWCS").check(f);
+	}
+
+	test("pass: zero IfcGeometricRepresentationContext instances", () => {
+		expect(check(blankFile())).not.toThrow();
+	});
+
+	test("pass: exactly one IfcGeometricRepresentationContext instance", () => {
+		const f = blankFile();
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+		expect(check(f)).not.toThrow();
+	});
+
+	test("pass: two contexts with genuinely identical placements", () => {
+		const f = blankFile();
+		const wcs = axisPlacement3DOn(f, [0, 0, 0]);
+		geometricContextOn(f, wcs);
+		geometricContextOn(f, wcs);
+		expect(check(f)).not.toThrow();
+	});
+
+	// Demonstrates the disclosed real upstream bug (`ifcSameAxis2Placement`'s own doc
+	// comment): the two contexts have DIFFERENT Locations (structurally different
+	// WorldCoordinateSystem instances, so the outer `!=` check does fire) but the SAME
+	// default axis direction -- the rule still passes, because the buggy `Location`
+	// comparison inside `IfcSameAxis2Placement` always compares a point against itself.
+	test("pass (bug-demonstrating): different Location, same axis direction", () => {
+		const f = blankFile();
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+		geometricContextOn(f, axisPlacement3DOn(f, [100, 100, 100]));
+		expect(check(f)).not.toThrow();
+	});
+
+	test("fail: two contexts with different axis directions", () => {
+		const f = blankFile();
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0], [1, 0, 0]));
+		expect(check(f)).toThrow();
+	});
+
+	test("fail: two contexts with the same axis direction but incompatible Precision", () => {
+		const f = blankFile();
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+		geometricContextOn(f, axisPlacement3DOn(f, [1, 0, 0]), 0.5);
+		expect(check(f)).toThrow();
+	});
+
+	test("fail: 3 contexts -- the 3rd differs from the 1st even though the 2nd doesn't (loop continues past a passing comparison)", () => {
+		const f = blankFile();
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+		geometricContextOn(f, axisPlacement3DOn(f, [5, 5, 5])); // same axis, different Location -- passes (the bug)
+		geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0], [1, 0, 0])); // different axis -- fails
+		expect(check(f)).toThrow();
 	});
 });
 
