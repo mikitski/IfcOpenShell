@@ -3322,3 +3322,1320 @@ registerSchemaRules("IFC2X3", [
 	IfcQuantityArea_WR21,
 	IfcQuantityArea_WR22,
 ]);
+
+// =============================================================================
+// Phase EX-4 chunk 4 (planning/ifcopenshell-ts/70-express-rules-plan.md): the NEXT 85
+// `SCOPE = 'entity'` WHERE-rule classes in `IFC2X3.py`, real file order (lines
+// 6052-6917, re-verified directly against that file -- `grep -n "^class Ifc.*_WR"
+// src/ifcopenshell-python/ifcopenshell/express/rules/IFC2X3.py | awk -F: '$1>=6052 &&
+// $1<6927'` yields exactly 85 matches, `IfcQuantityCount_WR21` through
+// `IfcSweptDiskSolid_WR2`). Continues directly from chunk 3's own last-ported rule
+// (`IfcQuantityArea_WR22`, line 6042) with zero gap or overlap -- confirmed by grepping
+// both boundary class names directly (6042/6052) and the immediate next class after this
+// chunk's own last rule (`IfcSweptSurface_WR1`, line 6928, correctly left for a future
+// chunk).
+//
+// **Three new rule-file-local EXPRESS-library helpers ported, each a REAL named Python
+// function** (none are `calc_*` DERIVE functions or WHERE-rule classes themselves, same
+// "third bucket" chunks 1-3's own header comments already established):
+// `ifcCorrectObjectAssignment` (`IFC2X3.py` line 7622, used by `IfcRelAssigns_WR1`),
+// `ifcCurveWeightsPositive` (line 7703, used by `IfcRationalBezierCurve_WR2`), and
+// `ifcShapeRepresentationTypes` (line 7979, a 15-branch `RepresentationType` keyword
+// dispatch, used by `IfcShapeRepresentation_WR24`). See each one's own doc comment
+// below.
+//
+// **Seven new rule-file-local helpers factored from repeated INLINE shapes (not real
+// named Python functions -- same "factor a byte-identical repeated inline assert shape"
+// precedent chunk 1's own `userDefinedOrHasAttribute` and chunk 2's own
+// `exactlyOneDimensionType` already established), disclosed**:
+// - `quantityUnitTypeOrAbsent` (4 uses: `IfcQuantityLength_WR21`/`IfcQuantityTime_WR21`/
+//   `IfcQuantityVolume_WR21`/`IfcQuantityWeight_WR21`) -- `not exists(Unit) or
+//   Unit.UnitType == <X>UNIT`.
+// - `quantityValueNonNegative` (5 uses: `IfcQuantityCount_WR21`/`IfcQuantityLength_WR22`/
+//   `IfcQuantityTime_WR22`/`IfcQuantityVolume_WR22`/`IfcQuantityWeight_WR22`) --
+//   `<X>Value >= 0.0`.
+// - `decomposedWithoutOwnRepresentation` (3 uses: `IfcRamp_WR1`/`IfcRoof_WR1`/
+//   `IfcStair_WR1`, byte-identical bodies) -- `hiindex(IsDecomposedBy) == 0 or
+//   (hiindex(IsDecomposedBy) == 1 and not exists(Representation))`.
+// - `relatingObjectNotInRelatedObjects` (7 uses: `IfcRelAssignsToActor_WR1`/
+//   `_ToControl_WR1`/`_ToGroup_WR1`/`_ToProcess_WR1`/`_ToProduct_WR1`/`_ToResource_WR1`,
+//   and `IfcRelDecomposes_WR31`) -- `sizeof([temp for temp in RelatedObjects if
+//   relatingX == temp]) == 0`, only the "relating" attribute name differs.
+// - `relatedElementsExcludeSpatialStructureElement` (2 uses:
+//   `IfcRelContainedInSpatialStructure_WR31`/`IfcRelReferencedInSpatialStructure_WR31`,
+//   byte-identical bodies) -- `sizeof([temp for temp in RelatedElements if
+//   IfcSpatialStructureElement in typeof(temp)]) == 0`.
+// - `atMostOneStyleOfType` (5 uses: `IfcSurfaceStyle_WR11..WR15`) -- `sizeof([style for
+//   style in Styles if <X> in typeof(style)]) <= 1`, only the type name differs.
+// - `appliedLoadIsExactlyOneOf` (4 uses: `IfcStructuralLinearAction_WR61`/
+//   `_PlanarAction_WR61`/`_PointAction_WR61`/`_PointReaction_WR61`) -- `sizeof([<2 named
+//   types> ] * typeof(AppliedLoad)) == 1`, only the 2-member type list differs (and
+//   `PointAction`/`PointReaction` happen to share theirs verbatim).
+//
+// **No new shared `runtimeShim.ts` primitive needed this chunk** -- every Tri-logic/
+// `ExpressSet` operation this chunk's 85 rules need (`triXor` for `IfcShapeModel_WR11`'s
+// own 3-way XOR, `ExpressSet.multiply`/`.equals` for `IfcShapeRepresentation_WR22`'s
+// membership-count check and `IfcRelNests_WR1`'s direct `typeof(...) == typeof(...)`
+// comparison) was already added by chunk 3.
+//
+// **One more real, verbatim-preserved upstream Python bug found, confirmed from first
+// principles, same shape as chunk 2's own `IfcDimensionCurveDirectedCallout_WR42`**:
+// `IfcStructuredDimensionCallout_WR31` (real source line 6794) computes `contents =
+// express_getattr(self, 'Contents', INDETERMINATE)` (correct capitalization) but never
+// reads that local -- its own list comprehension re-fetches `express_getattr(self,
+// 'contents', INDETERMINATE)` (all-lowercase attribute NAME). Re-derived independently
+// here, not just cited by analogy: this port's own `expressGetAttr` (`runtimeShim.ts`)
+// resolves an attribute NAME via a plain JS property read on the `EntityInstance`
+// Proxy (`(aggr as Record<string, unknown>)[name]`), which is case-sensitive -- a
+// lowercase `"contents"` property does not exist on any real entity (only `"Contents"`
+// does), so the read falls through to the `defaultValue` (`INDETERMINATE`) exactly the
+// way chunk 2's own `IfcDimensionCurveDirectedCallout_WR42` writeup already confirmed
+// empirically for the identical shape. `asList(INDETERMINATE)` (this file's own
+// established helper) collapses to `[]`, so BOTH of this rule's nested list
+// comprehensions are always empty, `sizeof([...]) == 0` is unconditionally `True`, and
+// this rule can never actually fail in either real Python or this port. Ported AS-IS
+// (the lowercase `'contents'` read, the dead `Contents`-cased local dropped, matching
+// WR42's own precedent of not porting an unused local JS has no no-op equivalent for).
+//
+// **No other rule-file-local EXPRESS-library helper (beyond the ten above) is called by
+// any of these 85 rules, and no other new real Python bug was found** -- confirmed by
+// reading every single body directly against real source (see the per-rule comments
+// below, each citing its own exact real-source line), not assumed from the dispatching
+// task brief's own citation.
+// =============================================================================
+
+/**
+ * Python: `IfcCorrectObjectAssignment(constraint, objects)` (`IFC2X3.py` line 7622):
+ * ```python
+ * def IfcCorrectObjectAssignment(constraint, objects):
+ *     count = 0
+ *     if not exists(constraint):
+ *         return True
+ *     if constraint == IfcObjectTypeEnum.NOTDEFINED:
+ *         return True
+ *     elif constraint == IfcObjectTypeEnum.PRODUCT:
+ *         return sizeof([temp for temp in objects if not IfcProduct in typeof(temp)]) == 0
+ *     ... (PROCESS/CONTROL/RESOURCE/ACTOR/GROUP/PROJECT, same shape) ...
+ *     else:
+ *         return None
+ * ```
+ * The dead local `count = 0` (immediately overwritten or never used on every real
+ * return path) is not ported, matching this project's established "don't port a
+ * genuinely dead local with no JS equivalent" precedent (e.g. chunk 2's own
+ * `IfcDimensionCurveDirectedCallout_WR42`). An absent/unmatched `constraint` maps to
+ * `INDETERMINATE`, mirroring `ifcCorrectLocalPlacement`'s own established `return None`
+ * -> `INDETERMINATE` convention.
+ */
+function ifcCorrectObjectAssignment(constraint: unknown, objects: unknown): Tri {
+	if (!exists(constraint)) return true;
+	if (triEq(constraint, "NOTDEFINED") === true) return true;
+	const list = asList(objects);
+	const noneViolate = (typeName: string) => list.filter((temp) => !typeOfAttr(temp).has(typeName)).length === 0;
+	if (triEq(constraint, "PRODUCT") === true) return noneViolate("ifc2x3.ifcproduct");
+	if (triEq(constraint, "PROCESS") === true) return noneViolate("ifc2x3.ifcprocess");
+	if (triEq(constraint, "CONTROL") === true) return noneViolate("ifc2x3.ifccontrol");
+	if (triEq(constraint, "RESOURCE") === true) return noneViolate("ifc2x3.ifcresource");
+	if (triEq(constraint, "ACTOR") === true) return noneViolate("ifc2x3.ifcactor");
+	if (triEq(constraint, "GROUP") === true) return noneViolate("ifc2x3.ifcgroup");
+	if (triEq(constraint, "PROJECT") === true) return noneViolate("ifc2x3.ifcproject");
+	return INDETERMINATE;
+}
+
+/**
+ * Python: `IfcCurveWeightsPositive(b)` (`IFC2X3.py` line 7703):
+ * ```python
+ * def IfcCurveWeightsPositive(b):
+ *     result = True
+ *     for i in range(0, express_getattr(b, 'UpperIndexOnControlPoints', INDETERMINATE) + 1):
+ *         if express_getitem(express_getattr(b, 'Weights', INDETERMINATE), i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE) <= 0.0:
+ *             result = False
+ *             return result
+ *     return result
+ * ```
+ * `result` is ported as an early `return false`, not a mutated local -- every real
+ * Python path that sets `result = False` immediately `return`s it on the very next
+ * line, so the mutation itself is dead; the only observable difference is the final
+ * fallthrough `return result`, ported as `return true` (the value `result` still holds
+ * at that point, since nothing else ever changes it). `UpperIndexOnControlPoints` is a
+ * DERIVE attribute (already wired by Phase EX-2); a genuinely `INDETERMINATE` value
+ * here is unreachable in practice for a real constructed instance, same disclaimer as
+ * `asList`'s own established one.
+ */
+function ifcCurveWeightsPositive(b: EntityInstance): boolean {
+	const weights = expressGetAttr(b, "Weights", INDETERMINATE);
+	const upperIndex = expressGetAttr(b, "UpperIndexOnControlPoints", INDETERMINATE) as number;
+	for (const i of expressRange(0, upperIndex + 1)) {
+		if (triLe(expressGetItem(weights, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE), 0.0) === true) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Python: `IfcShapeRepresentationTypes(reptype, items)` (`IFC2X3.py` line 7979) -- a
+ * 15-branch dispatch on `reptype.lower()` (each branch counts how many `items` members
+ * satisfy that `RepresentationType` keyword's own documented geometry-kind criterion),
+ * final `return count == sizeof(items)` (every `Items` member must satisfy its
+ * declared type's criterion, none left over). Falls through to `return None`
+ * (`INDETERMINATE`) for an undocumented keyword. The `'geometriccurveset'` branch has
+ * a genuinely distinct second pass (decrementing `count` for each `IfcGeometricSet`
+ * member that itself contains a surface -- ported as a second loop, matching real
+ * source exactly) and `'boundingbox'` has an extra `if sizeof(items) > 1: count = 0`
+ * override, both preserved verbatim.
+ */
+function ifcShapeRepresentationTypes(reptype: unknown, items: unknown): Tri {
+	const list = asList<EntityInstance>(items);
+	const kind = typeof reptype === "string" ? reptype.toLowerCase() : undefined;
+	let count: number;
+	switch (kind) {
+		case "curve2d":
+			count = list.filter(
+				(temp) =>
+					typeOfAttr(temp).has("ifc2x3.ifccurve") && triEq(expressGetAttr(temp, "Dim", INDETERMINATE), 2) === true,
+			).length;
+			break;
+		case "annotation2d":
+			count = list.filter(
+				(temp) =>
+					typeOfAttr(temp).multiply([
+						"ifc2x3.ifcpoint",
+						"ifc2x3.ifccurve",
+						"ifc2x3.ifcgeometriccurveset",
+						"ifc2x3.ifcannotationfillarea",
+						"ifc2x3.ifcdefinedsymbol",
+						"ifc2x3.ifctextliteral",
+						"ifc2x3.ifcdraughtingcallout",
+					]).size === 1,
+			).length;
+			break;
+		case "geometricset":
+			count = list.filter((temp) => {
+				const types = typeOfAttr(temp);
+				return (
+					types.has("ifc2x3.ifcgeometricset") ||
+					types.has("ifc2x3.ifcpoint") ||
+					types.has("ifc2x3.ifccurve") ||
+					types.has("ifc2x3.ifcsurface")
+				);
+			}).length;
+			break;
+		case "geometriccurveset": {
+			count = list.filter((temp) => {
+				const types = typeOfAttr(temp);
+				return (
+					types.has("ifc2x3.ifcgeometriccurveset") ||
+					types.has("ifc2x3.ifcgeometricset") ||
+					types.has("ifc2x3.ifcpoint") ||
+					types.has("ifc2x3.ifccurve")
+				);
+			}).length;
+			for (const item of list) {
+				if (typeOfAttr(item).has("ifc2x3.ifcgeometricset")) {
+					const elements = asList(expressGetAttr(item, "Elements", INDETERMINATE));
+					if (elements.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcsurface")).length > 0) {
+						count -= 1;
+					}
+				}
+			}
+			break;
+		}
+		case "surfacemodel":
+			count = list.filter(
+				(temp) =>
+					typeOfAttr(temp).multiply([
+						"ifc2x3.ifcshellbasedsurfacemodel",
+						"ifc2x3.ifcfacebasedsurfacemodel",
+						"ifc2x3.ifcfacetedbrep",
+						"ifc2x3.ifcfacetedbrepwithvoids",
+					]).size >= 1,
+			).length;
+			break;
+		case "solidmodel":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcsolidmodel")).length;
+			break;
+		case "sweptsolid":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcsweptareasolid")).length;
+			break;
+		case "csg":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcbooleanresult")).length;
+			break;
+		case "clipping":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcbooleanclippingresult")).length;
+			break;
+		case "advancedsweptsolid":
+			count = list.filter((temp) => {
+				const types = typeOfAttr(temp);
+				return types.has("ifc2x3.ifcsurfacecurvesweptareasolid") || types.has("ifc2x3.ifcsweptdisksolid");
+			}).length;
+			break;
+		case "brep":
+			count = list.filter((temp) => {
+				const types = typeOfAttr(temp);
+				return types.has("ifc2x3.ifcfacetedbrep") || types.has("ifc2x3.ifcfacetedbrepwithvoids");
+			}).length;
+			break;
+		case "boundingbox":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcboundingbox")).length;
+			if (list.length > 1) count = 0;
+			break;
+		case "sectionedspine":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcsectionedspine")).length;
+			break;
+		case "mappedrepresentation":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcmappeditem")).length;
+			break;
+		default:
+			return INDETERMINATE;
+	}
+	return count === list.length;
+}
+
+/**
+ * Shared shape repeated verbatim across `IfcQuantityLength_WR21`, `IfcQuantityTime_WR21`,
+ * `IfcQuantityVolume_WR21`, `IfcQuantityWeight_WR21` -- Python: `not exists(Unit) or
+ * Unit.UnitType == <X>UNIT` (only the expected `IfcUnitEnum` member differs).
+ */
+function quantityUnitTypeOrAbsent(self: EntityInstance, expectedUnitType: string): Tri {
+	const unit = expressGetAttr(self, "Unit", INDETERMINATE);
+	return pyOr(!exists(unit), () => triEq(expressGetAttr(unit, "UnitType", INDETERMINATE), expectedUnitType));
+}
+
+/**
+ * Shared shape repeated verbatim across `IfcQuantityCount_WR21`, `IfcQuantityLength_WR22`,
+ * `IfcQuantityTime_WR22`, `IfcQuantityVolume_WR22`, `IfcQuantityWeight_WR22` -- Python:
+ * `<X>Value >= 0.0` (only the attribute name differs).
+ */
+function quantityValueNonNegative(self: EntityInstance, attrName: string): Tri {
+	return triGe(expressGetAttr(self, attrName, INDETERMINATE), 0.0);
+}
+
+/**
+ * Shared shape repeated verbatim (modulo entity name) across `IfcRamp_WR1`,
+ * `IfcRoof_WR1`, `IfcStair_WR1` -- Python: `hiindex(IsDecomposedBy) == 0 or
+ * (hiindex(IsDecomposedBy) == 1 and not exists(Representation))`.
+ */
+function decomposedWithoutOwnRepresentation(self: EntityInstance): Tri {
+	const isDecomposedBy = expressGetAttr(self, "IsDecomposedBy", INDETERMINATE);
+	return pyOr(triEq(hiIndex(isDecomposedBy), 0), () =>
+		pyAnd(triEq(hiIndex(isDecomposedBy), 1), () => !exists(expressGetAttr(self, "Representation", INDETERMINATE))),
+	);
+}
+
+/**
+ * Shared shape repeated verbatim across `IfcRelAssignsToActor_WR1`,
+ * `IfcRelAssignsToControl_WR1`, `IfcRelAssignsToGroup_WR1`, `IfcRelAssignsToProcess_WR1`,
+ * `IfcRelAssignsToProduct_WR1`, `IfcRelAssignsToResource_WR1`, and `IfcRelDecomposes_WR31`
+ * -- Python: `sizeof([temp for temp in RelatedObjects if relatingX == temp]) == 0`, only
+ * the "relating" attribute name differs. `==` on possibly-entity-typed operands dispatches
+ * through `triEq` (`.equals()`, `settings.compareInstancesByValue`-aware), never a bare
+ * `===`.
+ */
+function relatingObjectNotInRelatedObjects(self: EntityInstance, relatingAttrName: string): boolean {
+	const relatingValue = expressGetAttr(self, relatingAttrName, INDETERMINATE);
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	return relatedObjects.filter((temp) => triEq(relatingValue, temp) === true).length === 0;
+}
+
+/**
+ * Shared shape repeated verbatim across `IfcRelContainedInSpatialStructure_WR31` and
+ * `IfcRelReferencedInSpatialStructure_WR31` -- Python: `sizeof([temp for temp in
+ * RelatedElements if 'ifc2x3.ifcspatialstructureelement' in typeof(temp)]) == 0`.
+ */
+function relatedElementsExcludeSpatialStructureElement(self: EntityInstance): boolean {
+	const relatedElements = asList(expressGetAttr(self, "RelatedElements", INDETERMINATE));
+	return relatedElements.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcspatialstructureelement")).length === 0;
+}
+
+/**
+ * Shared shape repeated verbatim (modulo the style type name) across
+ * `IfcSurfaceStyle_WR11..WR15` -- Python: `sizeof([style for style in Styles if <X> in
+ * typeof(style)]) <= 1`.
+ */
+function atMostOneStyleOfType(self: EntityInstance, typeName: string): boolean {
+	const styles = asList(expressGetAttr(self, "Styles", INDETERMINATE));
+	return styles.filter((style) => typeOfAttr(style).has(typeName)).length <= 1;
+}
+
+/**
+ * Shared shape repeated verbatim (modulo the 2-member type list) across
+ * `IfcStructuralLinearAction_WR61`, `IfcStructuralPlanarAction_WR61`,
+ * `IfcStructuralPointAction_WR61`, `IfcStructuralPointReaction_WR61` -- Python:
+ * `sizeof([<2 named types>] * typeof(AppliedLoad)) == 1`.
+ */
+function appliedLoadIsExactlyOneOf(self: EntityInstance, types: readonly string[]): boolean {
+	return typeOfAttr(expressGetAttr(self, "AppliedLoad", INDETERMINATE)).multiply(types).size === 1;
+}
+
+// =============================================================================
+// SCOPE = 'entity' rules, chunk 4 (real source lines 6052-6917, all 85 in this range).
+// =============================================================================
+
+// `IfcQuantityCount_WR21` (line 6052): `CountValue >= 0.0`.
+const IfcQuantityCount_WR21 = entityRule("IfcQuantityCount", "WR21", (self) => {
+	assertWhereRule(quantityValueNonNegative(self, "CountValue"), "IfcQuantityCount.CountValue must be >= 0.");
+});
+
+// `IfcQuantityLength_WR21` (line 6062): `not exists(Unit) or Unit.UnitType == LENGTHUNIT`.
+const IfcQuantityLength_WR21 = entityRule("IfcQuantityLength", "WR21", (self) => {
+	assertWhereRule(
+		quantityUnitTypeOrAbsent(self, "LENGTHUNIT"),
+		"IfcQuantityLength: if Unit is given, its UnitType must be LENGTHUNIT.",
+	);
+});
+
+// `IfcQuantityLength_WR22` (line 6071): `LengthValue >= 0.0`.
+const IfcQuantityLength_WR22 = entityRule("IfcQuantityLength", "WR22", (self) => {
+	assertWhereRule(quantityValueNonNegative(self, "LengthValue"), "IfcQuantityLength.LengthValue must be >= 0.");
+});
+
+// `IfcQuantityTime_WR21` (line 6081): `not exists(Unit) or Unit.UnitType == TIMEUNIT`.
+const IfcQuantityTime_WR21 = entityRule("IfcQuantityTime", "WR21", (self) => {
+	assertWhereRule(
+		quantityUnitTypeOrAbsent(self, "TIMEUNIT"),
+		"IfcQuantityTime: if Unit is given, its UnitType must be TIMEUNIT.",
+	);
+});
+
+// `IfcQuantityTime_WR22` (line 6090): `TimeValue >= 0.0`.
+const IfcQuantityTime_WR22 = entityRule("IfcQuantityTime", "WR22", (self) => {
+	assertWhereRule(quantityValueNonNegative(self, "TimeValue"), "IfcQuantityTime.TimeValue must be >= 0.");
+});
+
+// `IfcQuantityVolume_WR21` (line 6100): `not exists(Unit) or Unit.UnitType == VOLUMEUNIT`.
+const IfcQuantityVolume_WR21 = entityRule("IfcQuantityVolume", "WR21", (self) => {
+	assertWhereRule(
+		quantityUnitTypeOrAbsent(self, "VOLUMEUNIT"),
+		"IfcQuantityVolume: if Unit is given, its UnitType must be VOLUMEUNIT.",
+	);
+});
+
+// `IfcQuantityVolume_WR22` (line 6109): `VolumeValue >= 0.0`.
+const IfcQuantityVolume_WR22 = entityRule("IfcQuantityVolume", "WR22", (self) => {
+	assertWhereRule(quantityValueNonNegative(self, "VolumeValue"), "IfcQuantityVolume.VolumeValue must be >= 0.");
+});
+
+// `IfcQuantityWeight_WR21` (line 6119): `not exists(Unit) or Unit.UnitType == MASSUNIT`.
+const IfcQuantityWeight_WR21 = entityRule("IfcQuantityWeight", "WR21", (self) => {
+	assertWhereRule(
+		quantityUnitTypeOrAbsent(self, "MASSUNIT"),
+		"IfcQuantityWeight: if Unit is given, its UnitType must be MASSUNIT.",
+	);
+});
+
+// `IfcQuantityWeight_WR22` (line 6128): `WeightValue >= 0.0`.
+const IfcQuantityWeight_WR22 = entityRule("IfcQuantityWeight", "WR22", (self) => {
+	assertWhereRule(quantityValueNonNegative(self, "WeightValue"), "IfcQuantityWeight.WeightValue must be >= 0.");
+});
+
+// `IfcRailing_WR61` (line 6138): `not exists(PredefinedType) or PredefinedType !=
+// USERDEFINED or (PredefinedType == USERDEFINED and exists(ObjectType))` -- the leading
+// `not exists(...)` term composes with the already-established `userDefinedOrHasAttribute`
+// helper for the remaining 2 terms (see that helper's own doc comment).
+const IfcRailing_WR61 = entityRule("IfcRailing", "WR61", (self) => {
+	const predefinedType = expressGetAttr(self, "PredefinedType", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(predefinedType), () => userDefinedOrHasAttribute(self, "PredefinedType", "ObjectType")),
+		"IfcRailing: if PredefinedType is given and is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcRamp_WR1` (line 6148): see `decomposedWithoutOwnRepresentation`'s own doc comment.
+const IfcRamp_WR1 = entityRule("IfcRamp", "WR1", (self) => {
+	assertWhereRule(
+		decomposedWithoutOwnRepresentation(self),
+		"IfcRamp: IsDecomposedBy must have at most 1 member, and if it has exactly 1, Representation must be unset.",
+	);
+});
+
+// `IfcRationalBezierCurve_WR1` (line 6157): `sizeof(WeightsData) ==
+// sizeof(ControlPointsList)`.
+const IfcRationalBezierCurve_WR1 = entityRule("IfcRationalBezierCurve", "WR1", (self) => {
+	const weightsData = expressGetAttr(self, "WeightsData", INDETERMINATE);
+	const controlPointsList = expressGetAttr(self, "ControlPointsList", INDETERMINATE);
+	assertWhereRule(
+		triEq(sizeof(weightsData), sizeof(controlPointsList)),
+		"IfcRationalBezierCurve: WeightsData and ControlPointsList must have the same size.",
+	);
+});
+
+// `IfcRationalBezierCurve_WR2` (line 6167): `IfcCurveWeightsPositive(self)`.
+const IfcRationalBezierCurve_WR2 = entityRule("IfcRationalBezierCurve", "WR2", (self) => {
+	assertWhereRule(
+		ifcCurveWeightsPositive(self),
+		"IfcRationalBezierCurve: every Weights value must be greater than 0 (see IfcCurveWeightsPositive).",
+	);
+});
+
+// `IfcRectangleHollowProfileDef_WR31` (line 6180): `WallThickness < XDim / 2.0 and
+// WallThickness < YDim / 2.0`.
+const IfcRectangleHollowProfileDef_WR31 = entityRule("IfcRectangleHollowProfileDef", "WR31", (self) => {
+	const wallThickness = expressGetAttr(self, "WallThickness", INDETERMINATE);
+	const xDim = expressGetAttr(self, "XDim", INDETERMINATE);
+	const yDim = expressGetAttr(self, "YDim", INDETERMINATE);
+	assertWhereRule(
+		pyAnd(triLt(wallThickness, triDiv(xDim, 2.0)), () => triLt(wallThickness, triDiv(yDim, 2.0))),
+		"IfcRectangleHollowProfileDef.WallThickness must be less than half of both XDim and YDim.",
+	);
+});
+
+// `IfcRectangleHollowProfileDef_WR32` (line 6190): `not exists(OuterFilletRadius) or
+// (OuterFilletRadius <= XDim / 2.0 and OuterFilletRadius <= YDim / 2.0)`.
+const IfcRectangleHollowProfileDef_WR32 = entityRule("IfcRectangleHollowProfileDef", "WR32", (self) => {
+	const outerFilletRadius = expressGetAttr(self, "OuterFilletRadius", INDETERMINATE);
+	const xDim = expressGetAttr(self, "XDim", INDETERMINATE);
+	const yDim = expressGetAttr(self, "YDim", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(outerFilletRadius), () =>
+			pyAnd(triLe(outerFilletRadius, triDiv(xDim, 2.0)), () => triLe(outerFilletRadius, triDiv(yDim, 2.0))),
+		),
+		"IfcRectangleHollowProfileDef: if OuterFilletRadius is given, it must be at most half of both XDim and YDim.",
+	);
+});
+
+// `IfcRectangleHollowProfileDef_WR33` (line 6200): `not exists(InnerFilletRadius) or
+// (InnerFilletRadius <= XDim / 2.0 - WallThickness and InnerFilletRadius <= YDim / 2.0 -
+// WallThickness)`.
+const IfcRectangleHollowProfileDef_WR33 = entityRule("IfcRectangleHollowProfileDef", "WR33", (self) => {
+	const wallThickness = expressGetAttr(self, "WallThickness", INDETERMINATE) as number;
+	const innerFilletRadius = expressGetAttr(self, "InnerFilletRadius", INDETERMINATE);
+	const xDim = expressGetAttr(self, "XDim", INDETERMINATE);
+	const yDim = expressGetAttr(self, "YDim", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(innerFilletRadius), () =>
+			pyAnd(triLe(innerFilletRadius, (triDiv(xDim, 2.0) as number) - wallThickness), () =>
+				triLe(innerFilletRadius, (triDiv(yDim, 2.0) as number) - wallThickness),
+			),
+		),
+		"IfcRectangleHollowProfileDef: if InnerFilletRadius is given, it must be at most half of both XDim and YDim, each reduced by WallThickness.",
+	);
+});
+
+// `IfcRectangularTrimmedSurface_WR1` (line 6211): `U1 != U2`.
+const IfcRectangularTrimmedSurface_WR1 = entityRule("IfcRectangularTrimmedSurface", "WR1", (self) => {
+	const u1 = expressGetAttr(self, "U1", INDETERMINATE);
+	const u2 = expressGetAttr(self, "U2", INDETERMINATE);
+	assertWhereRule(triNe(u1, u2), "IfcRectangularTrimmedSurface: U1 must not equal U2.");
+});
+
+// `IfcRectangularTrimmedSurface_WR2` (line 6222): `V1 != V2`.
+const IfcRectangularTrimmedSurface_WR2 = entityRule("IfcRectangularTrimmedSurface", "WR2", (self) => {
+	const v1 = expressGetAttr(self, "V1", INDETERMINATE);
+	const v2 = expressGetAttr(self, "V2", INDETERMINATE);
+	assertWhereRule(triNe(v1, v2), "IfcRectangularTrimmedSurface: V1 must not equal V2.");
+});
+
+// `IfcRectangularTrimmedSurface_WR3` (line 6233): `(IfcElementarySurface in
+// typeof(BasisSurface) and not IfcPlane in typeof(BasisSurface)) or
+// IfcSurfaceOfRevolution in typeof(BasisSurface) or Usense == (U2 > U1)`.
+const IfcRectangularTrimmedSurface_WR3 = entityRule("IfcRectangularTrimmedSurface", "WR3", (self) => {
+	const basisSurface = expressGetAttr(self, "BasisSurface", INDETERMINATE);
+	const u1 = expressGetAttr(self, "U1", INDETERMINATE);
+	const u2 = expressGetAttr(self, "U2", INDETERMINATE);
+	const usense = expressGetAttr(self, "Usense", INDETERMINATE);
+	const basisTypes = typeOfAttr(basisSurface);
+	const isElementarySurfaceNotPlane =
+		basisTypes.has("ifc2x3.ifcelementarysurface") && !basisTypes.has("ifc2x3.ifcplane");
+	const isSurfaceOfRevolution = basisTypes.has("ifc2x3.ifcsurfaceofrevolution");
+	assertWhereRule(
+		pyOr(isElementarySurfaceNotPlane, () => pyOr(isSurfaceOfRevolution, () => triEq(usense, triGt(u2, u1)))),
+		"IfcRectangularTrimmedSurface: BasisSurface/Usense/U1/U2 combination is invalid (see real EXPRESS WR3).",
+	);
+});
+
+// `IfcRectangularTrimmedSurface_WR4` (line 6246): `Vsense == (V2 > V1)`.
+const IfcRectangularTrimmedSurface_WR4 = entityRule("IfcRectangularTrimmedSurface", "WR4", (self) => {
+	const v1 = expressGetAttr(self, "V1", INDETERMINATE);
+	const v2 = expressGetAttr(self, "V2", INDETERMINATE);
+	const vsense = expressGetAttr(self, "Vsense", INDETERMINATE);
+	assertWhereRule(triEq(vsense, triGt(v2, v1)), "IfcRectangularTrimmedSurface: Vsense must equal (V2 > V1).");
+});
+
+// `IfcReinforcingBar_WR1` (line 6262): same shape as `userDefinedOrHasAttribute`
+// (`BarRole`/`ObjectType`).
+const IfcReinforcingBar_WR1 = entityRule("IfcReinforcingBar", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "BarRole", "ObjectType"),
+		"IfcReinforcingBar: if BarRole is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcRelAssigns_WR1` (line 6272): `IfcCorrectObjectAssignment(RelatedObjectsType,
+// RelatedObjects)`.
+const IfcRelAssigns_WR1 = entityRule("IfcRelAssigns", "WR1", (self) => {
+	const relatedObjects = expressGetAttr(self, "RelatedObjects", INDETERMINATE);
+	const relatedObjectsType = expressGetAttr(self, "RelatedObjectsType", INDETERMINATE);
+	assertWhereRule(
+		ifcCorrectObjectAssignment(relatedObjectsType, relatedObjects),
+		"IfcRelAssigns: RelatedObjects do not match RelatedObjectsType (see IfcCorrectObjectAssignment).",
+	);
+});
+
+// `IfcRelAssignsTasks_WR1` (line 6283): `hiindex(RelatedObjects) == 1`.
+const IfcRelAssignsTasks_WR1 = entityRule("IfcRelAssignsTasks", "WR1", (self) => {
+	const relatedObjects = expressGetAttr(self, "RelatedObjects", INDETERMINATE);
+	assertWhereRule(triEq(hiIndex(relatedObjects), 1), "IfcRelAssignsTasks.RelatedObjects must have exactly 1 member.");
+});
+
+// `IfcRelAssignsTasks_WR2` (line 6292): `IfcTask in typeof(RelatedObjects[1])`.
+const IfcRelAssignsTasks_WR2 = entityRule("IfcRelAssignsTasks", "WR2", (self) => {
+	const relatedObjects = expressGetAttr(self, "RelatedObjects", INDETERMINATE);
+	const first = expressGetItem(relatedObjects, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	assertWhereRule(typeOfAttr(first).has("ifc2x3.ifctask"), "IfcRelAssignsTasks: RelatedObjects[1] must be an IfcTask.");
+});
+
+// `IfcRelAssignsTasks_WR3` (line 6301): `IfcWorkControl in typeof(RelatingControl)`.
+const IfcRelAssignsTasks_WR3 = entityRule("IfcRelAssignsTasks", "WR3", (self) => {
+	const relatingControl = expressGetAttr(self, "RelatingControl", INDETERMINATE);
+	assertWhereRule(
+		typeOfAttr(relatingControl).has("ifc2x3.ifcworkcontrol"),
+		"IfcRelAssignsTasks.RelatingControl must be an IfcWorkControl.",
+	);
+});
+
+// `IfcRelAssignsToActor_WR1` (line 6310): see `relatingObjectNotInRelatedObjects`'s own
+// doc comment (`RelatingActor`).
+const IfcRelAssignsToActor_WR1 = entityRule("IfcRelAssignsToActor", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingActor"),
+		"IfcRelAssignsToActor: RelatingActor must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssignsToControl_WR1` (line 6320): same shape (`RelatingControl`).
+const IfcRelAssignsToControl_WR1 = entityRule("IfcRelAssignsToControl", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingControl"),
+		"IfcRelAssignsToControl: RelatingControl must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssignsToGroup_WR1` (line 6330): same shape (`RelatingGroup`).
+const IfcRelAssignsToGroup_WR1 = entityRule("IfcRelAssignsToGroup", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingGroup"),
+		"IfcRelAssignsToGroup: RelatingGroup must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssignsToProcess_WR1` (line 6340): same shape (`RelatingProcess`).
+const IfcRelAssignsToProcess_WR1 = entityRule("IfcRelAssignsToProcess", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingProcess"),
+		"IfcRelAssignsToProcess: RelatingProcess must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssignsToProduct_WR1` (line 6350): same shape (`RelatingProduct`).
+const IfcRelAssignsToProduct_WR1 = entityRule("IfcRelAssignsToProduct", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingProduct"),
+		"IfcRelAssignsToProduct: RelatingProduct must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssignsToResource_WR1` (line 6360): same shape (`RelatingResource`).
+const IfcRelAssignsToResource_WR1 = entityRule("IfcRelAssignsToResource", "WR1", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingResource"),
+		"IfcRelAssignsToResource: RelatingResource must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelAssociates_WR21` (line 6370): `sizeof([temp for temp in RelatedObjects if not
+// (IfcObjectDefinition in typeof(temp) or IfcPropertyDefinition in typeof(temp))]) == 0`.
+const IfcRelAssociates_WR21 = entityRule("IfcRelAssociates", "WR21", (self) => {
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => {
+		const types = typeOfAttr(temp);
+		return !(types.has("ifc2x3.ifcobjectdefinition") || types.has("ifc2x3.ifcpropertydefinition"));
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcRelAssociates: every RelatedObjects member must be an IfcObjectDefinition or IfcPropertyDefinition.",
+	);
+});
+
+// `IfcRelAssociatesMaterial_WR21` (line 6380): `sizeof([temp for temp in RelatedObjects
+// if IfcFeatureElementSubtraction in typeof(temp) or IfcVirtualElement in
+// typeof(temp)]) == 0`.
+const IfcRelAssociatesMaterial_WR21 = entityRule("IfcRelAssociatesMaterial", "WR21", (self) => {
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => {
+		const types = typeOfAttr(temp);
+		return types.has("ifc2x3.ifcfeatureelementsubtraction") || types.has("ifc2x3.ifcvirtualelement");
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcRelAssociatesMaterial: no RelatedObjects member may be an IfcFeatureElementSubtraction or IfcVirtualElement.",
+	);
+});
+
+// `IfcRelAssociatesMaterial_WR22` (line 6389): `sizeof([temp for temp in RelatedObjects
+// if not IfcProduct in typeof(temp) and not IfcTypeProduct in typeof(temp)]) == 0`.
+const IfcRelAssociatesMaterial_WR22 = entityRule("IfcRelAssociatesMaterial", "WR22", (self) => {
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => {
+		const types = typeOfAttr(temp);
+		return !types.has("ifc2x3.ifcproduct") && !types.has("ifc2x3.ifctypeproduct");
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcRelAssociatesMaterial: every RelatedObjects member must be an IfcProduct or IfcTypeProduct.",
+	);
+});
+
+// `IfcRelConnectsElements_WR31` (line 6398): `RelatingElement != RelatedElement`.
+const IfcRelConnectsElements_WR31 = entityRule("IfcRelConnectsElements", "WR31", (self) => {
+	const relatingElement = expressGetAttr(self, "RelatingElement", INDETERMINATE);
+	const relatedElement = expressGetAttr(self, "RelatedElement", INDETERMINATE);
+	assertWhereRule(
+		triNe(relatingElement, relatedElement),
+		"IfcRelConnectsElements: RelatingElement must not equal RelatedElement.",
+	);
+});
+
+// `IfcRelContainedInSpatialStructure_WR31` (line 6409): see
+// `relatedElementsExcludeSpatialStructureElement`'s own doc comment.
+const IfcRelContainedInSpatialStructure_WR31 = entityRule("IfcRelContainedInSpatialStructure", "WR31", (self) => {
+	assertWhereRule(
+		relatedElementsExcludeSpatialStructureElement(self),
+		"IfcRelContainedInSpatialStructure: no RelatedElements member may be an IfcSpatialStructureElement.",
+	);
+});
+
+// `IfcRelDecomposes_WR31` (line 6419): see `relatingObjectNotInRelatedObjects`'s own doc
+// comment (`RelatingObject`).
+const IfcRelDecomposes_WR31 = entityRule("IfcRelDecomposes", "WR31", (self) => {
+	assertWhereRule(
+		relatingObjectNotInRelatedObjects(self, "RelatingObject"),
+		"IfcRelDecomposes: RelatingObject must not also appear in RelatedObjects.",
+	);
+});
+
+// `IfcRelNests_WR1` (line 6430): `sizeof([temp for temp in RelatedObjects if not
+// typeof(RelatingObject) == typeof(temp)]) == 0`.
+const IfcRelNests_WR1 = entityRule("IfcRelNests", "WR1", (self) => {
+	const relatingObject = expressGetAttr(self, "RelatingObject", INDETERMINATE);
+	const relatingTypes = typeOfAttr(relatingObject);
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => !relatingTypes.equals(typeOfAttr(temp))).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcRelNests: every RelatedObjects member must have the exact same declared type set as RelatingObject.",
+	);
+});
+
+// `IfcRelOverridesProperties_WR1` (line 6439): `sizeof(RelatedObjects) == 1`.
+const IfcRelOverridesProperties_WR1 = entityRule("IfcRelOverridesProperties", "WR1", (self) => {
+	const relatedObjects = expressGetAttr(self, "RelatedObjects", INDETERMINATE);
+	assertWhereRule(
+		triEq(sizeof(relatedObjects), 1),
+		"IfcRelOverridesProperties.RelatedObjects must have exactly 1 member.",
+	);
+});
+
+// `IfcRelReferencedInSpatialStructure_WR31` (line 6448): same shape as
+// `IfcRelContainedInSpatialStructure_WR31` (see `relatedElementsExcludeSpatialStructureElement`).
+const IfcRelReferencedInSpatialStructure_WR31 = entityRule("IfcRelReferencedInSpatialStructure", "WR31", (self) => {
+	assertWhereRule(
+		relatedElementsExcludeSpatialStructureElement(self),
+		"IfcRelReferencedInSpatialStructure: no RelatedElements member may be an IfcSpatialStructureElement.",
+	);
+});
+
+// `IfcRelSchedulesCostItems_WR11` (line 6458): `sizeof([temp for temp in RelatedObjects
+// if not IfcCostItem in typeof(temp)]) == 0`.
+const IfcRelSchedulesCostItems_WR11 = entityRule("IfcRelSchedulesCostItems", "WR11", (self) => {
+	const relatedObjects = asList(expressGetAttr(self, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifccostitem")).length;
+	assertWhereRule(violating === 0, "IfcRelSchedulesCostItems: every RelatedObjects member must be an IfcCostItem.");
+});
+
+// `IfcRelSchedulesCostItems_WR12` (line 6467): `IfcCostSchedule in typeof(RelatingControl)`.
+const IfcRelSchedulesCostItems_WR12 = entityRule("IfcRelSchedulesCostItems", "WR12", (self) => {
+	const relatingControl = expressGetAttr(self, "RelatingControl", INDETERMINATE);
+	assertWhereRule(
+		typeOfAttr(relatingControl).has("ifc2x3.ifccostschedule"),
+		"IfcRelSchedulesCostItems.RelatingControl must be an IfcCostSchedule.",
+	);
+});
+
+// `IfcRelSequence_WR1` (line 6476): `RelatingProcess != RelatedProcess`.
+const IfcRelSequence_WR1 = entityRule("IfcRelSequence", "WR1", (self) => {
+	const relatingProcess = expressGetAttr(self, "RelatingProcess", INDETERMINATE);
+	const relatedProcess = expressGetAttr(self, "RelatedProcess", INDETERMINATE);
+	assertWhereRule(
+		triNe(relatingProcess, relatedProcess),
+		"IfcRelSequence: RelatingProcess must not equal RelatedProcess.",
+	);
+});
+
+// `IfcRelSpaceBoundary_WR1` (line 6487): `(PhysicalOrVirtualBoundary == PHYSICAL and
+// exists(RelatedBuildingElement) and not IfcVirtualElement in
+// typeof(RelatedBuildingElement)) or (PhysicalOrVirtualBoundary == VIRTUAL and (not
+// exists(RelatedBuildingElement) or IfcVirtualElement in typeof(RelatedBuildingElement)))
+// or PhysicalOrVirtualBoundary == NOTDEFINED`.
+const IfcRelSpaceBoundary_WR1 = entityRule("IfcRelSpaceBoundary", "WR1", (self) => {
+	const relatedBuildingElement = expressGetAttr(self, "RelatedBuildingElement", INDETERMINATE);
+	const physicalOrVirtualBoundary = expressGetAttr(self, "PhysicalOrVirtualBoundary", INDETERMINATE);
+	const physicalCase = pyAnd(triEq(physicalOrVirtualBoundary, "PHYSICAL"), () =>
+		pyAnd(exists(relatedBuildingElement), () => !typeOfAttr(relatedBuildingElement).has("ifc2x3.ifcvirtualelement")),
+	);
+	const virtualCase = pyAnd(triEq(physicalOrVirtualBoundary, "VIRTUAL"), () =>
+		pyOr(!exists(relatedBuildingElement), () => typeOfAttr(relatedBuildingElement).has("ifc2x3.ifcvirtualelement")),
+	);
+	assertWhereRule(
+		pyOr(physicalCase, () => pyOr(virtualCase, () => triEq(physicalOrVirtualBoundary, "NOTDEFINED"))),
+		"IfcRelSpaceBoundary: PhysicalOrVirtualBoundary/RelatedBuildingElement combination is invalid (see real EXPRESS WR1).",
+	);
+});
+
+// `IfcRevolvedAreaSolid_WR31` (line 6498): `Axis.Location.Coordinates[3] == 0.0`.
+const IfcRevolvedAreaSolid_WR31 = entityRule("IfcRevolvedAreaSolid", "WR31", (self) => {
+	const axis = expressGetAttr(self, "Axis", INDETERMINATE);
+	const location = expressGetAttr(axis, "Location", INDETERMINATE);
+	const coordinates = expressGetAttr(location, "Coordinates", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetItem(coordinates, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE), 0.0),
+		"IfcRevolvedAreaSolid: Axis.Location's 3rd coordinate must equal 0.",
+	);
+});
+
+// `IfcRevolvedAreaSolid_WR32` (line 6508): `Axis.Z.DirectionRatios[3] == 0.0`.
+const IfcRevolvedAreaSolid_WR32 = entityRule("IfcRevolvedAreaSolid", "WR32", (self) => {
+	const axis = expressGetAttr(self, "Axis", INDETERMINATE);
+	const z = expressGetAttr(axis, "Z", INDETERMINATE);
+	const directionRatios = expressGetAttr(z, "DirectionRatios", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetItem(directionRatios, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE), 0.0),
+		"IfcRevolvedAreaSolid: Axis.Z's 3rd direction ratio must equal 0.",
+	);
+});
+
+// `IfcRoof_WR1` (line 6522): see `decomposedWithoutOwnRepresentation`'s own doc comment.
+const IfcRoof_WR1 = entityRule("IfcRoof", "WR1", (self) => {
+	assertWhereRule(
+		decomposedWithoutOwnRepresentation(self),
+		"IfcRoof: IsDecomposedBy must have at most 1 member, and if it has exactly 1, Representation must be unset.",
+	);
+});
+
+// `IfcRoundedRectangleProfileDef_WR31` (line 6531): `RoundingRadius <= XDim / 2.0 and
+// RoundingRadius <= YDim / 2.0`.
+const IfcRoundedRectangleProfileDef_WR31 = entityRule("IfcRoundedRectangleProfileDef", "WR31", (self) => {
+	const roundingRadius = expressGetAttr(self, "RoundingRadius", INDETERMINATE);
+	const xDim = expressGetAttr(self, "XDim", INDETERMINATE);
+	const yDim = expressGetAttr(self, "YDim", INDETERMINATE);
+	assertWhereRule(
+		pyAnd(triLe(roundingRadius, triDiv(xDim, 2.0)), () => triLe(roundingRadius, triDiv(yDim, 2.0))),
+		"IfcRoundedRectangleProfileDef.RoundingRadius must be at most half of both XDim and YDim.",
+	);
+});
+
+// `IfcSectionedSpine_WR1` (line 6544): `sizeof(CrossSections) ==
+// sizeof(CrossSectionPositions)`.
+const IfcSectionedSpine_WR1 = entityRule("IfcSectionedSpine", "WR1", (self) => {
+	const crossSections = expressGetAttr(self, "CrossSections", INDETERMINATE);
+	const crossSectionPositions = expressGetAttr(self, "CrossSectionPositions", INDETERMINATE);
+	assertWhereRule(
+		triEq(sizeof(crossSections), sizeof(crossSectionPositions)),
+		"IfcSectionedSpine: CrossSections and CrossSectionPositions must have the same size.",
+	);
+});
+
+// `IfcSectionedSpine_WR2` (line 6555): `sizeof([temp for temp in CrossSections if
+// CrossSections[1].ProfileType != temp.ProfileType]) == 0`.
+const IfcSectionedSpine_WR2 = entityRule("IfcSectionedSpine", "WR2", (self) => {
+	const crossSections = expressGetAttr(self, "CrossSections", INDETERMINATE);
+	const list = asList<EntityInstance>(crossSections);
+	const first = expressGetItem(list, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const firstProfileType = expressGetAttr(first, "ProfileType", INDETERMINATE);
+	const violating = list.filter(
+		(temp) => triNe(firstProfileType, expressGetAttr(temp, "ProfileType", INDETERMINATE)) === true,
+	).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcSectionedSpine: every CrossSections member must share the first member's ProfileType.",
+	);
+});
+
+// `IfcSectionedSpine_WR3` (line 6565): `SpineCurve.Dim == 3`.
+const IfcSectionedSpine_WR3 = entityRule("IfcSectionedSpine", "WR3", (self) => {
+	const spineCurve = expressGetAttr(self, "SpineCurve", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetAttr(spineCurve, "Dim", INDETERMINATE), 3),
+		"IfcSectionedSpine.SpineCurve.Dim must equal 3.",
+	);
+});
+
+// `IfcServiceLifeFactor_WR31` (line 6578): `not PredefinedType == USERDEFINED or
+// exists(ObjectType)` -- `not (X == Y)` is Python's own `not`, which always collapses to
+// a definite boolean (`pyNot`), NOT the same as `triNe(X, Y)` (which poisons on an
+// indeterminate operand) -- ported via `pyNot(triEq(...))` to preserve that distinction
+// exactly, matching this file's own established convention (see e.g.
+// `ifcCorrectLocalPlacement`'s own doc comment for the same collapse-to-definite-boolean
+// caveat).
+//
+// **A genuine, confirmed real-schema finding, disclosed (not a Python bug -- an inherent
+// schema fact)**: real `IfcServiceLifeFactor` is a subtype of
+// `IfcResourceLevelInformation` (`GlobalId`/`OwnerHistory`/`Name`/`Description`/
+// `PredefinedType`/`UpperValue`/`MostUsedValue`/`LowerValue`, confirmed directly against
+// this port's own native schema introspection -- NOT a subtype of `IfcObject`), so it has
+// NO `ObjectType` attribute at all, on either real Python or this port. `express_getattr(
+// self, 'ObjectType', INDETERMINATE)` therefore always resolves to `INDETERMINATE` in
+// both (real Python's `getattr(obj, name, default)` 3-arg form silently catches the
+// `AttributeError` a genuinely undeclared attribute name raises; this port's own
+// `expressGetAttr` does the equivalent via its own try/catch, see its doc comment) --
+// meaning `exists(ObjectType)` can never be `true`, and this rule's own `... or
+// exists(ObjectType)` escape hatch is PERMANENTLY unreachable for any real instance of
+// this entity. The rule is therefore ported and behaves faithfully as written (matching
+// real Python's own equally-unreachable escape hatch verbatim, not "fixed" into
+// something that reads a different, made-up attribute) -- confirmed empirically while
+// writing this chunk's own test fixtures (`test/express/whereRules/ifc2x3.test.ts`),
+// which could not even construct a "USERDEFINED with ObjectType given" fixture (this
+// port's own `.set()` throws immediately for a genuinely undeclared attribute name,
+// unlike the read path's graceful catch) and documents this finding there too.
+const IfcServiceLifeFactor_WR31 = entityRule("IfcServiceLifeFactor", "WR31", (self) => {
+	const predefinedType = expressGetAttr(self, "PredefinedType", INDETERMINATE);
+	assertWhereRule(
+		pyOr(pyNot(triEq(predefinedType, "USERDEFINED")), () => exists(expressGetAttr(self, "ObjectType", INDETERMINATE))),
+		"IfcServiceLifeFactor: if PredefinedType is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcShapeModel_WR11` (line 6588): `(sizeof(OfProductRepresentation) == 1) ^
+// (sizeof(RepresentationMap) == 1) ^ (sizeof(OfShapeAspect) == 1)`.
+const IfcShapeModel_WR11 = entityRule("IfcShapeModel", "WR11", (self) => {
+	const ofShapeAspect = expressGetAttr(self, "OfShapeAspect", INDETERMINATE);
+	const ofProductRepresentation = expressGetAttr(self, "OfProductRepresentation", INDETERMINATE);
+	const representationMap = expressGetAttr(self, "RepresentationMap", INDETERMINATE);
+	assertWhereRule(
+		triXor(
+			triXor(triEq(sizeof(ofProductRepresentation), 1), triEq(sizeof(representationMap), 1)),
+			triEq(sizeof(ofShapeAspect), 1),
+		),
+		"IfcShapeModel: exactly one of OfProductRepresentation, RepresentationMap, OfShapeAspect must have exactly 1 member (XOR).",
+	);
+});
+
+// `IfcShapeRepresentation_WR21` (line 6598): `IfcGeometricRepresentationContext in
+// typeof(ContextOfItems)`.
+const IfcShapeRepresentation_WR21 = entityRule("IfcShapeRepresentation", "WR21", (self) => {
+	const contextOfItems = expressGetAttr(self, "ContextOfItems", INDETERMINATE);
+	assertWhereRule(
+		typeOfAttr(contextOfItems).has("ifc2x3.ifcgeometricrepresentationcontext"),
+		"IfcShapeRepresentation.ContextOfItems must be an IfcGeometricRepresentationContext.",
+	);
+});
+
+// `IfcShapeRepresentation_WR22` (line 6607): `sizeof([temp for temp in Items if
+// IfcTopologicalRepresentationItem in typeof(temp) and not sizeof([IfcVertexPoint,
+// IfcEdgeCurve, IfcFaceSurface] * typeof(temp)) == 1]) == 0`.
+const IfcShapeRepresentation_WR22 = entityRule("IfcShapeRepresentation", "WR22", (self) => {
+	const items = asList(expressGetAttr(self, "Items", INDETERMINATE));
+	const violating = items.filter((temp) => {
+		const types = typeOfAttr(temp);
+		return (
+			types.has("ifc2x3.ifctopologicalrepresentationitem") &&
+			types.multiply(["ifc2x3.ifcvertexpoint", "ifc2x3.ifcedgecurve", "ifc2x3.ifcfacesurface"]).size !== 1
+		);
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcShapeRepresentation: every IfcTopologicalRepresentationItem member of Items must be exactly one of IfcVertexPoint, IfcEdgeCurve, IfcFaceSurface.",
+	);
+});
+
+// `IfcShapeRepresentation_WR23` (line 6617): `exists(RepresentationType)`.
+const IfcShapeRepresentation_WR23 = entityRule("IfcShapeRepresentation", "WR23", (self) => {
+	const representationType = expressGetAttr(self, "RepresentationType", INDETERMINATE);
+	assertWhereRule(exists(representationType), "IfcShapeRepresentation.RepresentationType must be given.");
+});
+
+// `IfcShapeRepresentation_WR24` (line 6626): `IfcShapeRepresentationTypes(RepresentationType, Items)`.
+const IfcShapeRepresentation_WR24 = entityRule("IfcShapeRepresentation", "WR24", (self) => {
+	const representationType = expressGetAttr(self, "RepresentationType", INDETERMINATE);
+	const items = expressGetAttr(self, "Items", INDETERMINATE);
+	assertWhereRule(
+		ifcShapeRepresentationTypes(representationType, items),
+		"IfcShapeRepresentation: Items do not match the declared RepresentationType (see IfcShapeRepresentationTypes).",
+	);
+});
+
+// `IfcSlab_WR61` (line 6638): same shape as `IfcRailing_WR61` (`PredefinedType`/`ObjectType`).
+const IfcSlab_WR61 = entityRule("IfcSlab", "WR61", (self) => {
+	const predefinedType = expressGetAttr(self, "PredefinedType", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(predefinedType), () => userDefinedOrHasAttribute(self, "PredefinedType", "ObjectType")),
+		"IfcSlab: if PredefinedType is given and is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcSpaceHeaterType_WR1` (line 6651): same shape as `userDefinedOrHasAttribute`
+// (`PredefinedType`/`ElementType`).
+const IfcSpaceHeaterType_WR1 = entityRule("IfcSpaceHeaterType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcSpaceHeaterType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcSpatialStructureElement_WR41` (line 6661): `hiindex(Decomposes) == 1 and
+// IfcRelAggregates in typeof(Decomposes[1]) and (IfcProject in
+// typeof(Decomposes[1].RelatingObject) or IfcSpatialStructureElement in
+// typeof(Decomposes[1].RelatingObject))`.
+const IfcSpatialStructureElement_WR41 = entityRule("IfcSpatialStructureElement", "WR41", (self) => {
+	const decomposes = expressGetAttr(self, "Decomposes", INDETERMINATE);
+	const first = () => expressGetItem(decomposes, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	assertWhereRule(
+		pyAnd(triEq(hiIndex(decomposes), 1), () =>
+			pyAnd(typeOfAttr(first()).has("ifc2x3.ifcrelaggregates"), () => {
+				const relatingObject = expressGetAttr(first(), "RelatingObject", INDETERMINATE);
+				const types = typeOfAttr(relatingObject);
+				return types.has("ifc2x3.ifcproject") || types.has("ifc2x3.ifcspatialstructureelement");
+			}),
+		),
+		"IfcSpatialStructureElement: must be decomposed by exactly one IfcRelAggregates whose RelatingObject is an IfcProject or IfcSpatialStructureElement.",
+	);
+});
+
+// `IfcStair_WR1` (line 6670): see `decomposedWithoutOwnRepresentation`'s own doc comment.
+const IfcStair_WR1 = entityRule("IfcStair", "WR1", (self) => {
+	assertWhereRule(
+		decomposedWithoutOwnRepresentation(self),
+		"IfcStair: IsDecomposedBy must have at most 1 member, and if it has exactly 1, Representation must be unset.",
+	);
+});
+
+// `IfcStructuralLinearAction_WR61` (line 6679): see `appliedLoadIsExactlyOneOf`'s own doc
+// comment.
+const IfcStructuralLinearAction_WR61 = entityRule("IfcStructuralLinearAction", "WR61", (self) => {
+	assertWhereRule(
+		appliedLoadIsExactlyOneOf(self, ["ifc2x3.ifcstructuralloadlinearforce", "ifc2x3.ifcstructuralloadtemperature"]),
+		"IfcStructuralLinearAction.AppliedLoad must be exactly one of IfcStructuralLoadLinearForce, IfcStructuralLoadTemperature.",
+	);
+});
+
+// `IfcStructuralPlanarAction_WR61` (line 6692): same shape (different type list).
+const IfcStructuralPlanarAction_WR61 = entityRule("IfcStructuralPlanarAction", "WR61", (self) => {
+	assertWhereRule(
+		appliedLoadIsExactlyOneOf(self, ["ifc2x3.ifcstructuralloadplanarforce", "ifc2x3.ifcstructuralloadtemperature"]),
+		"IfcStructuralPlanarAction.AppliedLoad must be exactly one of IfcStructuralLoadPlanarForce, IfcStructuralLoadTemperature.",
+	);
+});
+
+// `IfcStructuralPointAction_WR61` (line 6705): same shape (different type list).
+const IfcStructuralPointAction_WR61 = entityRule("IfcStructuralPointAction", "WR61", (self) => {
+	assertWhereRule(
+		appliedLoadIsExactlyOneOf(self, [
+			"ifc2x3.ifcstructuralloadsingleforce",
+			"ifc2x3.ifcstructuralloadsingledisplacement",
+		]),
+		"IfcStructuralPointAction.AppliedLoad must be exactly one of IfcStructuralLoadSingleForce, IfcStructuralLoadSingleDisplacement.",
+	);
+});
+
+// `IfcStructuralPointReaction_WR61` (line 6714): same type list as
+// `IfcStructuralPointAction_WR61` above (verbatim, re-verified directly).
+const IfcStructuralPointReaction_WR61 = entityRule("IfcStructuralPointReaction", "WR61", (self) => {
+	assertWhereRule(
+		appliedLoadIsExactlyOneOf(self, [
+			"ifc2x3.ifcstructuralloadsingleforce",
+			"ifc2x3.ifcstructuralloadsingledisplacement",
+		]),
+		"IfcStructuralPointReaction.AppliedLoad must be exactly one of IfcStructuralLoadSingleForce, IfcStructuralLoadSingleDisplacement.",
+	);
+});
+
+// `IfcStructuralProfileProperties_WR21` (line 6723): `not exists(ShearDeformationAreaY)
+// or ShearDeformationAreaY >= 0.0`.
+const IfcStructuralProfileProperties_WR21 = entityRule("IfcStructuralProfileProperties", "WR21", (self) => {
+	const shearDeformationAreaY = expressGetAttr(self, "ShearDeformationAreaY", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(shearDeformationAreaY), () => triGe(shearDeformationAreaY, 0.0)),
+		"IfcStructuralProfileProperties: if ShearDeformationAreaY is given, it must be >= 0.",
+	);
+});
+
+// `IfcStructuralProfileProperties_WR22` (line 6733): same shape (`ShearDeformationAreaZ`).
+const IfcStructuralProfileProperties_WR22 = entityRule("IfcStructuralProfileProperties", "WR22", (self) => {
+	const shearDeformationAreaZ = expressGetAttr(self, "ShearDeformationAreaZ", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(shearDeformationAreaZ), () => triGe(shearDeformationAreaZ, 0.0)),
+		"IfcStructuralProfileProperties: if ShearDeformationAreaZ is given, it must be >= 0.",
+	);
+});
+
+// `IfcStructuralSteelProfileProperties_WR31` (line 6743): `not exists(ShearAreaY) or
+// ShearAreaY >= 0.0`.
+const IfcStructuralSteelProfileProperties_WR31 = entityRule("IfcStructuralSteelProfileProperties", "WR31", (self) => {
+	const shearAreaY = expressGetAttr(self, "ShearAreaY", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(shearAreaY), () => triGe(shearAreaY, 0.0)),
+		"IfcStructuralSteelProfileProperties: if ShearAreaY is given, it must be >= 0.",
+	);
+});
+
+// `IfcStructuralSteelProfileProperties_WR32` (line 6753): same shape (`ShearAreaZ`).
+const IfcStructuralSteelProfileProperties_WR32 = entityRule("IfcStructuralSteelProfileProperties", "WR32", (self) => {
+	const shearAreaZ = expressGetAttr(self, "ShearAreaZ", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(shearAreaZ), () => triGe(shearAreaZ, 0.0)),
+		"IfcStructuralSteelProfileProperties: if ShearAreaZ is given, it must be >= 0.",
+	);
+});
+
+// `IfcStructuralSurfaceMemberVarying_WR61` (line 6763): `exists(Thickness)`.
+const IfcStructuralSurfaceMemberVarying_WR61 = entityRule("IfcStructuralSurfaceMemberVarying", "WR61", (self) => {
+	const thickness = expressGetAttr(self, "Thickness", INDETERMINATE);
+	assertWhereRule(exists(thickness), "IfcStructuralSurfaceMemberVarying.Thickness must be given.");
+});
+
+// `IfcStructuralSurfaceMemberVarying_WR62` (line 6772): `sizeof([temp for temp in
+// VaryingThicknessLocation.ShapeRepresentations if not sizeof(temp.Items) == 1]) == 0`
+// -- `not (X == 1)` is Python's own `not`, ported via `pyNot(triEq(...))`, same
+// collapse-to-definite-boolean caveat as `IfcServiceLifeFactor_WR31` above.
+const IfcStructuralSurfaceMemberVarying_WR62 = entityRule("IfcStructuralSurfaceMemberVarying", "WR62", (self) => {
+	const varyingThicknessLocation = expressGetAttr(self, "VaryingThicknessLocation", INDETERMINATE);
+	const shapeRepresentations = asList(expressGetAttr(varyingThicknessLocation, "ShapeRepresentations", INDETERMINATE));
+	const violating = shapeRepresentations.filter((temp) =>
+		pyNot(triEq(sizeof(expressGetAttr(temp, "Items", INDETERMINATE)), 1)),
+	).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcStructuralSurfaceMemberVarying: every VaryingThicknessLocation.ShapeRepresentations member must have exactly 1 Items member.",
+	);
+});
+
+// `IfcStructuralSurfaceMemberVarying_WR63` (line 6781): `sizeof([temp for temp in
+// VaryingThicknessLocation.ShapeRepresentations if not (IfcCartesianPoint in
+// typeof(temp.Items[1]) or IfcPointOnSurface in typeof(temp.Items[1]))]) == 0`.
+const IfcStructuralSurfaceMemberVarying_WR63 = entityRule("IfcStructuralSurfaceMemberVarying", "WR63", (self) => {
+	const varyingThicknessLocation = expressGetAttr(self, "VaryingThicknessLocation", INDETERMINATE);
+	const shapeRepresentations = asList(expressGetAttr(varyingThicknessLocation, "ShapeRepresentations", INDETERMINATE));
+	const violating = shapeRepresentations.filter((temp) => {
+		const firstItem = expressGetItem(
+			expressGetAttr(temp, "Items", INDETERMINATE),
+			1 - EXPRESS_ONE_BASED_INDEXING,
+			INDETERMINATE,
+		);
+		const types = typeOfAttr(firstItem);
+		return !(types.has("ifc2x3.ifccartesianpoint") || types.has("ifc2x3.ifcpointonsurface"));
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcStructuralSurfaceMemberVarying: every VaryingThicknessLocation.ShapeRepresentations member's Items[1] must be an IfcCartesianPoint or IfcPointOnSurface.",
+	);
+});
+
+// `IfcStructuredDimensionCallout_WR31` (line 6794) -- a CONFIRMED, always-passing dead
+// rule, the exact same real, verbatim-preserved upstream typo shape as chunk 2's own
+// `IfcDimensionCurveDirectedCallout_WR42` (see this section's own header comment for the
+// from-first-principles derivation): real source computes `contents =
+// express_getattr(self, 'Contents', INDETERMINATE)` here but never reads it -- the
+// actual (doubly-nested) list comprehension re-fetches `express_getattr(self,
+// 'contents', INDETERMINATE)` (all-lowercase), which always resolves to `INDETERMINATE`
+// (case-sensitive attribute lookup), collapsing both comprehensions to `[]` and making
+// `sizeof([...]) == 0` unconditionally `True`. The dead `Contents`-cased local is not
+// ported, same precedent as WR42's own.
+const IfcStructuredDimensionCallout_WR31 = entityRule("IfcStructuredDimensionCallout", "WR31", (self) => {
+	const contents = asList<EntityInstance>(expressGetAttr(self, "contents", INDETERMINATE));
+	const annotationTextOccurrences = contents.filter((con) => typeOfAttr(con).has("ifc2x3.ifcannotationtextoccurrence"));
+	const violating = annotationTextOccurrences.filter((ato) => {
+		const name = expressGetAttr(ato, "Name", INDETERMINATE) as string;
+		return !["dimension value", "tolerance value", "unit text", "prefix text", "suffix text"].includes(
+			name.toLowerCase(),
+		);
+	}).length;
+	assertWhereRule(
+		violating === 0,
+		"IfcStructuredDimensionCallout: every Contents member that is an IfcAnnotationTextOccurrence must have a Name of 'dimension value', 'tolerance value', 'unit text', 'prefix text', or 'suffix text'.",
+	);
+});
+
+// `IfcStyledItem_WR11` (line 6804): `sizeof(Styles) == 1`.
+const IfcStyledItem_WR11 = entityRule("IfcStyledItem", "WR11", (self) => {
+	const styles = expressGetAttr(self, "Styles", INDETERMINATE);
+	assertWhereRule(triEq(sizeof(styles), 1), "IfcStyledItem.Styles must have exactly 1 member.");
+});
+
+// `IfcStyledItem_WR12` (line 6814): `not IfcStyledItem in typeof(Item)`.
+const IfcStyledItem_WR12 = entityRule("IfcStyledItem", "WR12", (self) => {
+	const item = expressGetAttr(self, "Item", INDETERMINATE);
+	assertWhereRule(
+		!typeOfAttr(item).has("ifc2x3.ifcstyleditem"),
+		"IfcStyledItem.Item must not itself be an IfcStyledItem.",
+	);
+});
+
+// `IfcStyledRepresentation_WR21` (line 6824): `sizeof([temp for temp in Items if not
+// IfcStyledItem in typeof(temp)]) == 0`.
+const IfcStyledRepresentation_WR21 = entityRule("IfcStyledRepresentation", "WR21", (self) => {
+	const items = asList(expressGetAttr(self, "Items", INDETERMINATE));
+	const violating = items.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifcstyleditem")).length;
+	assertWhereRule(violating === 0, "IfcStyledRepresentation: every Items member must be an IfcStyledItem.");
+});
+
+// `IfcSurfaceOfLinearExtrusion_WR41` (line 6833): `Depth > 0.0`.
+const IfcSurfaceOfLinearExtrusion_WR41 = entityRule("IfcSurfaceOfLinearExtrusion", "WR41", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE);
+	assertWhereRule(triGt(depth, 0.0), "IfcSurfaceOfLinearExtrusion.Depth must be greater than 0.");
+});
+
+// `IfcSurfaceStyle_WR11` (line 6852): see `atMostOneStyleOfType`'s own doc comment
+// (`IfcSurfaceStyleShading`).
+const IfcSurfaceStyle_WR11 = entityRule("IfcSurfaceStyle", "WR11", (self) => {
+	assertWhereRule(
+		atMostOneStyleOfType(self, "ifc2x3.ifcsurfacestyleshading"),
+		"IfcSurfaceStyle: at most 1 Styles member may be an IfcSurfaceStyleShading.",
+	);
+});
+
+// `IfcSurfaceStyle_WR12` (line 6861): same shape (`IfcSurfaceStyleLighting`).
+const IfcSurfaceStyle_WR12 = entityRule("IfcSurfaceStyle", "WR12", (self) => {
+	assertWhereRule(
+		atMostOneStyleOfType(self, "ifc2x3.ifcsurfacestylelighting"),
+		"IfcSurfaceStyle: at most 1 Styles member may be an IfcSurfaceStyleLighting.",
+	);
+});
+
+// `IfcSurfaceStyle_WR13` (line 6870): same shape (`IfcSurfaceStyleRefraction`).
+const IfcSurfaceStyle_WR13 = entityRule("IfcSurfaceStyle", "WR13", (self) => {
+	assertWhereRule(
+		atMostOneStyleOfType(self, "ifc2x3.ifcsurfacestylerefraction"),
+		"IfcSurfaceStyle: at most 1 Styles member may be an IfcSurfaceStyleRefraction.",
+	);
+});
+
+// `IfcSurfaceStyle_WR14` (line 6879): same shape (`IfcSurfaceStyleWithTextures`).
+const IfcSurfaceStyle_WR14 = entityRule("IfcSurfaceStyle", "WR14", (self) => {
+	assertWhereRule(
+		atMostOneStyleOfType(self, "ifc2x3.ifcsurfacestylewithtextures"),
+		"IfcSurfaceStyle: at most 1 Styles member may be an IfcSurfaceStyleWithTextures.",
+	);
+});
+
+// `IfcSurfaceStyle_WR15` (line 6888): same shape (`IfcExternallyDefinedSurfaceStyle`).
+const IfcSurfaceStyle_WR15 = entityRule("IfcSurfaceStyle", "WR15", (self) => {
+	assertWhereRule(
+		atMostOneStyleOfType(self, "ifc2x3.ifcexternallydefinedsurfacestyle"),
+		"IfcSurfaceStyle: at most 1 Styles member may be an IfcExternallyDefinedSurfaceStyle.",
+	);
+});
+
+// `IfcSweptAreaSolid_WR22` (line 6897): `SweptArea.ProfileType == AREA`.
+const IfcSweptAreaSolid_WR22 = entityRule("IfcSweptAreaSolid", "WR22", (self) => {
+	const sweptArea = expressGetAttr(self, "SweptArea", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetAttr(sweptArea, "ProfileType", INDETERMINATE), "AREA"),
+		"IfcSweptAreaSolid.SweptArea.ProfileType must be AREA.",
+	);
+});
+
+// `IfcSweptDiskSolid_WR1` (line 6907): `Directrix.Dim == 3`.
+const IfcSweptDiskSolid_WR1 = entityRule("IfcSweptDiskSolid", "WR1", (self) => {
+	const directrix = expressGetAttr(self, "Directrix", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetAttr(directrix, "Dim", INDETERMINATE), 3),
+		"IfcSweptDiskSolid.Directrix.Dim must equal 3.",
+	);
+});
+
+// `IfcSweptDiskSolid_WR2` (line 6917): `not exists(InnerRadius) or Radius > InnerRadius`.
+const IfcSweptDiskSolid_WR2 = entityRule("IfcSweptDiskSolid", "WR2", (self) => {
+	const radius = expressGetAttr(self, "Radius", INDETERMINATE);
+	const innerRadius = expressGetAttr(self, "InnerRadius", INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(innerRadius), () => triGt(radius, innerRadius)),
+		"IfcSweptDiskSolid: if InnerRadius is given, Radius must be greater than it.",
+	);
+});
+
+registerSchemaRules("IFC2X3", [
+	IfcQuantityCount_WR21,
+	IfcQuantityLength_WR21,
+	IfcQuantityLength_WR22,
+	IfcQuantityTime_WR21,
+	IfcQuantityTime_WR22,
+	IfcQuantityVolume_WR21,
+	IfcQuantityVolume_WR22,
+	IfcQuantityWeight_WR21,
+	IfcQuantityWeight_WR22,
+	IfcRailing_WR61,
+	IfcRamp_WR1,
+	IfcRationalBezierCurve_WR1,
+	IfcRationalBezierCurve_WR2,
+	IfcRectangleHollowProfileDef_WR31,
+	IfcRectangleHollowProfileDef_WR32,
+	IfcRectangleHollowProfileDef_WR33,
+	IfcRectangularTrimmedSurface_WR1,
+	IfcRectangularTrimmedSurface_WR2,
+	IfcRectangularTrimmedSurface_WR3,
+	IfcRectangularTrimmedSurface_WR4,
+	IfcReinforcingBar_WR1,
+	IfcRelAssigns_WR1,
+	IfcRelAssignsTasks_WR1,
+	IfcRelAssignsTasks_WR2,
+	IfcRelAssignsTasks_WR3,
+	IfcRelAssignsToActor_WR1,
+	IfcRelAssignsToControl_WR1,
+	IfcRelAssignsToGroup_WR1,
+	IfcRelAssignsToProcess_WR1,
+	IfcRelAssignsToProduct_WR1,
+	IfcRelAssignsToResource_WR1,
+	IfcRelAssociates_WR21,
+	IfcRelAssociatesMaterial_WR21,
+	IfcRelAssociatesMaterial_WR22,
+	IfcRelConnectsElements_WR31,
+	IfcRelContainedInSpatialStructure_WR31,
+	IfcRelDecomposes_WR31,
+	IfcRelNests_WR1,
+	IfcRelOverridesProperties_WR1,
+	IfcRelReferencedInSpatialStructure_WR31,
+	IfcRelSchedulesCostItems_WR11,
+	IfcRelSchedulesCostItems_WR12,
+	IfcRelSequence_WR1,
+	IfcRelSpaceBoundary_WR1,
+	IfcRevolvedAreaSolid_WR31,
+	IfcRevolvedAreaSolid_WR32,
+	IfcRoof_WR1,
+	IfcRoundedRectangleProfileDef_WR31,
+	IfcSectionedSpine_WR1,
+	IfcSectionedSpine_WR2,
+	IfcSectionedSpine_WR3,
+	IfcServiceLifeFactor_WR31,
+	IfcShapeModel_WR11,
+	IfcShapeRepresentation_WR21,
+	IfcShapeRepresentation_WR22,
+	IfcShapeRepresentation_WR23,
+	IfcShapeRepresentation_WR24,
+	IfcSlab_WR61,
+	IfcSpaceHeaterType_WR1,
+	IfcSpatialStructureElement_WR41,
+	IfcStair_WR1,
+	IfcStructuralLinearAction_WR61,
+	IfcStructuralPlanarAction_WR61,
+	IfcStructuralPointAction_WR61,
+	IfcStructuralPointReaction_WR61,
+	IfcStructuralProfileProperties_WR21,
+	IfcStructuralProfileProperties_WR22,
+	IfcStructuralSteelProfileProperties_WR31,
+	IfcStructuralSteelProfileProperties_WR32,
+	IfcStructuralSurfaceMemberVarying_WR61,
+	IfcStructuralSurfaceMemberVarying_WR62,
+	IfcStructuralSurfaceMemberVarying_WR63,
+	IfcStructuredDimensionCallout_WR31,
+	IfcStyledItem_WR11,
+	IfcStyledItem_WR12,
+	IfcStyledRepresentation_WR21,
+	IfcSurfaceOfLinearExtrusion_WR41,
+	IfcSurfaceStyle_WR11,
+	IfcSurfaceStyle_WR12,
+	IfcSurfaceStyle_WR13,
+	IfcSurfaceStyle_WR14,
+	IfcSurfaceStyle_WR15,
+	IfcSweptAreaSolid_WR22,
+	IfcSweptDiskSolid_WR1,
+	IfcSweptDiskSolid_WR2,
+]);
