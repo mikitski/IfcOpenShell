@@ -74,97 +74,23 @@
 
 import { AttributeCategory, EntityInstance } from "../entityInstance";
 import type { IfcFile } from "../file";
-import {
-	aggregation_type as NativeAggregationType,
-	declaration as NativeDeclaration,
-	entity as NativeEntity,
-	enumeration_type as NativeEnumerationType,
-	named_type as NativeNamedType,
-	parameter_type as NativeParameterType,
-	select_type as NativeSelectType,
-	simple_type as NativeSimpleType,
-	type_declaration as NativeTypeDeclaration,
-} from "../native/ifcopenshell_native";
 import { settings } from "../settings";
 import { directSubtypesOfTypeDeclarations, entityName } from "../util/schema";
-import { ValidationError, getEntityAttributes } from "../validate";
+import {
+	type AttributeTypeLike,
+	type ClassifiedAttributeType,
+	ValidationError,
+	classifyAny,
+	declarationName,
+	getEntityAttributes,
+} from "../validate";
 import { type RuleDefinition, getSchemaRules } from "./ruleDispatch";
 
-// --- attribute-type classification -- a small, local duplicate of `validate.ts`'s own
-// `classifyAny`/`classifyParameterType`/`classifyDeclaration`/`declarationName`
-// (module-private there, so not importable), following this port's established
-// precedent (`runtimeShim.ts`'s own `entityDeclarationName`, `util/schema.ts`'s
-// `entityName`, `util/element.ts`'s own copy) of duplicating a small reinterpret-cast
-// helper locally rather than growing a new cross-module coupling for it. See
-// `validate.ts`'s own header comment (finding 1) for the full, independently-verified
-// justification of why this dispatch is needed at all (no SWIG-style dynamic
-// downcasting on this port's native layer). ---
-
-type AttributeTypeLike =
-	| InstanceType<typeof NativeParameterType>
-	| InstanceType<typeof NativeDeclaration>
-	| InstanceType<typeof NativeSimpleType>
-	| InstanceType<typeof NativeNamedType>
-	| InstanceType<typeof NativeAggregationType>
-	| InstanceType<typeof NativeTypeDeclaration>
-	| InstanceType<typeof NativeSelectType>
-	| InstanceType<typeof NativeEnumerationType>
-	| InstanceType<typeof NativeEntity>;
-
-type ClassifiedAttributeType =
-	| { readonly kind: "simple"; readonly node: InstanceType<typeof NativeSimpleType> }
-	| { readonly kind: "named"; readonly node: InstanceType<typeof NativeNamedType> }
-	| { readonly kind: "aggregation"; readonly node: InstanceType<typeof NativeAggregationType> }
-	| { readonly kind: "typeDeclaration"; readonly node: InstanceType<typeof NativeTypeDeclaration> }
-	| { readonly kind: "select"; readonly node: InstanceType<typeof NativeSelectType> }
-	| { readonly kind: "enumeration"; readonly node: InstanceType<typeof NativeEnumerationType> }
-	| { readonly kind: "entity"; readonly node: InstanceType<typeof NativeEntity> };
-
-function classifyDeclaration(decl: InstanceType<typeof NativeDeclaration>): ClassifiedAttributeType {
-	const entity = decl.as_entity();
-	if (entity !== null) return { kind: "entity", node: entity };
-	const typeDeclaration = decl.as_type_declaration();
-	if (typeDeclaration !== null) return { kind: "typeDeclaration", node: typeDeclaration };
-	const select = decl.as_select_type();
-	if (select !== null) return { kind: "select", node: select };
-	const enumeration = decl.as_enumeration_type();
-	if (enumeration !== null) return { kind: "enumeration", node: enumeration };
-	throw new Error("ruleExecutor: declaration is none of entity/type_declaration/select_type/enumeration_type");
-}
-
-function classifyParameterType(pt: InstanceType<typeof NativeParameterType>): ClassifiedAttributeType {
-	const simple = pt.as_simple_type();
-	if (simple !== null) return { kind: "simple", node: simple };
-	const named = pt.as_named_type();
-	if (named !== null) return { kind: "named", node: named };
-	const aggregation = pt.as_aggregation_type();
-	if (aggregation !== null) return { kind: "aggregation", node: aggregation };
-	throw new Error("ruleExecutor: parameter_type is none of simple_type/named_type/aggregation_type");
-}
-
-function classifyAny(node: AttributeTypeLike): ClassifiedAttributeType {
-	if (node instanceof NativeSimpleType) return { kind: "simple", node };
-	if (node instanceof NativeNamedType) return { kind: "named", node };
-	if (node instanceof NativeAggregationType) return { kind: "aggregation", node };
-	if (node instanceof NativeTypeDeclaration) return { kind: "typeDeclaration", node };
-	if (node instanceof NativeSelectType) return { kind: "select", node };
-	if (node instanceof NativeEnumerationType) return { kind: "enumeration", node };
-	if (node instanceof NativeEntity) return { kind: "entity", node };
-	if (node instanceof NativeDeclaration) return classifyDeclaration(node);
-	if (node instanceof NativeParameterType) return classifyParameterType(node);
-	throw new Error("ruleExecutor: unrecognized attribute-type node");
-}
-
-/**
- * `entity`/`select_type`/`type_declaration`/`enumeration_type` have no `.name()` of
- * their own on this port's generated facade -- see `validate.ts`'s own header comment
- * (finding 4) for the full, independently-verified justification (a safe pointer-
- * reinterpret: all four are real, single, non-virtual `: public declaration` C++
- * subclasses).
- */
-function declarationName(node: { readonly _handle: unknown }): string {
-	return new NativeDeclaration(node._handle).name();
-}
+// --- attribute-type classification: reuses `validate.ts`'s own already-exported
+// `classifyAny`/`declarationName`/`AttributeTypeLike` (see that file's own header
+// comment for why they're exported, not duplicated -- a `/code-review` finding on this
+// chunk's own first draft, which HAD duplicated a byte-for-byte local copy of this
+// ~70-line classification cascade; fixed to import instead). ---
 
 /**
  * Python: `type_name(ty)` (`rule_executor.py` lines 168-177) -- returns the type-scope
@@ -229,7 +155,18 @@ function toViolation(rule: RuleDefinition, error: unknown, instance?: EntityInst
 	const message = error instanceof Error ? error.message : String(error);
 	const ruleId = rule.typeName !== undefined ? `${rule.typeName}.${rule.ruleName}` : rule.ruleName;
 	const instanceText = instance ? `On instance:\n    ${instance.toString()}\n` : "";
-	return new ValidationError(`${instanceText}Rule ${ruleId} violated:\n    ${message}`, rule.typeName);
+	// `attribute` is deliberately left `undefined`, NOT `rule.typeName` -- `/code-review`
+	// found that an earlier version of this function passed `rule.typeName` (an
+	// EXPRESS entity/type NAME, e.g. `"IfcWall"`) as `ValidationError.attribute`, but
+	// every other producer of a `ValidationError` (`validate.ts`) populates that field
+	// with an actual ATTRIBUTE name (`attr.name()`, or a re-thrown `e.attribute`) --
+	// confirmed by reading every `new ValidationError(...)` call site in that file.
+	// Passing a type/entity name there would be a real, disclosed shape mismatch a
+	// future Phase EX-5 unification (this file's own header comment already flags that
+	// goal) would have to specifically work around; leaving it `undefined` here is
+	// honest about what this file doesn't have (no single "attribute" a whole-rule
+	// violation is about) rather than overloading the field with the wrong kind of value.
+	return new ValidationError(`${instanceText}Rule ${ruleId} violated:\n    ${message}`);
 }
 
 /**
@@ -237,9 +174,24 @@ function toViolation(rule: RuleDefinition, error: unknown, instance?: EntityInst
  * ...` (`rule_executor.py`, all 3 phases) -- see this file's own header comment for why
  * a JS `RangeError` (this platform's own unbounded-recursion failure mode) is treated
  * the same way: silently skipped, not reported as a violation.
+ *
+ * **`/code-review`-found bug, fixed here**: a bare `error instanceof RangeError` is
+ * WRONG -- this codebase uses `RangeError` pervasively as its own general translation
+ * of Python's `IndexError`/`ValueError`-style "out of range" conditions (confirmed by
+ * grepping every `throw new RangeError(...)` site: `entityInstance.ts`'s own
+ * `getByIndex` -- called directly by this file's own `checkValue`, line ~348 --
+ * `api/material/removeListItem.ts`, `api/pset/editPset.ts`, `util/date.ts`,
+ * `util/unit.ts`, all throw a genuine, unrelated `RangeError` for a real out-of-range
+ * bug, NOT a stack overflow). A bare `instanceof` check would silently swallow any of
+ * those as if they were "rule could not be evaluated, skip quietly" -- masking a real
+ * bug (or a real WHERE-rule violation) with zero diagnostic trace. Real V8 stack
+ * overflows are always the exact message `"Maximum call stack size exceeded"`
+ * (confirmed against this project's own Node runtime, matching `util/element.ts`'s own
+ * documented precedent for this exact error shape) -- checked explicitly below, so an
+ * unrelated `RangeError` correctly falls through to `toViolation` instead.
  */
 function isRecursionFailure(error: unknown): boolean {
-	return error instanceof RangeError;
+	return error instanceof RangeError && /call stack/i.test(error.message);
 }
 
 /**
@@ -306,7 +258,17 @@ export function executeRules(f: IfcFile): ValidationError[] {
 			visit(rule.typeName!);
 		}
 
-		// Python: `check(value, type, instance)` closure (lines 179-234).
+		// Python: `check(value, type, instance)` closure (lines 179-234). Calls
+		// `typeName(type)` then, separately, `unwrapForCheck(type)` below -- each its own
+		// `classifyAny` dispatch over the same starting node. `/code-review` flagged this
+		// as two classification passes where one might do; left as two, deliberately: real
+		// Python's own `type_name(ty)` (lines 168-177) and the inline `while isinstance(type,
+		// (named_type, type_declaration))` unwrap (lines 207-214) are ALSO two separate
+		// walks with two distinct unwrap conditions (`type_name` never unwraps
+		// `type_declaration`; this unwrap always does -- see `typeName`'s own doc comment) --
+		// merging them here would diverge from that real two-pass structure for a perf gain
+		// that's negligible at this chunk's own scale (single-digit classification calls per
+		// attribute, not a hot inner loop over millions of values).
 		const checkValue = (value: unknown, type: AttributeTypeLike, instance: EntityInstance): void => {
 			if (value === null || value === undefined) return;
 
@@ -381,10 +343,27 @@ export function executeRules(f: IfcFile): ValidationError[] {
 		}
 
 		// --- entity-scope rules (Python: lines 259-278) ---
+		//
+		// Python: `for R in [...]: for inst in f.by_type(R.TYPE_NAME): ...` -- real
+		// Python re-queries `f.by_type(...)` once per rule too, with no cache, so this
+		// loop's overall SHAPE matches real Python's own exactly. `/code-review` flagged
+		// the resulting repeated native `by_type` query (plus `EntityInstance` rewrap
+		// per matching handle) as wasteful once multiple entity-scope rules share the
+		// same `TYPE_NAME` -- expected to become common as the registry grows toward
+		// ~1,830 rules across 3 schemas -- so instances are cached per `TYPE_NAME` here
+		// (a real, if minor, deliberate improvement beyond a literal transliteration),
+		// mirroring the type-scope loop's own `typeRulesByName` caching pattern above.
+		const instancesByTypeName = new Map<string, EntityInstance[]>();
 		for (const rule of rules) {
 			if (rule.scope !== "entity") continue;
 			// biome-ignore lint/style/noNonNullAssertion: a `SCOPE: "entity"` `RuleDefinition` always carries a `typeName`, same as the type-scope loop above.
-			for (const inst of f.byType(rule.typeName!)) {
+			const ruleTypeName = rule.typeName!;
+			let instances = instancesByTypeName.get(ruleTypeName);
+			if (!instances) {
+				instances = f.byType(ruleTypeName);
+				instancesByTypeName.set(ruleTypeName, instances);
+			}
+			for (const inst of instances) {
 				try {
 					rule.check(inst);
 				} catch (error) {

@@ -477,6 +477,20 @@ export type AttributeTypeLike =
 	| NativeEnumerationType
 	| NativeEntity;
 
+// UPDATED (Phase EX-4 chunk 1, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+// `ClassifiedAttributeType`/`classifyDeclaration`/`classifyParameterType`/`classifyAny`/
+// `declarationName` are now `export`ed -- `express/ruleExecutor.ts`'s own `check()` port
+// (`rule_executor.py`'s `type_name`/the aggregation/select unwrap walk) needs the exact
+// same "no SWIG-style dynamic downcasting, dispatch via `as_X()` probes" classification
+// this file already built (finding 1, above). A `/code-review` pass on that chunk found
+// its own first draft had duplicated a byte-for-byte copy of this ~70-line cascade
+// locally instead of importing it -- fixed by exporting here instead, matching this
+// project's own established "export narrowly once a second real consumer exists"
+// precedent (`util/schema.ts`'s `entityName`/`getSchemaDefinition`, `express/rules/
+// ifc2x3.ts`'s `ifcCrossProduct`) rather than the "small local duplicate" precedent,
+// which is reserved for genuinely tiny (1-3 line) reinterpret-casts -- a ~70-line
+// classification cascade is well past that threshold, and duplicating it risks the two
+// copies silently drifting apart under a future native-layer change.
 type ClassifiedAttributeType =
 	| { readonly kind: "simple"; readonly node: NativeSimpleType }
 	| { readonly kind: "named"; readonly node: NativeNamedType }
@@ -530,6 +544,9 @@ function classifyAny(node: AttributeTypeLike): ClassifiedAttributeType {
 function declarationName(node: { readonly _handle: unknown }): string {
 	return new NativeDeclaration(node._handle).name();
 }
+
+export { classifyAny, classifyDeclaration, classifyParameterType, declarationName };
+export type { ClassifiedAttributeType };
 
 /**
  * Python: `while isinstance(attr_type, type_wrappers): attr_type = attr_type.

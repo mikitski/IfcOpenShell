@@ -30,9 +30,23 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import type { EntityInstance } from "../../../src/entityInstance";
 import "../../../src/express/whereRules/ifc2x3";
 import { type RuleDefinition, getSchemaRules } from "../../../src/express/ruleDispatch";
+import { executeRules } from "../../../src/express/ruleExecutor";
 import type { IfcFile } from "../../../src/file";
 import { settings } from "../../../src/settings";
+import * as template from "../../../src/template";
 import { createTestFile } from "../../bootstrap";
+
+/**
+ * `createTestFile`'s own default (non-`blank`) template bakes in a starter
+ * `IfcProject`/unit-assignment/geometric-context/owner-history chain (see
+ * `template.ts`'s own header comment, and `ruleExecutor.test.ts`'s own identical
+ * finding) -- genuinely present entities whose own attribute values would otherwise
+ * cross-contaminate an end-to-end "zero violations" or "exactly this one violation"
+ * assertion. `blank: true` gives a genuinely entity-free starting point.
+ */
+function blankFile(): IfcFile {
+	return template.create({ schemaIdentifier: "IFC2X3", blank: true });
+}
 
 function findRule(typeName: string, ruleName: string): RuleDefinition {
 	const rule = getSchemaRules("IFC2X3").find((r) => r.typeName === typeName && r.ruleName === ruleName);
@@ -879,5 +893,49 @@ describe("IfcCalendarDate.WR21", () => {
 	});
 	test("fail: day out of the [1, 31] range entirely", () => {
 		expectFail("IfcCalendarDate", "WR21", date(32, 1, 2024));
+	});
+});
+
+// =============================================================================
+// End-to-end wiring: `executeRules(file)` against the REAL registered rules above,
+// on a dedicated, freshly-constructed file (never the shared `file`/`create()` used by
+// every test above, whose accumulated fixtures -- many deliberately invalid, for the
+// per-rule `expectFail` cases -- would otherwise cross-contaminate an end-to-end
+// violation count). `/code-review` found that neither this file (which calls `check()`
+// directly, bypassing the executor) nor `ruleExecutor.test.ts` (synthetic rules only,
+// deliberately isolated from these real 70) proves the full registry -> engine -> real
+// rule body wiring actually works together -- this block closes that gap.
+// =============================================================================
+
+describe("executeRules -- end-to-end wiring against the real registered IFC2X3 rules", () => {
+	test("an entity-scope violation (IfcBuildingElementProxy.WR1, missing Name) is detected", () => {
+		const wiringFile = blankFile();
+		wiringFile.createEntity("IfcBuildingElementProxy");
+
+		const violations = executeRules(wiringFile);
+		expect(violations.some((v) => v.message.includes("IfcBuildingElementProxy.WR1"))).toBe(true);
+	});
+
+	test("a type-scope violation (IfcPositiveLengthMeasure.WR1, a non-positive Depth) is detected via the per-instance attribute walk", () => {
+		const wiringFile = blankFile();
+		const profile = wiringFile.createEntity("IfcCShapeProfileDef");
+		// `Depth`/`Girth`/`Width`/`WallThickness` are all declared `IfcPositiveLengthMeasure`
+		// -- a negative `Depth` should be caught by the TYPE-scope rule (fired while
+		// walking this instance's own forward attributes), not the entity-scope
+		// `IfcCShapeProfileDef.WR1`/`WR3` rules (which would themselves also fire here,
+		// since they read `Depth` too -- both are legitimately expected).
+		(profile as unknown as { Depth: number }).Depth = -5;
+
+		const violations = executeRules(wiringFile);
+		expect(violations.some((v) => v.message.includes("IfcPositiveLengthMeasure.WR1"))).toBe(true);
+	});
+
+	test("a well-formed instance produces zero violations from any of the 70 registered rules", () => {
+		const wiringFile = blankFile();
+		const proxy = wiringFile.createEntity("IfcBuildingElementProxy");
+		(proxy as unknown as { Name: string }).Name = "A well-formed proxy";
+
+		const violations = executeRules(wiringFile);
+		expect(violations).toEqual([]);
 	});
 });
