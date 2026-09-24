@@ -445,6 +445,30 @@ export class ExpressSet<T = unknown> {
 	getItem(index: number): T | Indeterminate | null {
 		return expressGetItem(this.toArray(), index, INDETERMINATE) as T | Indeterminate | null;
 	}
+
+	/**
+	 * Python: `set.__eq__` -- `express_set` is a bare `set` subclass with no override of
+	 * its own, so `==` between two `express_set`s (or an `express_set` and a plain Python
+	 * `set`) is genuine `set` structural equality (same size, same members, order-
+	 * independent) -- NOT object identity, which is all a bare JS `===` between two
+	 * `ExpressSet` instances would ever give. No chunk needed this before Phase EX-4
+	 * chunk 3 (`express/whereRules/ifc2x3.ts`), which is the first to port WHERE-rules
+	 * comparing two `typeof(...)` results directly with `==` (e.g.
+	 * `IfcPropertyBoundedValue_WR21`: `typeof(upperboundvalue) == typeof(lowerboundvalue)`)
+	 * -- added here, as a method on this class, rather than a new `runtimeShim.ts`-level
+	 * `triEq`-style free function, since `typeof()`'s own return type is always exactly
+	 * this class (never a bare JS `Set`/array), matching this class's own existing
+	 * `multiply`/`plus`/`getItem` precedent of hosting EXPRESS/Python set-operator
+	 * equivalents as named methods.
+	 */
+	equals(other: Iterable<T>): boolean {
+		const otherSet = other instanceof ExpressSet ? other : new ExpressSet(other);
+		if (this.items.size !== otherSet.items.size) return false;
+		for (const value of this.items) {
+			if (!otherSet.items.has(value)) return false;
+		}
+		return true;
+	}
 }
 
 /**
@@ -791,6 +815,27 @@ export function triGt(a: unknown, b: unknown): Tri {
 /** Python: `a >= b` -- see `triLt`'s own doc comment. */
 export function triGe(a: unknown, b: unknown): Tri {
 	return triCompare(a, b, (x, y) => x >= y);
+}
+
+/**
+ * Python: `a ^ b` (bitwise XOR, real Python's own idiom for chained "exactly one of N
+ * conditions holds" checks on plain `bool`s, e.g. `IfcGridAxis_WR2`:
+ * `(sizeof(partofu) == 1) ^ (sizeof(partofv) == 1) ^ (sizeof(partofw) == 1)`). Not
+ * needed by any Phase EX-4 chunk 1/2 rule -- first real consumer is chunk 3's own
+ * `IfcGridAxis_WR2`. CORRECTION (verified directly against `rule_compiler.py` lines
+ * 956-984): `indeterminate_type` does NOT override `__xor__`/`__rxor__` -- unlike every
+ * other dunder aliased to `bop` there, `^` is absent from that list. Real Python would
+ * therefore raise a `TypeError` (unsupported operand types) if `^` ever actually hit an
+ * `INDETERMINATE` operand, not silently propagate poison. This function's own
+ * poison-propagating behavior is chosen only for structural uniformity with this
+ * section's `triEq`/`triLt`/etc. neighbors, not because real Python does the same --
+ * and is confirmed dead code for every real call site found so far, since `PartOfU`/
+ * `PartOfV`/`PartOfW` are always-defined INVERSE `SET`s, never optional forward
+ * attributes, so `sizeof(...) == 1` can never actually be indeterminate here.
+ */
+export function triXor(a: Tri, b: Tri): Tri {
+	if (isIndeterminate(a) || isIndeterminate(b)) return INDETERMINATE;
+	return (a as boolean) !== (b as boolean);
 }
 
 /**

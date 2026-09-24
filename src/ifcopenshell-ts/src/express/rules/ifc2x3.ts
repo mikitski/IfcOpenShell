@@ -241,6 +241,41 @@ function ifcVector(orientation: EntityInstance, magnitude: number): EntityInstan
 }
 
 /**
+ * Exported (Phase EX-4 chunk 3, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+ * `express/whereRules/ifc2x3.ts`'s own `IfcCorrectDimensions` (a rule-file-local
+ * EXPRESS-library helper, not itself a WHERE-rule -- real source line 7439, used by
+ * `IfcNamedUnit_WR1`) needs a bare 7-arg `IfcDimensionalExponents(...)` constructor for
+ * each of its own 29 unit-type branches (e.g. `IfcDimensionalExponents(1, 0, 0, 0, 0,
+ * 0, 0)`) -- reused via this thin wrapper rather than re-derived, matching
+ * `ifcDirection`'s own established precedent immediately above ("export narrowly once
+ * a second real consumer exists"; this file's own `ifcDeriveDimensionalExponents`/
+ * `ifcDimensionsForSiUnit` already construct the exact same entity type inline via
+ * `getScratchFile().createEntity("IfcDimensionalExponents", ...)`, but neither exports
+ * a reusable positional-args constructor shaped for an external caller -- this fills
+ * that one gap without touching either existing function).
+ */
+export function ifcDimensionalExponents(
+	lengthExponent: number,
+	massExponent: number,
+	timeExponent: number,
+	electricCurrentExponent: number,
+	thermodynamicTemperatureExponent: number,
+	amountOfSubstanceExponent: number,
+	luminousIntensityExponent: number,
+): EntityInstance {
+	return getScratchFile().createEntity(
+		"IfcDimensionalExponents",
+		lengthExponent,
+		massExponent,
+		timeExponent,
+		electricCurrentExponent,
+		thermodynamicTemperatureExponent,
+		amountOfSubstanceExponent,
+		luminousIntensityExponent,
+	);
+}
+
+/**
  * Python: bare `IfcLine(*args, **kwargs)` convenience constructor (`IFC2X3.py` line
  * 2523, `return ifcopenshell.create_entity('IfcLine', 'IFC2X3', *args, **kwargs)`) --
  * called with `Pnt=`/`Dir=` kwargs by `calc_IfcRevolvedAreaSolid_AxisLine`/`calc_
