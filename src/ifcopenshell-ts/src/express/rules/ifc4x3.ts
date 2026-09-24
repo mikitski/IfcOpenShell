@@ -294,8 +294,14 @@ function ifcOrthogonalComplement(vec: unknown): EntityInstance | null {
 	]);
 }
 
-/** Python: `IfcCrossProduct` (`IFC4X3_ADD2.py`) -- byte-identical to `IFC4.py`'s own. */
-function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
+/**
+ * Python: `IfcCrossProduct` (`IFC4X3_ADD2.py`) -- byte-identical to `IFC4.py`'s own.
+ * **Exported starting with Phase EX-4's own IFC4X3_ADD2 chunk 1** (`whereRules/
+ * ifc4x3.ts`'s own `IfcAxis2Placement3D_AxisToRefDirPosition`/`IfcAxis2PlacementLinear_
+ * WR2` need it), exactly mirroring `rules/ifc4.ts`'s own identical `ifcCrossProduct`
+ * export precedent for `whereRules/ifc4.ts`'s IFC4 chunk 1.
+ */
+export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
 	if (
 		!exists(arg1) ||
 		expressGetAttr(arg1, "Dim", INDETERMINATE) === 2 ||
