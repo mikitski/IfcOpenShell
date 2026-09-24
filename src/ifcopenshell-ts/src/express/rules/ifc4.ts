@@ -246,8 +246,16 @@ function ifcOrthogonalComplement(vec: unknown): EntityInstance | null {
 	]);
 }
 
-/** Python: `IfcCrossProduct` (`IFC4.py`) -- byte-identical to IFC2X3's own. */
-function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
+/**
+ * Python: `IfcCrossProduct` (`IFC4.py`) -- byte-identical to IFC2X3's own.
+ *
+ * Exported as of Phase EX-4 IFC4 chunk 1 (`whereRules/ifc4.ts`) -- `IfcAxis2Placement3D_
+ * AxisToRefDirPosition`'s own real source body calls `IfcCrossProduct(axis,
+ * refdirection).Magnitude`, reusing this already-ported, already-tested function
+ * instead of re-deriving it, exactly mirroring `express/rules/ifc2x3.ts`'s own
+ * "export narrowly on second consumer" precedent for the same function.
+ */
+export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
 	if (
 		!exists(arg1) ||
 		expressGetAttr(arg1, "Dim", INDETERMINATE) === 2 ||

@@ -16,3 +16,4 @@
 // below -- nothing else in this barrel, `ruleDispatch.ts`, or `ruleExecutor.ts` needs to
 // change for it.
 import "./ifc2x3";
+import "./ifc4";
