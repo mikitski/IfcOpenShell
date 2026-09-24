@@ -4274,3 +4274,32 @@ retrigger, distinguishing it from a genuine regression before merging.
 diff (the shim function + registration, already written and verified compile-clean before this fix even
 started) is preserved, uncommitted-to-`v0.9.0`, in a dedicated local worktree, ready to be regenerated and
 shipped for real now that this blocker is cleared.
+
+### Native primitive-layer gap: mixing a raw JS value with an `EntityInstance` in the same SELECT-of-(entity|simple) LIST/aggregate attribute crashes the native process (worker death, not a JS exception)
+
+**Found:** 2026-09-24, while dispatching Phase EX-4 chunk 5 (final IFC2X3 WHERE-rule classes,
+`whereRules/ifc2x3.ts`) -- building a test fixture for `IfcTrimmedCurve.Trim1` (a SELECT-typed LIST
+attribute that can hold either wrapped `IfcCartesianPoint` entities or a raw `IfcParameterValue`-typed
+number) by assigning `[point(...), 1.5]` directly -- a raw JS `number` alongside an `EntityInstance` in
+the same JS array passed to a LIST/aggregate SELECT attribute setter -- kills the whole native worker
+process outright, not a catchable JS exception. Worked around in that PR's own test fixtures by wrapping
+the raw number as a proper standalone defined-type instance first (`file.createEntity("IfcParameterValue",
+1.5)`) before putting it in the list, which does NOT crash.
+
+**Not yet root-caused:** no native stack trace or ASan/UBSan repro captured yet (chunk 5's own CI run,
+including asan-ubsan, passed -- meaning the crashing construction was never actually exercised by that
+PR's final, fixed test suite, only by an intermediate iteration during authoring). Suspected shape: the
+attribute-value marshaling path for a LIST/aggregate SELECT attribute likely assumes every element is
+either uniformly a wrapped handle or uniformly a raw primitive when building the underlying `aggregate_of_instance`/
+value vector, and a mixed list violates that assumption at the C++ layer without a bounds/type check.
+
+**Impact:** any future WHERE-rule, calc function, or ordinary API call that constructs a SELECT-of-
+(entity|simple)-typed LIST/aggregate attribute with a genuinely mixed raw/wrapped element list will hit
+this. Not yet known how many such attributes exist in the schema or whether any already-merged code
+constructs one this way (not audited).
+
+**Depends on / blocked by:** nothing blocks other work in the meantime -- always wrapping raw simple
+values in their own defined-type instance before adding them to such a list (as chunk 5's own test
+fixtures now do) is a safe, always-available workaround; this entry tracks the underlying native gap for
+whoever next has reason to fix the marshaling layer itself, or to reproduce it under ASan for a proper
+root cause.
