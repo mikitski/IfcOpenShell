@@ -1099,6 +1099,741 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 	});
 
 	// =============================================================================
+	// Phase EX-4, IFC4X3_ADD2 chunk 2: original, hand-rolled coverage for the 120
+	// WHERE-rule classes this chunk adds to `src/express/whereRules/ifc4x3.ts` (real source
+	// lines 6176-7421, `IfcBooleanResult_SecondOperandClosed` through `IfcDerivedUnit_WR1`)
+	// -- same conventions as chunk 1's own tests above: data-driven `describe.each` blocks
+	// for the two dominant shapes (`correctPredefinedType`/`correctTypeAssigned`, 58/24
+	// call sites respectively), individual `describe` blocks for every other rule.
+	// `create`/`set`/`typeAssign`/`point2D`/`point3D`/`direction3D`/`polyline2D`/
+	// `polyline3D`/`planeSurface` are all reused directly from chunk 1's own module-scope
+	// helpers above (this file is one shared module, not per-chunk).
+	//
+	// 104 of this chunk's 120 rules are byte-identical to `whereRules/ifc4.ts`'s own IFC4
+	// chunk 2 bodies (see `ifc4x3.ts`'s own header comment for the full disclosure) --
+	// their test fixtures are correspondingly identical to `ifc4.test.ts`'s own (same
+	// pass/fail values), just re-targeted at the `IFC4X3_ADD2` schema/registry. The 16
+	// genuinely-no-IFC4-counterpart rules (14 ordinary `_CorrectPredefinedType`/
+	// `_CorrectTypeAssigned` shapes on new-in-ADD2 entities, already covered by the two
+	// data tables below; `IfcBuiltElement.MaxOneMaterialAssociation`, IFC4's own renamed
+	// `IfcBuildingElement` rule; `IfcCoordinateReferenceSystem.NameOrWKT`, a genuinely
+	// bespoke new shape) get fresh, original fixtures below.
+	// =============================================================================
+
+	interface CorrectPredefinedTypeCaseChunk2 {
+		readonly typeName: string;
+		readonly escapeAttr: string;
+		readonly optional: boolean;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own chunk 2 `correctPredefinedType(...)`
+	// call sites (real source lines 6176-7421) -- `optional` matches that file's own
+	// `predefinedTypeOptional` argument at each site exactly (independently re-derived via a
+	// small script scanning the real ADD2 rule bodies directly, not hand-transcribed).
+	const correctPredefinedTypeCasesChunk2: readonly CorrectPredefinedTypeCaseChunk2[] = [
+		{ typeName: "IfcBridge", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBridgePart", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBuildingElementPart", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBuildingElementPartType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcBuildingElementProxy", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBuildingElementProxyType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcBuildingSystem", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBuiltSystem", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBurner", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcBurnerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCableCarrierFitting", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCableCarrierFittingType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCableCarrierSegment", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCableCarrierSegmentType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCableFitting", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCableFittingType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCableSegment", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCableSegmentType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCaissonFoundation", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCaissonFoundationType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcChiller", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcChillerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcChimney", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcChimneyType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCoil", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCoilType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcColumn", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcColumnType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCommunicationsAppliance", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCommunicationsApplianceType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCompressor", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCompressorType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCondenser", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCondenserType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcConstructionEquipmentResource", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcConstructionEquipmentResourceType", escapeAttr: "ResourceType", optional: false },
+		{ typeName: "IfcConstructionMaterialResource", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcConstructionMaterialResourceType", escapeAttr: "ResourceType", optional: false },
+		{ typeName: "IfcConstructionProductResource", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcConstructionProductResourceType", escapeAttr: "ResourceType", optional: false },
+		{ typeName: "IfcController", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcControllerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcConveyorSegment", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcConveyorSegmentType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCooledBeam", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCooledBeamType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCoolingTower", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCoolingTowerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCourse", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCourseType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCovering", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCoveringType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcCrewResource", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCrewResourceType", escapeAttr: "ResourceType", optional: false },
+		{ typeName: "IfcCurtainWall", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcCurtainWallType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcDamper", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcDamperType", escapeAttr: "ElementType", optional: false },
+	];
+
+	describe.each(correctPredefinedTypeCasesChunk2)(
+		"$typeName.CorrectPredefinedType (chunk 2)",
+		({ typeName, escapeAttr, optional }) => {
+			test("pass: PredefinedType is a non-USERDEFINED enum value", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "NOTDEFINED");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("pass: PredefinedType is USERDEFINED and the escape attribute is given", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				set(inst, escapeAttr, "a custom value");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("fail: PredefinedType is USERDEFINED but the escape attribute is missing", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				expectFail(typeName, "CorrectPredefinedType", inst);
+			});
+			if (optional) {
+				test("pass: PredefinedType is not given at all (optional on this entity)", () => {
+					const inst = create(typeName);
+					expectPass(typeName, "CorrectPredefinedType", inst);
+				});
+			}
+		},
+	);
+
+	interface CorrectTypeAssignedCaseChunk2 {
+		readonly typeName: string;
+		readonly expectedTypeName: string;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own chunk 2 `correctTypeAssigned(...)`
+	// call sites (real source lines 6176-7421).
+	const correctTypeAssignedCasesChunk2: readonly CorrectTypeAssignedCaseChunk2[] = [
+		{ typeName: "IfcBuildingElementPart", expectedTypeName: "IfcBuildingElementPartType" },
+		{ typeName: "IfcBuildingElementProxy", expectedTypeName: "IfcBuildingElementProxyType" },
+		{ typeName: "IfcBurner", expectedTypeName: "IfcBurnerType" },
+		{ typeName: "IfcCableCarrierFitting", expectedTypeName: "IfcCableCarrierFittingType" },
+		{ typeName: "IfcCableCarrierSegment", expectedTypeName: "IfcCableCarrierSegmentType" },
+		{ typeName: "IfcCableFitting", expectedTypeName: "IfcCableFittingType" },
+		{ typeName: "IfcCableSegment", expectedTypeName: "IfcCableSegmentType" },
+		{ typeName: "IfcCaissonFoundation", expectedTypeName: "IfcCaissonFoundationType" },
+		{ typeName: "IfcChiller", expectedTypeName: "IfcChillerType" },
+		{ typeName: "IfcChimney", expectedTypeName: "IfcChimneyType" },
+		{ typeName: "IfcCoil", expectedTypeName: "IfcCoilType" },
+		{ typeName: "IfcColumn", expectedTypeName: "IfcColumnType" },
+		{ typeName: "IfcCommunicationsAppliance", expectedTypeName: "IfcCommunicationsApplianceType" },
+		{ typeName: "IfcCompressor", expectedTypeName: "IfcCompressorType" },
+		{ typeName: "IfcCondenser", expectedTypeName: "IfcCondenserType" },
+		{ typeName: "IfcController", expectedTypeName: "IfcControllerType" },
+		{ typeName: "IfcConveyorSegment", expectedTypeName: "IfcConveyorSegmentType" },
+		{ typeName: "IfcCooledBeam", expectedTypeName: "IfcCooledBeamType" },
+		{ typeName: "IfcCoolingTower", expectedTypeName: "IfcCoolingTowerType" },
+		{ typeName: "IfcCourse", expectedTypeName: "IfcCourseType" },
+		{ typeName: "IfcCovering", expectedTypeName: "IfcCoveringType" },
+		{ typeName: "IfcCurtainWall", expectedTypeName: "IfcCurtainWallType" },
+		{ typeName: "IfcDamper", expectedTypeName: "IfcDamperType" },
+		{ typeName: "IfcDeepFoundation", expectedTypeName: "IfcDeepFoundationType" },
+	];
+
+	describe.each(correctTypeAssignedCasesChunk2)(
+		"$typeName.CorrectTypeAssigned (chunk 2)",
+		({ typeName, expectedTypeName }) => {
+			test("pass: no IsTypedBy at all", () => {
+				const inst = create(typeName);
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("pass: IsTypedBy's RelatingType is the expected *Type", () => {
+				const inst = create(typeName);
+				typeAssign(inst, create(expectedTypeName));
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("fail: IsTypedBy's RelatingType is a mismatched *Type", () => {
+				const inst = create(typeName);
+				// `IfcActuatorType` (chunk 1) is a real, always-available *Type entity not equal
+				// to any `expectedTypeName` this chunk's own cases use.
+				typeAssign(inst, create("IfcActuatorType"));
+				expectFail(typeName, "CorrectTypeAssigned", inst);
+			});
+		},
+	);
+	describe("IfcBooleanResult.SecondOperandClosed", () => {
+		test("pass: SecondOperand is not an IfcTessellatedFaceSet", () => {
+			const result = create("IfcBooleanResult");
+			set(result, "SecondOperand", create("IfcBlock")); // vacuously passes
+			expectPass("IfcBooleanResult", "SecondOperandClosed", result);
+		});
+		test("pass: SecondOperand is a closed IfcTessellatedFaceSet", () => {
+			const closedFaceSet = create("IfcPolygonalFaceSet");
+			set(closedFaceSet, "Closed", true);
+			const result = create("IfcBooleanResult");
+			set(result, "SecondOperand", closedFaceSet);
+			expectPass("IfcBooleanResult", "SecondOperandClosed", result);
+		});
+		test("fail: SecondOperand is an open IfcTessellatedFaceSet", () => {
+			const openFaceSet = create("IfcPolygonalFaceSet");
+			set(openFaceSet, "Closed", false);
+			const result = create("IfcBooleanResult");
+			set(result, "SecondOperand", openFaceSet);
+			expectFail("IfcBooleanResult", "SecondOperandClosed", result);
+		});
+	});
+
+	describe("IfcBoundaryCurve.IsClosed", () => {
+		test("pass: ClosedCurve reads back INDETERMINATE for an empty Segments list (not treated as failure)", () => {
+			const curve = create("IfcBoundaryCurve");
+			set(curve, "Segments", []);
+			set(curve, "SelfIntersect", false);
+			expectPass("IfcBoundaryCurve", "IsClosed", curve);
+		});
+	});
+
+	describe("IfcBoxedHalfSpace.UnboundedSurface", () => {
+		test("pass: BaseSurface is not an IfcCurveBoundedPlane", () => {
+			const halfSpace = create("IfcBoxedHalfSpace");
+			set(halfSpace, "BaseSurface", planeSurface());
+			expectPass("IfcBoxedHalfSpace", "UnboundedSurface", halfSpace);
+		});
+		test("fail: BaseSurface is an IfcCurveBoundedPlane", () => {
+			const halfSpace = create("IfcBoxedHalfSpace");
+			set(halfSpace, "BaseSurface", create("IfcCurveBoundedPlane"));
+			expectFail("IfcBoxedHalfSpace", "UnboundedSurface", halfSpace);
+		});
+	});
+
+	describe("IfcBuildingElementProxy.HasObjectName", () => {
+		test("pass: Name given", () => {
+			const proxy = create("IfcBuildingElementProxy");
+			set(proxy, "Name", "Proxy 1");
+			expectPass("IfcBuildingElementProxy", "HasObjectName", proxy);
+		});
+		test("fail: Name not given", () => {
+			expectFail("IfcBuildingElementProxy", "HasObjectName", create("IfcBuildingElementProxy"));
+		});
+	});
+
+	// `IfcBuiltElement` is IFC4X3_ADD2's own rename of IFC4's `IfcBuildingElement` (see
+	// `whereRules/ifc4x3.ts`'s own header comment) -- `IfcBuildingElementProxy` (also this
+	// chunk) is a real, concrete, always-available `IfcBuiltElement` subtype fixture.
+	describe("IfcBuiltElement.MaxOneMaterialAssociation", () => {
+		function relAssociatesMaterial(relatedObject: EntityInstance): void {
+			const rel = create("IfcRelAssociatesMaterial");
+			set(rel, "RelatedObjects", [relatedObject]);
+			set(rel, "RelatingMaterial", create("IfcMaterial"));
+		}
+
+		test("pass: zero or one material association", () => {
+			expectPass("IfcBuiltElement", "MaxOneMaterialAssociation", create("IfcBuildingElementProxy"));
+
+			const singleAssociated = create("IfcBuildingElementProxy");
+			relAssociatesMaterial(singleAssociated);
+			expectPass("IfcBuiltElement", "MaxOneMaterialAssociation", singleAssociated);
+		});
+		test("fail: two material associations", () => {
+			const doubleAssociated = create("IfcBuildingElementProxy");
+			relAssociatesMaterial(doubleAssociated);
+			relAssociatesMaterial(doubleAssociated);
+			expectFail("IfcBuiltElement", "MaxOneMaterialAssociation", doubleAssociated);
+		});
+	});
+
+	describe("IfcCShapeProfileDef", () => {
+		function profile(overrides: Record<string, unknown>): EntityInstance {
+			const p = create("IfcCShapeProfileDef");
+			set(p, "Depth", 100);
+			set(p, "Width", 80);
+			set(p, "WallThickness", 5);
+			set(p, "Girth", 10);
+			for (const [k, v] of Object.entries(overrides)) set(p, k, v);
+			return p;
+		}
+
+		test("ValidGirth pass/fail", () => {
+			expectPass("IfcCShapeProfileDef", "ValidGirth", profile({ Girth: 40 }));
+			expectFail("IfcCShapeProfileDef", "ValidGirth", profile({ Girth: 60 }));
+		});
+		test("ValidInternalFilletRadius pass/fail", () => {
+			expectPass("IfcCShapeProfileDef", "ValidInternalFilletRadius", profile({}));
+			expectPass("IfcCShapeProfileDef", "ValidInternalFilletRadius", profile({ InternalFilletRadius: 10 }));
+			expectFail("IfcCShapeProfileDef", "ValidInternalFilletRadius", profile({ InternalFilletRadius: 50 }));
+		});
+		test("ValidWallThickness pass/fail", () => {
+			expectPass("IfcCShapeProfileDef", "ValidWallThickness", profile({ WallThickness: 10 }));
+			expectFail("IfcCShapeProfileDef", "ValidWallThickness", profile({ WallThickness: 50 }));
+		});
+	});
+
+	describe("IfcCartesianPoint.CP2Dor3D", () => {
+		test("pass/fail", () => {
+			expectPass("IfcCartesianPoint", "CP2Dor3D", point2D([0, 0]));
+			expectFail("IfcCartesianPoint", "CP2Dor3D", point2D([0]));
+		});
+	});
+
+	describe("IfcCartesianTransformationOperator.ScaleGreaterZero", () => {
+		test("pass/fail", () => {
+			// `Scl` is a DERIVE attribute (`nvl(Scale, 1.0)`) -- the forward `Scale` attribute
+			// is set instead.
+			const op = create("IfcCartesianTransformationOperator");
+			set(op, "Scale", 1.0);
+			expectPass("IfcCartesianTransformationOperator", "ScaleGreaterZero", op);
+
+			const badOp = create("IfcCartesianTransformationOperator");
+			set(badOp, "Scale", 0.0);
+			expectFail("IfcCartesianTransformationOperator", "ScaleGreaterZero", badOp);
+		});
+	});
+
+	describe("IfcCartesianTransformationOperator2D", () => {
+		test("DimEqual2 pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator2D");
+			set(op, "LocalOrigin", point2D([0, 0]));
+			expectPass("IfcCartesianTransformationOperator2D", "DimEqual2", op);
+
+			const badOp = create("IfcCartesianTransformationOperator2D");
+			set(badOp, "LocalOrigin", point3D([0, 0, 0]));
+			expectFail("IfcCartesianTransformationOperator2D", "DimEqual2", badOp);
+		});
+		test("Axis1Is2D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator2D");
+			expectPass("IfcCartesianTransformationOperator2D", "Axis1Is2D", op); // unset -- passes
+
+			set(op, "Axis1", direction3D([1, 0]));
+			expectPass("IfcCartesianTransformationOperator2D", "Axis1Is2D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator2D");
+			set(badOp, "Axis1", direction3D([1, 0, 0]));
+			expectFail("IfcCartesianTransformationOperator2D", "Axis1Is2D", badOp);
+		});
+		test("Axis2Is2D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator2D");
+			set(op, "Axis2", direction3D([0, 1]));
+			expectPass("IfcCartesianTransformationOperator2D", "Axis2Is2D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator2D");
+			set(badOp, "Axis2", direction3D([0, 1, 0]));
+			expectFail("IfcCartesianTransformationOperator2D", "Axis2Is2D", badOp);
+		});
+	});
+
+	describe("IfcCartesianTransformationOperator2DnonUniform.Scale2GreaterZero", () => {
+		test("pass/fail", () => {
+			// `Scl2` is a DERIVE attribute (`nvl(Scale2, Scl)`) -- the forward `Scale2`
+			// attribute is set instead.
+			const op = create("IfcCartesianTransformationOperator2DnonUniform");
+			set(op, "Scale2", 1.0);
+			expectPass("IfcCartesianTransformationOperator2DnonUniform", "Scale2GreaterZero", op);
+
+			const badOp = create("IfcCartesianTransformationOperator2DnonUniform");
+			set(badOp, "Scale2", 0.0);
+			expectFail("IfcCartesianTransformationOperator2DnonUniform", "Scale2GreaterZero", badOp);
+		});
+	});
+
+	describe("IfcCartesianTransformationOperator3D", () => {
+		test("DimIs3D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3D");
+			set(op, "LocalOrigin", point3D([0, 0, 0]));
+			expectPass("IfcCartesianTransformationOperator3D", "DimIs3D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3D");
+			set(badOp, "LocalOrigin", point2D([0, 0]));
+			expectFail("IfcCartesianTransformationOperator3D", "DimIs3D", badOp);
+		});
+		test("Axis1Is3D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3D");
+			set(op, "Axis1", direction3D([1, 0, 0]));
+			expectPass("IfcCartesianTransformationOperator3D", "Axis1Is3D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3D");
+			set(badOp, "Axis1", direction3D([1, 0]));
+			expectFail("IfcCartesianTransformationOperator3D", "Axis1Is3D", badOp);
+		});
+		test("Axis2Is3D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3D");
+			set(op, "Axis2", direction3D([0, 1, 0]));
+			expectPass("IfcCartesianTransformationOperator3D", "Axis2Is3D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3D");
+			set(badOp, "Axis2", direction3D([0, 1]));
+			expectFail("IfcCartesianTransformationOperator3D", "Axis2Is3D", badOp);
+		});
+		test("Axis3Is3D pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3D");
+			set(op, "Axis3", direction3D([0, 0, 1]));
+			expectPass("IfcCartesianTransformationOperator3D", "Axis3Is3D", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3D");
+			set(badOp, "Axis3", direction3D([0, 1]));
+			expectFail("IfcCartesianTransformationOperator3D", "Axis3Is3D", badOp);
+		});
+	});
+
+	describe("IfcCartesianTransformationOperator3DnonUniform", () => {
+		test("Scale2GreaterZero pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3DnonUniform");
+			set(op, "Scale2", 1.0);
+			expectPass("IfcCartesianTransformationOperator3DnonUniform", "Scale2GreaterZero", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3DnonUniform");
+			set(badOp, "Scale2", 0.0);
+			expectFail("IfcCartesianTransformationOperator3DnonUniform", "Scale2GreaterZero", badOp);
+		});
+		test("Scale3GreaterZero pass/fail", () => {
+			const op = create("IfcCartesianTransformationOperator3DnonUniform");
+			set(op, "Scale3", 1.0);
+			expectPass("IfcCartesianTransformationOperator3DnonUniform", "Scale3GreaterZero", op);
+
+			const badOp = create("IfcCartesianTransformationOperator3DnonUniform");
+			set(badOp, "Scale3", 0.0);
+			expectFail("IfcCartesianTransformationOperator3DnonUniform", "Scale3GreaterZero", badOp);
+		});
+	});
+
+	describe("IfcCircleHollowProfileDef.WR1", () => {
+		test("pass/fail", () => {
+			const profile = create("IfcCircleHollowProfileDef");
+			set(profile, "Radius", 10);
+			set(profile, "WallThickness", 2);
+			expectPass("IfcCircleHollowProfileDef", "WR1", profile);
+
+			const badProfile = create("IfcCircleHollowProfileDef");
+			set(badProfile, "Radius", 10);
+			set(badProfile, "WallThickness", 10);
+			expectFail("IfcCircleHollowProfileDef", "WR1", badProfile);
+		});
+	});
+
+	describe("IfcComplexProperty", () => {
+		function singleValue(name: string): EntityInstance {
+			const p = create("IfcPropertySingleValue");
+			set(p, "Name", name);
+			return p;
+		}
+
+		test("WR21 pass/fail (no self-reference)", () => {
+			const prop = create("IfcComplexProperty");
+			set(prop, "HasProperties", [singleValue("A")]);
+			expectPass("IfcComplexProperty", "WR21", prop);
+
+			const selfReferencing = create("IfcComplexProperty");
+			set(selfReferencing, "HasProperties", [selfReferencing]);
+			expectFail("IfcComplexProperty", "WR21", selfReferencing);
+		});
+		test("WR22 pass/fail (unique property names)", () => {
+			const prop = create("IfcComplexProperty");
+			set(prop, "HasProperties", [singleValue("A"), singleValue("B")]);
+			expectPass("IfcComplexProperty", "WR22", prop);
+
+			const dup = create("IfcComplexProperty");
+			set(dup, "HasProperties", [singleValue("A"), singleValue("A")]);
+			expectFail("IfcComplexProperty", "WR22", dup);
+		});
+	});
+
+	describe("IfcComplexPropertyTemplate", () => {
+		function simpleTemplate(name: string): EntityInstance {
+			const t = create("IfcSimplePropertyTemplate");
+			set(t, "Name", name);
+			return t;
+		}
+
+		test("UniquePropertyNames pass/fail", () => {
+			const template = create("IfcComplexPropertyTemplate");
+			set(template, "HasPropertyTemplates", [simpleTemplate("A"), simpleTemplate("B")]);
+			expectPass("IfcComplexPropertyTemplate", "UniquePropertyNames", template);
+
+			const dup = create("IfcComplexPropertyTemplate");
+			set(dup, "HasPropertyTemplates", [simpleTemplate("A"), simpleTemplate("A")]);
+			expectFail("IfcComplexPropertyTemplate", "UniquePropertyNames", dup);
+		});
+		test("NoSelfReference pass/fail", () => {
+			const template = create("IfcComplexPropertyTemplate");
+			set(template, "HasPropertyTemplates", [simpleTemplate("A")]);
+			expectPass("IfcComplexPropertyTemplate", "NoSelfReference", template);
+
+			const selfReferencing = create("IfcComplexPropertyTemplate");
+			set(selfReferencing, "HasPropertyTemplates", [selfReferencing]);
+			expectFail("IfcComplexPropertyTemplate", "NoSelfReference", selfReferencing);
+		});
+	});
+
+	function compositeCurveSegment(parentCurve: EntityInstance, transition = "CONTINUOUS"): EntityInstance {
+		const seg = create("IfcCompositeCurveSegment");
+		set(seg, "Transition", transition);
+		set(seg, "SameSense", true);
+		set(seg, "ParentCurve", parentCurve);
+		return seg;
+	}
+
+	describe("IfcCompositeCurve.CurveContinuous", () => {
+		test("pass: open curve with exactly one DISCONTINUOUS-transition segment", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [compositeCurveSegment(polyline3D(), "DISCONTINUOUS")]);
+			set(curve, "SelfIntersect", false);
+			expectPass("IfcCompositeCurve", "CurveContinuous", curve);
+		});
+		test("fail: open curve (last segment DISCONTINUOUS) with more than one DISCONTINUOUS segment", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [
+				compositeCurveSegment(polyline3D(), "DISCONTINUOUS"),
+				compositeCurveSegment(polyline3D(), "DISCONTINUOUS"),
+			]);
+			set(curve, "SelfIntersect", false);
+			expectFail("IfcCompositeCurve", "CurveContinuous", curve);
+		});
+		test("pass: closed curve (last segment not DISCONTINUOUS) with zero DISCONTINUOUS segments", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [
+				compositeCurveSegment(polyline3D(), "CONTINUOUS"),
+				compositeCurveSegment(polyline3D(), "CONTINUOUS"),
+			]);
+			set(curve, "SelfIntersect", false);
+			expectPass("IfcCompositeCurve", "CurveContinuous", curve);
+		});
+		test("fail: closed curve (last segment not DISCONTINUOUS) but an earlier segment is DISCONTINUOUS", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [
+				compositeCurveSegment(polyline3D(), "DISCONTINUOUS"),
+				compositeCurveSegment(polyline3D(), "CONTINUOUS"),
+			]);
+			set(curve, "SelfIntersect", false);
+			expectFail("IfcCompositeCurve", "CurveContinuous", curve);
+		});
+	});
+
+	describe("IfcCompositeCurve.SameDim", () => {
+		test("pass: every segment's own ParentCurve shares the first segment's own Dim", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [compositeCurveSegment(polyline3D()), compositeCurveSegment(polyline3D())]);
+			expectPass("IfcCompositeCurve", "SameDim", curve);
+		});
+		test("fail: a later segment's own ParentCurve has a different Dim", () => {
+			const curve = create("IfcCompositeCurve");
+			set(curve, "Segments", [compositeCurveSegment(polyline3D()), compositeCurveSegment(polyline2D())]);
+			expectFail("IfcCompositeCurve", "SameDim", curve);
+		});
+	});
+
+	function pcurveOn(basisSurface: EntityInstance): EntityInstance {
+		const pcurve = create("IfcPcurve");
+		set(pcurve, "BasisSurface", basisSurface);
+		set(pcurve, "ReferenceCurve", polyline2D());
+		return pcurve;
+	}
+
+	describe("IfcCompositeCurveOnSurface.SameSurface", () => {
+		test("pass: single segment whose own ParentCurve is an IfcPcurve", () => {
+			// `BasisSurface` is a DERIVE attribute (`calc_IfcCompositeCurveOnSurface_BasisSurface`
+			// -> `IfcGetBasisSurface`, Phase EX-2). A single segment whose own `ParentCurve` is
+			// an `IfcPcurve` is the one path that resolves without throwing (recurses into the
+			// `IfcPcurve`'s own `BasisSurface`, a 1-element result).
+			const curve = create("IfcCompositeCurveOnSurface");
+			set(curve, "Segments", [compositeCurveSegment(pcurveOn(planeSurface()))]);
+			set(curve, "SelfIntersect", false);
+			expectPass("IfcCompositeCurveOnSurface", "SameSurface", curve);
+		});
+		test("fail: single segment whose own ParentCurve resolves to an empty BasisSurface", () => {
+			const curve = create("IfcCompositeCurveOnSurface");
+			set(curve, "Segments", [compositeCurveSegment(polyline3D())]);
+			set(curve, "SelfIntersect", false);
+			expectFail("IfcCompositeCurveOnSurface", "SameSurface", curve);
+		});
+	});
+
+	describe("IfcCompositeCurveSegment.ParentIsBoundedCurve", () => {
+		test("pass/fail", () => {
+			expectPass("IfcCompositeCurveSegment", "ParentIsBoundedCurve", compositeCurveSegment(polyline3D()));
+			expectFail("IfcCompositeCurveSegment", "ParentIsBoundedCurve", compositeCurveSegment(create("IfcLine")));
+		});
+	});
+
+	describe("IfcCompositeProfileDef", () => {
+		function profileWithType(profileType: string): EntityInstance {
+			const p = create("IfcRectangleProfileDef");
+			set(p, "ProfileType", profileType);
+			set(p, "XDim", 1);
+			set(p, "YDim", 1);
+			return p;
+		}
+
+		test("InvariantProfileType pass/fail", () => {
+			const composite = create("IfcCompositeProfileDef");
+			set(composite, "Profiles", [profileWithType("AREA"), profileWithType("AREA")]);
+			expectPass("IfcCompositeProfileDef", "InvariantProfileType", composite);
+
+			const mismatched = create("IfcCompositeProfileDef");
+			set(mismatched, "Profiles", [profileWithType("AREA"), profileWithType("CURVE")]);
+			expectFail("IfcCompositeProfileDef", "InvariantProfileType", mismatched);
+		});
+		test("NoRecursion pass/fail", () => {
+			const composite = create("IfcCompositeProfileDef");
+			set(composite, "Profiles", [profileWithType("AREA")]);
+			expectPass("IfcCompositeProfileDef", "NoRecursion", composite);
+
+			const recursive = create("IfcCompositeProfileDef");
+			set(recursive, "Profiles", [create("IfcCompositeProfileDef")]);
+			expectFail("IfcCompositeProfileDef", "NoRecursion", recursive);
+		});
+	});
+
+	describe("IfcConstraint.WR11", () => {
+		test("pass: ConstraintGrade is not USERDEFINED", () => {
+			const constraint = create("IfcConstraint");
+			set(constraint, "ConstraintGrade", "HARD");
+			expectPass("IfcConstraint", "WR11", constraint);
+		});
+		test("pass: ConstraintGrade is USERDEFINED and UserDefinedGrade is given", () => {
+			const constraint = create("IfcConstraint");
+			set(constraint, "ConstraintGrade", "USERDEFINED");
+			set(constraint, "UserDefinedGrade", "Something");
+			expectPass("IfcConstraint", "WR11", constraint);
+		});
+		test("fail: ConstraintGrade is USERDEFINED but UserDefinedGrade is missing", () => {
+			const constraint = create("IfcConstraint");
+			set(constraint, "ConstraintGrade", "USERDEFINED");
+			expectFail("IfcConstraint", "WR11", constraint);
+		});
+	});
+
+	// `IfcCoordinateReferenceSystem` itself already exists in IFC4 but carries no WHERE-rule
+	// there -- see `whereRules/ifc4x3.ts`'s own header comment ("genuinely bespoke shape").
+	// `WellKnownText` is a genuine INVERSE attribute on `IfcCoordinateReferenceSystem`
+	// (`SET [0:1] OF IfcWellKnownText`, confirmed directly against the real compiled native
+	// schema, `src/ifcparse/schemas/Ifc4x3_add2-schema.cpp`, not settable via a plain
+	// `set(...)` the way a forward attribute is) -- built the same way this file's own
+	// `typeAssign` helper builds `IsTypedBy` for `_CorrectTypeAssigned` tests: construct the
+	// real referencing `IfcWellKnownText` instance whose own forward `CoordinateReferenceSystem`
+	// attribute points back at the CRS under test.
+	function wellKnownTextFor(crs: EntityInstance, text: string): void {
+		const wkt = create("IfcWellKnownText");
+		set(wkt, "WellKnownText", text);
+		set(wkt, "CoordinateReferenceSystem", crs);
+	}
+
+	describe("IfcCoordinateReferenceSystem.NameOrWKT", () => {
+		test("pass: WellKnownText has exactly one element", () => {
+			const crs = create("IfcCoordinateReferenceSystem");
+			wellKnownTextFor(crs, "PROJCS[...]");
+			expectPass("IfcCoordinateReferenceSystem", "NameOrWKT", crs);
+		});
+		test("pass: Name is given (WellKnownText empty)", () => {
+			const crs = create("IfcCoordinateReferenceSystem");
+			set(crs, "Name", "EPSG:4326");
+			expectPass("IfcCoordinateReferenceSystem", "NameOrWKT", crs);
+		});
+		test("fail: neither a 1-element WellKnownText nor a Name", () => {
+			expectFail("IfcCoordinateReferenceSystem", "NameOrWKT", create("IfcCoordinateReferenceSystem"));
+		});
+	});
+
+	describe("IfcCurveStyle", () => {
+		function lengthMeasure(value: number): EntityInstance {
+			return file.createEntity("IfcPositiveLengthMeasure", value as unknown as never);
+		}
+		function descriptiveMeasure(value: string): EntityInstance {
+			return file.createEntity("IfcDescriptiveMeasure", value as unknown as never);
+		}
+
+		test("MeasureOfWidth pass/fail", () => {
+			expectPass("IfcCurveStyle", "MeasureOfWidth", create("IfcCurveStyle")); // CurveWidth unset
+
+			const withLength = create("IfcCurveStyle");
+			set(withLength, "CurveWidth", lengthMeasure(5.0));
+			expectPass("IfcCurveStyle", "MeasureOfWidth", withLength);
+
+			const withByLayer = create("IfcCurveStyle");
+			set(withByLayer, "CurveWidth", descriptiveMeasure("by layer"));
+			expectPass("IfcCurveStyle", "MeasureOfWidth", withByLayer);
+
+			const bad = create("IfcCurveStyle");
+			set(bad, "CurveWidth", descriptiveMeasure("solid"));
+			expectFail("IfcCurveStyle", "MeasureOfWidth", bad);
+		});
+		test("IdentifiableCurveStyle pass/fail", () => {
+			const withFont = create("IfcCurveStyle");
+			set(withFont, "CurveFont", create("IfcCurveStyleFont"));
+			expectPass("IfcCurveStyle", "IdentifiableCurveStyle", withFont);
+
+			expectFail("IfcCurveStyle", "IdentifiableCurveStyle", create("IfcCurveStyle"));
+		});
+	});
+
+	describe("IfcCurveStyleFontPattern.VisibleLengthGreaterEqualZero", () => {
+		test("pass/fail", () => {
+			const pattern = create("IfcCurveStyleFontPattern");
+			set(pattern, "VisibleSegmentLength", 0.0);
+			expectPass("IfcCurveStyleFontPattern", "VisibleLengthGreaterEqualZero", pattern);
+
+			const badPattern = create("IfcCurveStyleFontPattern");
+			set(badPattern, "VisibleSegmentLength", -1.0);
+			expectFail("IfcCurveStyleFontPattern", "VisibleLengthGreaterEqualZero", badPattern);
+		});
+	});
+
+	describe("IfcDerivedProfileDef.InvariantProfileType", () => {
+		function parentWithType(profileType: string): EntityInstance {
+			const p = create("IfcRectangleProfileDef");
+			set(p, "ProfileType", profileType);
+			set(p, "XDim", 1);
+			set(p, "YDim", 1);
+			return p;
+		}
+
+		test("pass/fail", () => {
+			const derived = create("IfcDerivedProfileDef");
+			set(derived, "ProfileType", "AREA");
+			set(derived, "ParentProfile", parentWithType("AREA"));
+			expectPass("IfcDerivedProfileDef", "InvariantProfileType", derived);
+
+			const badDerived = create("IfcDerivedProfileDef");
+			set(badDerived, "ProfileType", "CURVE");
+			set(badDerived, "ParentProfile", parentWithType("AREA"));
+			expectFail("IfcDerivedProfileDef", "InvariantProfileType", badDerived);
+		});
+	});
+
+	describe("IfcDerivedUnit.WR1", () => {
+		function derivedUnitElement(exponent: number): EntityInstance {
+			const el = create("IfcDerivedUnitElement");
+			set(el, "Unit", create("IfcSIUnit"));
+			set(el, "Exponent", exponent);
+			return el;
+		}
+
+		test("pass/fail", () => {
+			const twoElements = create("IfcDerivedUnit");
+			set(twoElements, "Elements", [derivedUnitElement(1), derivedUnitElement(-1)]);
+			expectPass("IfcDerivedUnit", "WR1", twoElements);
+
+			const oneNonUnitExponent = create("IfcDerivedUnit");
+			set(oneNonUnitExponent, "Elements", [derivedUnitElement(2)]);
+			expectPass("IfcDerivedUnit", "WR1", oneNonUnitExponent);
+
+			const oneUnitExponent = create("IfcDerivedUnit");
+			set(oneUnitExponent, "Elements", [derivedUnitElement(1)]);
+			expectFail("IfcDerivedUnit", "WR1", oneUnitExponent);
+		});
+	});
+
+	// =============================================================================
 	// End-to-end wiring: `executeRules(file)` against the REAL registered rules above,
 	// on a dedicated, freshly-constructed file -- mirrors `ifc2x3.test.ts`'s/
 	// `ifc4.test.ts`'s own identical end-to-end block, closing the same "registry ->
@@ -1144,7 +1879,24 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 			expect(violations.some((v) => v.message.includes("IfcBearingType.CorrectPredefinedType"))).toBe(true);
 		});
 
-		test("a well-formed instance produces zero violations from any of the 100 registered rules", () => {
+		test("a chunk-2 genuinely-new-in-ADD2 rule violation (IfcCaissonFoundationType.CorrectPredefinedType) is detected", () => {
+			const wiringFile = blankFile();
+			const caissonType = wiringFile.createEntity("IfcCaissonFoundationType");
+			(caissonType as unknown as Record<string, unknown>).PredefinedType = "USERDEFINED";
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcCaissonFoundationType.CorrectPredefinedType"))).toBe(true);
+		});
+
+		test("a chunk-2 bespoke-shape rule violation (IfcCoordinateReferenceSystem.NameOrWKT) is detected", () => {
+			const wiringFile = blankFile();
+			wiringFile.createEntity("IfcCoordinateReferenceSystem");
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcCoordinateReferenceSystem.NameOrWKT"))).toBe(true);
+		});
+
+		test("a well-formed instance produces zero violations from any of the 220 registered rules", () => {
 			const wiringFile = blankFile();
 			const approval = wiringFile.createEntity("IfcApproval");
 			(approval as unknown as Record<string, unknown>).Name = "A well-formed approval";
