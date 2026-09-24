@@ -636,3 +636,187 @@ export function typeOf(instance: EntityInstance | null | undefined): ExpressSet<
 	}
 	return new ExpressSet(names);
 }
+
+// =============================================================================
+// Phase EX-4 chunk 1 (planning/ifcopenshell-ts/70-express-rules-plan.md, "the large
+// chunk" -- WHERE-rule classes + `rule_executor.py`): this shim's own header comment
+// (above, "A separate, load-bearing finding for Phase EX-2/EX-4") already flagged that
+// real Python's `indeterminate_type` dunder-based poison propagation (`__lt__`/`__eq__`/
+// `__add__`/etc. all aliased to `bop`, returning `self`) has no JS operator-overloading
+// equivalent, and that whichever phase first evaluates real comparison/boolean
+// expressions from generated formula bodies would need an explicit strategy. This is
+// that strategy, built while porting the first 70 IFC2X3 WHERE-rule classes
+// (`express/whereRules/ifc2x3.ts`) -- confirmed empirically against real Python's own
+// documented dunder behavior (re-read line-by-line above, not assumed) before writing
+// any of the following:
+//
+// **Comparisons (`==`/`!=`/`<`/`<=`/`>`/`>=`) are order-independent poison-propagation**:
+// `indeterminate_type`'s own reflected dunders (`__eq__`/`__lt__`/`__gt__`/...) are ALL
+// aliased to the same `bop`, which returns `self` (`INDETERMINATE`) unconditionally --
+// so `X <op> INDETERMINATE` and `INDETERMINATE <op> X` both resolve to `INDETERMINATE`
+// regardless of `X` or which comparison operator is used (Python tries the left
+// operand's own dunder first, gets `NotImplemented` since a plain `int`/`str` has no
+// idea how to compare against an `indeterminate_type`, then falls back to the right
+// operand's reflected dunder, which is `bop` either way). `triEq`/`triNe`/`triLt`/
+// `triLe`/`triGt`/`triGe` below implement exactly this: check either operand for
+// indeterminacy FIRST, unconditionally, before ever touching the actual values.
+//
+// `triEq`/`triNe` additionally dispatch to `EntityInstance.equals()`/`.notEquals()`
+// when either operand is an `EntityInstance` -- **load-bearing, not optional**: real
+// Python's own generated rules are compiled with EXPRESS `=`/`<>` emitted as Python
+// `==`/`!=` (`rule_compiler.py`'s own `process_rel_op`, confirmed directly), which for
+// two `entity_instance` operands dispatches to `entity_instance_mixin.__eq__` --
+// itself gated on `ifcopenshell.settings.compare_instances_by_value` (`entity_
+// instance.py` lines 211-226), the exact global flag this module's own executor
+// (`ruleExecutor.ts`) toggles `true` for the whole rule-execution pass, matching real
+// Python's own `rule_executor.run()` (lines 90-97). TS has no operator overloading, so
+// a ported rule body comparing two values that MIGHT be `EntityInstance`s must call
+// `triEq`/`triNe` (which delegate to `.equals()`, itself already `settings.
+// compareInstancesByValue`-aware -- see `entityInstance.ts`) explicitly, never a bare
+// `===`/`!==` -- a bare `===` would compare object identity only, silently reproducing
+// NEITHER Python's default identity-comparison mode NOR its value-comparison mode once
+// the setting is toggled on. Every ported WHERE-rule body in `express/whereRules/*.ts`
+// is expected to follow this rule for any comparison whose operands could be entity
+// instances (plain scalar comparisons -- numbers, strings, enum-name strings -- have no
+// such requirement and may use `triLt`/`triGe`/`===`/`!==` freely, since a bare
+// `===`/`!==` between two primitives is already correct either way).
+//
+// **`and`/`or` are Python short-circuit value-returning operators, NOT symmetric
+// 3-valued (Kleene) logic** -- a genuinely easy mistake to make, and empirically
+// verified here rather than assumed: Python's `a and b` returns `a` itself (unevaluated
+// `b`) when `bool(a)` is falsy, else returns `b`; `a or b` returns `a` when truthy, else
+// `b`. Since `indeterminate_type.__bool__` returns `False` (making it Python-falsy),
+// `INDETERMINATE and X` ALWAYS returns `INDETERMINATE` itself (`X` never evaluated,
+// REGARDLESS of what `X` actually is -- even if `X` would itself be `False`), while
+// `False and INDETERMINATE` returns the definite `False` (short-circuits on the first,
+// definite, falsy operand -- `INDETERMINATE` never evaluated). This is a real,
+// order-dependent asymmetry, NOT the commutative "FALSE dominates" table standard
+// 3-valued/SQL logic would predict. `pyAnd`/`pyOr` below reproduce this exactly via a
+// lazy right-hand thunk (never evaluated when the left operand alone already
+// determines the result) -- ported this way specifically so a chain like
+// `pyOr(pyAnd(a, () => b), () => c)` mirrors the real Python source's own left-to-right
+// operand evaluation and short-circuiting precisely, operand for operand.
+//
+// **`not` ALWAYS collapses to a definite boolean, losing indeterminacy entirely** --
+// also verified directly: Python has no `__not__` dunder at all; `not x` is always
+// `bool(x)` inverted, and `bool(INDETERMINATE)` is `False`, so `not INDETERMINATE` is
+// the definite `True`, not indeterminate-propagating. This is a real, if easily-missed,
+// verbatim Python quirk (`assert not readsAsIndeterminate is not False` will therefore
+// often trivially pass, `True is not False`) -- ported faithfully as `pyNot` below
+// (a plain boolean-returning function, deliberately NOT `Tri`-returning), not "fixed"
+// into a poison-propagating `triNot` no real generated rule body would actually match.
+//
+// **The top-level `assert (...) is not False` idiom**: `assertWhereRule` below is the
+// direct TS equivalent -- fails (throws) if and only if the final expression is the
+// literal `false`; any other value (`true`, `INDETERMINATE`, or any other truthy
+// non-boolean real Python's own generated formula might otherwise produce, e.g. a bare
+// scalar/entity from a degenerate `and`/`or` chain) is treated as "rule satisfied",
+// exactly mirroring Python's own identity check against the `False` singleton.
+// =============================================================================
+
+/** A value that may be `boolean` or genuinely indeterminate -- see this section's own header comment. */
+export type Tri = boolean | Indeterminate;
+
+/**
+ * Python: `not x` on a value that may be `INDETERMINATE` -- see this section's own
+ * header comment for why this deliberately collapses to a definite boolean rather than
+ * propagating indeterminacy (a real, verbatim-preserved Python quirk: `indeterminate_
+ * type` has no `__not__` override, so `not INDETERMINATE` is the definite `True`).
+ */
+export function pyNot(value: Tri): boolean {
+	return isIndeterminate(value) ? true : !value;
+}
+
+/**
+ * Python: `a and b`, where `b` is a lazy thunk mirroring Python's own short-circuit
+ * non-evaluation of the right operand whenever `a` alone is already falsy (`False` or
+ * `INDETERMINATE`, see this section's own header comment for why this is NOT the same
+ * as symmetric 3-valued-logic "FALSE dominates").
+ */
+export function pyAnd(a: Tri, b: () => Tri): Tri {
+	return a === false || isIndeterminate(a) ? a : b();
+}
+
+/**
+ * Python: `a or b`, where `b` is a lazy thunk mirroring Python's own short-circuit
+ * non-evaluation of the right operand whenever `a` alone is already truthy (`a ===
+ * true`; `INDETERMINATE`'s own falsiness means `INDETERMINATE or b` always evaluates
+ * `b`, never short-circuiting on the left operand -- see this section's own header
+ * comment).
+ */
+export function pyOr(a: Tri, b: () => Tri): Tri {
+	return a === true ? a : b();
+}
+
+/**
+ * Python: `a == b` / EXPRESS `=`, compiled to Python `==` (`rule_compiler.py`'s own
+ * `process_rel_op`). See this section's own header comment for why either operand's
+ * indeterminacy poisons the result regardless of order, and why an `EntityInstance`
+ * operand must dispatch through `.equals()` (itself `settings.compareInstancesByValue`-
+ * aware) rather than a bare `===`.
+ */
+export function triEq(a: unknown, b: unknown): Tri {
+	if (isIndeterminate(a) || isIndeterminate(b)) return INDETERMINATE;
+	if (a instanceof EntityInstance) return a.equals(b);
+	if (b instanceof EntityInstance) return b.equals(a);
+	return a === b;
+}
+
+/** Python: `a != b` / EXPRESS `<>`, compiled to Python `!=` -- see `triEq`'s own doc comment. */
+export function triNe(a: unknown, b: unknown): Tri {
+	const eq = triEq(a, b);
+	return isIndeterminate(eq) ? INDETERMINATE : !eq;
+}
+
+function triCompare(a: unknown, b: unknown, compare: (x: number, y: number) => boolean): Tri {
+	if (isIndeterminate(a) || isIndeterminate(b)) return INDETERMINATE;
+	return compare(a as number, b as number);
+}
+
+/** Python: `a < b` -- see this section's own header comment on order-independent poison propagation. */
+export function triLt(a: unknown, b: unknown): Tri {
+	return triCompare(a, b, (x, y) => x < y);
+}
+
+/** Python: `a <= b` -- see `triLt`'s own doc comment. */
+export function triLe(a: unknown, b: unknown): Tri {
+	return triCompare(a, b, (x, y) => x <= y);
+}
+
+/** Python: `a > b` -- see `triLt`'s own doc comment. */
+export function triGt(a: unknown, b: unknown): Tri {
+	return triCompare(a, b, (x, y) => x > y);
+}
+
+/** Python: `a >= b` -- see `triLt`'s own doc comment. */
+export function triGe(a: unknown, b: unknown): Tri {
+	return triCompare(a, b, (x, y) => x >= y);
+}
+
+/**
+ * Python: `a / b` where `a` may be `INDETERMINATE` (`indeterminate_type.__truediv__ =
+ * bop` returns `self` rather than raising). A raw JS `(a as number) / b` on an
+ * `INDETERMINATE` `a` would instead silently divide the `Symbol` sentinel-as-`NaN`
+ * (worse, `Symbol / number` actually THROWS a `TypeError` in JS, unlike Python's own
+ * graceful poison propagation) -- confirmed empirically before adding this, not
+ * assumed. Needed by e.g. `IfcCShapeProfileDef_WR1..WR3`'s own `Depth / 2.0`/`Width /
+ * 2.0` divisions in `whereRules/ifc2x3.ts`; only `a` (the generated rules' own division
+ * operand that is ever a `express_getattr(...)` result) needs this guard in practice --
+ * `b` is always a literal constant in every real call site found so far.
+ */
+export function triDiv(a: unknown, b: number): number | Indeterminate {
+	return isIndeterminate(a) ? INDETERMINATE : (a as number) / b;
+}
+
+/**
+ * Python: `assert (...) is not False` -- the idiom every generated WHERE-rule
+ * `__call__` body ends with (`rule_compiler.py`'s own codegen always wraps a rule's
+ * final boolean expression this way). Fails (throws) if and only if `value` is the
+ * literal `false` -- see this section's own header comment for why any other value
+ * (`true`, `INDETERMINATE`, or any other truthy value a degenerate `and`/`or` chain
+ * might produce) means "rule satisfied," matching Python's own identity check against
+ * the `False` singleton exactly.
+ */
+export function assertWhereRule(value: Tri, message: string): void {
+	if (value === false) throw new Error(message);
+}

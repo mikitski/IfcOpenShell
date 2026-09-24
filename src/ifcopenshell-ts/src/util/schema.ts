@@ -33,6 +33,14 @@
 // below). Second real consumer, same "export narrowly once one exists" precedent as
 // `getSchemaDefinition` above.
 //
+// UPDATED (Phase EX-4 chunk 1, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+// `directSubtypesOfTypeDeclarations` added below -- the `type_declaration` analog of
+// `directSubtypesOf`'s own entity-subtype-grouping workaround, needed by `express/
+// ruleExecutor.ts`'s type-scope WHERE-rule dispatch (mirrors real Python's `rule_
+// executor.run()`'s own inline `subtypes` map, see that function's own doc comment for
+// the full citation). Same "reuse an established workaround shape for the analogous
+// missing primitive" precedent as `directSubtypesOf` itself.
+//
 // Naming note (flagged per this chunk's own task brief): Python's `schema.is_a(decl,
 // ifc_class)` operates on a *schema declaration* object, not an `entity_instance` --
 // semantically different from (and easily confusable with) this project's own
@@ -222,6 +230,56 @@ export function directSubtypesOf(schema: NativeSchemaDefinition): Map<string, Na
 			siblings.push(entity);
 		} else {
 			children.set(supertypeName, [entity]);
+		}
+	}
+	return children;
+}
+
+/**
+ * Python: `rule_executor.run`'s own inline `subtypes` map construction (`ifcopenshell/
+ * express/rule_executor.py` lines 149-156, Phase EX-4's own task brief) -- the
+ * `type_declaration` analog of `directSubtypesOf` above (that function's own entity-
+ * subtype workaround for the missing `entity::subtypes()` binding). Real Python:
+ * ```python
+ * subtypes = collections.defaultdict(list)
+ * for d in S.declarations():
+ *     if isinstance(d, type_declaration):
+ *         if isinstance(d.declared_type(), named_type):
+ *             subtypes[d.declared_type().declared_type().name()].append(d.name())
+ * ```
+ * i.e. a `type_declaration` `d` is a "subtype" of another type declaration/entity named
+ * `base` exactly when `d`'s own EXPRESS definition is a bare reference to `base`
+ * (`TYPE Sub = Base; END_TYPE;`, surfacing as `d.declared_type()` being a `named_type`
+ * wrapping `base`) -- as opposed to `d` defining its own primitive/aggregate shape
+ * directly (`declared_type()` a `simple_type`/`aggregation_type`, which this function
+ * correctly ignores, matching Python's own `isinstance(..., named_type)` guard).
+ * `type_declaration.declared_type()` (returning `parameter_type`) and `named_type.
+ * declared_type()` (returning the wrapped `declaration`, whose bare `.name()` already
+ * works directly -- unlike `type_declaration`/`entity`/etc., `declaration` itself needs
+ * no reinterpret-cast) are both already-exposed native primitives (`ifcopenshell_
+ * native.ts`), confirmed directly before writing this -- no new primitive needed here,
+ * exactly as `70-express-rules-plan.md`'s own Phase EX-4 scoping already anticipated.
+ *
+ * Keyed and valued by plain declaration NAME strings (not `type_declaration` handles,
+ * unlike `directSubtypesOf`'s own `NativeEntity[]`) -- `rule_executor.ts`'s own
+ * `visit(nm)` closure (mirroring real Python's identically-named closure, same lines)
+ * only ever needs names to group type-scope WHERE-rules by `TYPE_NAME`, never the
+ * declaration objects themselves.
+ */
+export function directSubtypesOfTypeDeclarations(schema: NativeSchemaDefinition): Map<string, string[]> {
+	const children = new Map<string, string[]>();
+	for (const declaration of schema.declarations()) {
+		const typeDeclaration = declaration.as_type_declaration();
+		if (typeDeclaration === null) continue;
+		const namedType = typeDeclaration.declared_type().as_named_type();
+		if (namedType === null) continue;
+		const baseName = namedType.declared_type().name();
+		const subName = declaration.name();
+		const siblings = children.get(baseName);
+		if (siblings) {
+			siblings.push(subName);
+		} else {
+			children.set(baseName, [subName]);
 		}
 	}
 	return children;

@@ -20,3 +20,15 @@ export * from "./runtimeShim";
 // functions registered, without depending on import order between the two.
 export * from "./dispatch";
 import "./rules";
+
+// Phase EX-4 chunk 1 (planning/ifcopenshell-ts/70-express-rules-plan.md): the WHERE-
+// rule registry (`ruleDispatch.ts`) and 3-phase execution engine (`ruleExecutor.ts`),
+// re-exported here for the same reason `dispatch.ts`/`runtimeShim.ts` are above --
+// direct access for tests/advanced callers. `./whereRules` (the per-schema WHERE-rule
+// registrations, starting with `./whereRules/ifc2x3`) is side-effect-only, imported
+// here too (in addition to whatever future orchestrator eventually imports it directly)
+// so anyone importing this package's top-level `express` namespace also gets every
+// ported schema's WHERE-rules registered, without depending on import order.
+export * from "./ruleDispatch";
+export * from "./ruleExecutor";
+import "./whereRules";

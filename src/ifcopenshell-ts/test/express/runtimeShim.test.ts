@@ -454,3 +454,138 @@ describe("express.typeOf", () => {
 		});
 	});
 });
+
+// =============================================================================
+// Phase EX-4 chunk 1 (planning/ifcopenshell-ts/70-express-rules-plan.md): original,
+// hand-rolled coverage for the new Tri-logic section of `runtimeShim.ts` (`pyNot`/
+// `pyAnd`/`pyOr`/`triEq`/`triNe`/`triLt`/`triLe`/`triGt`/`triGe`/`triDiv`/
+// `assertWhereRule`), built while porting the first 70 IFC2X3 WHERE-rule classes
+// (`express/whereRules/ifc2x3.ts`). Each test is derived directly from re-reading real
+// Python's own `indeterminate_type` dunder behavior (`IFC2X3.py`'s own inline shim) --
+// see `runtimeShim.ts`'s own header comment for the full citations -- not from this
+// port's own implementation.
+// =============================================================================
+
+describe("express.pyNot", () => {
+	test("negates a definite boolean", () => {
+		expect(subject.pyNot(true)).toBe(false);
+		expect(subject.pyNot(false)).toBe(true);
+	});
+
+	test("INDETERMINATE collapses to a definite `true` (real Python quirk: `not` has no dunder, always calls bool())", () => {
+		expect(subject.pyNot(subject.INDETERMINATE)).toBe(true);
+	});
+});
+
+describe("express.pyAnd", () => {
+	test("false short-circuits and returns false without evaluating the right operand", () => {
+		let evaluated = false;
+		const result = subject.pyAnd(false, () => {
+			evaluated = true;
+			return true;
+		});
+		expect(result).toBe(false);
+		expect(evaluated).toBe(false);
+	});
+
+	test("true evaluates and returns the right operand", () => {
+		expect(subject.pyAnd(true, () => false)).toBe(false);
+		expect(subject.pyAnd(true, () => true)).toBe(true);
+		expect(subject.pyAnd(true, () => subject.INDETERMINATE)).toBe(subject.INDETERMINATE);
+	});
+
+	test("INDETERMINATE short-circuits and returns INDETERMINATE itself, regardless of the right operand", () => {
+		let evaluated = false;
+		const result = subject.pyAnd(subject.INDETERMINATE, () => {
+			evaluated = true;
+			return false;
+		});
+		expect(result).toBe(subject.INDETERMINATE);
+		expect(evaluated).toBe(false);
+	});
+});
+
+describe("express.pyOr", () => {
+	test("true short-circuits and returns true without evaluating the right operand", () => {
+		let evaluated = false;
+		const result = subject.pyOr(true, () => {
+			evaluated = true;
+			return false;
+		});
+		expect(result).toBe(true);
+		expect(evaluated).toBe(false);
+	});
+
+	test("false evaluates and returns the right operand", () => {
+		expect(subject.pyOr(false, () => true)).toBe(true);
+		expect(subject.pyOr(false, () => false)).toBe(false);
+	});
+
+	test("INDETERMINATE does NOT short-circuit (falsy) -- always evaluates the right operand", () => {
+		let evaluated = false;
+		const result = subject.pyOr(subject.INDETERMINATE, () => {
+			evaluated = true;
+			return true;
+		});
+		expect(result).toBe(true);
+		expect(evaluated).toBe(true);
+	});
+});
+
+describe("express.triEq / triNe", () => {
+	test("plain scalar equality", () => {
+		expect(subject.triEq(2, 2)).toBe(true);
+		expect(subject.triEq(2, 3)).toBe(false);
+		expect(subject.triNe(2, 3)).toBe(true);
+		expect(subject.triNe(2, 2)).toBe(false);
+	});
+
+	test("either operand indeterminate poisons the result, regardless of order", () => {
+		expect(subject.triEq(subject.INDETERMINATE, 2)).toBe(subject.INDETERMINATE);
+		expect(subject.triEq(2, subject.INDETERMINATE)).toBe(subject.INDETERMINATE);
+		expect(subject.triNe(subject.INDETERMINATE, 2)).toBe(subject.INDETERMINATE);
+	});
+
+	test("dispatches to EntityInstance.equals() when either operand is an entity instance", () => {
+		const file = createTestFile("IFC2X3");
+		const a = file.createEntity("IfcCartesianPoint", [0, 0]);
+		const b = file.createEntity("IfcCartesianPoint", [0, 0]);
+		expect(subject.triEq(a, b)).toBe(false); // different instances, identity comparison by default
+		expect(subject.triEq(a, a)).toBe(true);
+	});
+});
+
+describe("express.triLt / triLe / triGt / triGe", () => {
+	test("plain numeric comparisons", () => {
+		expect(subject.triLt(1, 2)).toBe(true);
+		expect(subject.triLe(2, 2)).toBe(true);
+		expect(subject.triGt(3, 2)).toBe(true);
+		expect(subject.triGe(2, 2)).toBe(true);
+	});
+
+	test("either operand indeterminate poisons the result", () => {
+		expect(subject.triLt(subject.INDETERMINATE, 2)).toBe(subject.INDETERMINATE);
+		expect(subject.triGt(2, subject.INDETERMINATE)).toBe(subject.INDETERMINATE);
+	});
+});
+
+describe("express.triDiv", () => {
+	test("divides a definite number", () => {
+		expect(subject.triDiv(10, 2)).toBe(5);
+	});
+
+	test("INDETERMINATE numerator propagates instead of throwing", () => {
+		expect(subject.triDiv(subject.INDETERMINATE, 2)).toBe(subject.INDETERMINATE);
+	});
+});
+
+describe("express.assertWhereRule", () => {
+	test("throws only for the literal false", () => {
+		expect(() => subject.assertWhereRule(false, "boom")).toThrowError("boom");
+	});
+
+	test("does not throw for true or INDETERMINATE", () => {
+		expect(() => subject.assertWhereRule(true, "boom")).not.toThrow();
+		expect(() => subject.assertWhereRule(subject.INDETERMINATE, "boom")).not.toThrow();
+	});
+});

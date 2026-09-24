@@ -306,8 +306,17 @@ function ifcOrthogonalComplement(vec: unknown): EntityInstance | null {
 	]);
 }
 
-/** Python: `IfcCrossProduct` (`IFC2X3.py`). */
-function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
+/**
+ * Python: `IfcCrossProduct` (`IFC2X3.py`).
+ *
+ * Exported (Phase EX-4 chunk 1, `planning/ifcopenshell-ts/70-express-rules-plan.md`):
+ * `express/whereRules/ifc2x3.ts`'s own `IfcAxis2Placement3D_WR4` needs this exact
+ * function (its own real-source body calls `IfcCrossProduct(axis, refdirection)`
+ * directly) -- reused as-is rather than re-derived, matching this project's
+ * established "export narrowly once a second real consumer exists" precedent
+ * (`util/schema.ts`'s own `entityName`/`getSchemaDefinition` header comments).
+ */
+export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | null {
 	if (
 		!exists(arg1) ||
 		expressGetAttr(arg1, "Dim", INDETERMINATE) === 2 ||
