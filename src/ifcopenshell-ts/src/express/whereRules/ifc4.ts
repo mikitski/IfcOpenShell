@@ -4859,14 +4859,20 @@ registerSchemaRules("IFC4", [
 //
 // **`ifcCorrectDimensions`** (real source line 11439, used by `IfcNamedUnit_WR1`) -- the
 // SAME 29-branch `IfcUnitEnum`-keyed dispatch table as `whereRules/ifc2x3.ts`'s own
-// already-ported version, but **genuinely different by exactly ONE value**: the
-// `ELECTRICCAPACITANCEUNIT`/`FARAD` branch's `ElectricCurrentExponent` is `2` here vs. `1`
-// in IFC2X3 -- independently re-confirmed byte-for-byte directly against real `IFC4.py`
-// source (`IfcDimensionalExponents(-2, -1, 4, 2, 0, 0, 0)` vs. IFC2X3's `(-2, 1, 4, 1, 0,
-// 0, 0)`). **NOT a new finding** -- this is the exact same real schema-evolution
-// difference Phase EX-2's own `calc_IfcSIUnit_Dimensions`/`ifcDimensionsForSiUnit` (`rules/
-// ifc4.ts`) already disclosed and independently verified byte-for-byte by the orchestrating
-// session; cross-referenced here, not re-disclosed as new. Needs a bare 7-arg
+// already-ported version, but **genuinely different in exactly ONE ROW**: the
+// `ELECTRICCAPACITANCEUNIT`/`FARAD` branch is `IfcDimensionalExponents(-2, -1, 4, 2, 0, 0,
+// 0)` here vs. IFC2X3's `(-2, 1, 4, 1, 0, 0, 0)` -- independently re-confirmed byte-for-byte
+// directly against real `IFC4.py` source (line 11505). CORRECTION to this file's own
+// cross-referenced source: TWO positional values differ, not one --
+// `MassExponent` (`-1` vs. IFC2X3's `1`) AND `ElectricCurrentExponent` (`2` vs. `1`) both
+// change. Phase EX-2's own already-merged `rules/ifc4.ts` comment (near its own `FARAD`
+// branch) states only the `ElectricCurrentExponent` difference and is itself imprecise in
+// the same way -- not fixed here (out of this chunk's own diff/scope, a different phase's
+// already-shipped file), flagged for whoever next touches that file. **NOT a new
+// finding** -- this is the exact same real schema-evolution difference Phase EX-2 already
+// disclosed and independently verified byte-for-byte by the orchestrating session;
+// cross-referenced here, not re-disclosed as new, only its own precision corrected. Needs a
+// bare 7-arg
 // `IfcDimensionalExponents(...)` constructor for its own literal branches -- reused via a
 // newly-exported `ifcDimensionalExponents` in `rules/ifc4.ts` (mirroring `rules/ifc2x3.ts`'s
 // own identical export, added by that file's own chunk 3), rather than duplicating a
