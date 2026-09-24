@@ -822,14 +822,16 @@ export function triGe(a: unknown, b: unknown): Tri {
  * conditions holds" checks on plain `bool`s, e.g. `IfcGridAxis_WR2`:
  * `(sizeof(partofu) == 1) ^ (sizeof(partofv) == 1) ^ (sizeof(partofw) == 1)`). Not
  * needed by any Phase EX-4 chunk 1/2 rule -- first real consumer is chunk 3's own
- * `IfcGridAxis_WR2`. `indeterminate_type` overloads `__xor__`/`__rxor__` the same way it
- * overloads every other dunder this section documents (aliased to `bop`, returning
- * `self`) -- ported the same order-independent-poison-propagation way as `triEq`/
- * `triLt`/etc. above, even though in practice every real call site's own operands
- * (`sizeof(...) == 1`-shaped `Tri`s) are never actually indeterminate (the aggregates
- * being sized are always-defined INVERSE `SET`s, never optional forward attributes) --
- * ported for structural fidelity/uniformity with this section's own established
- * discipline regardless.
+ * `IfcGridAxis_WR2`. CORRECTION (verified directly against `rule_compiler.py` lines
+ * 956-984): `indeterminate_type` does NOT override `__xor__`/`__rxor__` -- unlike every
+ * other dunder aliased to `bop` there, `^` is absent from that list. Real Python would
+ * therefore raise a `TypeError` (unsupported operand types) if `^` ever actually hit an
+ * `INDETERMINATE` operand, not silently propagate poison. This function's own
+ * poison-propagating behavior is chosen only for structural uniformity with this
+ * section's `triEq`/`triLt`/etc. neighbors, not because real Python does the same --
+ * and is confirmed dead code for every real call site found so far, since `PartOfU`/
+ * `PartOfV`/`PartOfW` are always-defined INVERSE `SET`s, never optional forward
+ * attributes, so `sizeof(...) == 1` can never actually be indeterminate here.
  */
 export function triXor(a: Tri, b: Tri): Tri {
 	if (isIndeterminate(a) || isIndeterminate(b)) return INDETERMINATE;
