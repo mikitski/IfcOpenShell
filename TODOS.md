@@ -4303,3 +4303,9 @@ values in their own defined-type instance before adding them to such a list (as 
 fixtures now do) is a safe, always-available workaround; this entry tracks the underlying native gap for
 whoever next has reason to fix the marshaling layer itself, or to reproduce it under ASan for a proper
 root cause.
+
+**RECONFIRMED, same schema-independent gap:** hit again 2026-09-24 while dispatching Phase EX-4's IFC4
+chunk 6 (the final IFC4 WHERE-rule chunk, `whereRules/ifc4.ts`) -- same `IfcTrimmedCurve.Trim1`/`Trim2`
+construct, same vitest-worker-segfault symptom, same workaround (`file.createEntity("IfcParameterValue",
+value)`). Confirms this is a genuine cross-schema native-layer gap (IFC2X3 and IFC4 share the same
+underlying attribute-marshaling code), not something specific to one schema's own generated bindings.
