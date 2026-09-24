@@ -77,7 +77,8 @@
 // any of these 70 rules** -- confirmed by reading every single body directly (see the
 // per-rule comments below, each citing its own exact real-source line).
 
-import type { EntityInstance } from "../../entityInstance";
+import { EntityInstance } from "../../entityInstance";
+import type { IfcFile } from "../../file";
 import { type RuleDefinition, registerSchemaRules } from "../ruleDispatch";
 import { ifcCrossProduct, ifcDimensionalExponents, ifcDirection, ifcDotProduct } from "../rules/ifc2x3";
 import {
@@ -91,7 +92,9 @@ import {
 	expressGetItem,
 	expressRange,
 	hiIndex,
+	isEntity,
 	isIndeterminate,
+	nvl,
 	pyAnd,
 	pyNot,
 	pyOr,
@@ -115,6 +118,22 @@ function typeRule(typeName: string, ruleName: string, check: (self: any) => void
 
 function entityRule(typeName: string, ruleName: string, check: (self: EntityInstance) => void): RuleDefinition {
 	return { scope: "entity", typeName, ruleName, check };
+}
+
+/**
+ * Phase EX-4 chunk 5's own new registration helper, mirroring `typeRule`/`entityRule`
+ * above exactly -- the FIRST chunk to register a `SCOPE = 'file'` rule (`ruleDispatch.ts`
+ * already fully supports it: `RuleDefinition.typeName` is `undefined` for exactly this
+ * scope, per that file's own doc comment, and `check`'s own deliberate `any` parameter
+ * type already covers a `(file: IfcFile) => void` shape with no cast needed -- confirmed
+ * directly against that file before writing this, not assumed; NO changes to
+ * `ruleDispatch.ts`/`ruleExecutor.ts` were needed to support this scope). `check`
+ * receives the whole `IfcFile` (real Python: `R()(f)`, `rule_executor.py` line 143) --
+ * NOT a single `EntityInstance`, matching `ruleExecutor.ts`'s own file-scope loop
+ * (`rule.check(f)`, no per-instance dispatch at all).
+ */
+function fileRule(ruleName: string, check: (file: IfcFile) => void): RuleDefinition {
+	return { scope: "file", typeName: undefined, ruleName, check };
 }
 
 /**
@@ -4639,3 +4658,925 @@ registerSchemaRules("IFC2X3", [
 	IfcSweptDiskSolid_WR1,
 	IfcSweptDiskSolid_WR2,
 ]);
+
+// =============================================================================
+// Phase EX-4 chunk 5 (planning/ifcopenshell-ts/70-express-rules-plan.md): the LAST 42
+// `SCOPE = 'entity'` WHERE-rule classes in `IFC2X3.py`, real file order (lines
+// 6928-7357, re-verified directly against that file -- `grep -n "^class Ifc.*_WR"
+// IFC2X3.py | awk -F: '$1>6917'` confirms exactly 42 matches in this range, ending at
+// `IfcZone_WR1`, line 7357). Continues directly from chunk 4's own last-ported rule
+// (`IfcSweptDiskSolid_WR2`, line 6917) with zero gap or overlap (confirmed: real source
+// line 6928, `IfcSweptSurface_WR1`, is the very next `class Ifc.*_WR` after
+// `IfcSweptDiskSolid_WR2`, with only the non-WHERE-rule `calc_IfcSweptAreaSolid_Dim`/
+// no other declarations between them).
+//
+// **PLUS the LAST 2 `SCOPE = 'file'` WHERE-rule classes in the entire file**
+// (`IfcRepresentationContextSameWCS`/`IfcSingleProjectInstance`, lines 7366/7381 -- see
+// this file's own dedicated "SCOPE = 'file' rules" section further below for their own
+// header comment) -- **this closes out ALL 365 IFC2X3 WHERE-rule classes (339 entity +
+// 24 type + 2 file), a schema-complete milestone for Phase EX-4's IFC2X3 pass.** IFC4
+// (679) and IFC4X3_ADD2 (779) remain for future chunks.
+//
+// **Two new rule-file-local, non-`calc_*`, non-WHERE-rule EXPRESS-library helpers
+// ported for THIS section** (both real Python functions, neither previously needed by
+// any of chunks 1-4): `IfcCorrectUnitAssignment` (`IFC2X3.py` line 7652, called by
+// `IfcUnitAssignment_WR01`) and `IfcTopologyRepresentationTypes` (line 8019, called by
+// `IfcTopologyRepresentation_WR23`) -- ported below as `ifcCorrectUnitAssignment`/
+// `ifcTopologyRepresentationTypes`, the latter structurally identical to chunk 4's own
+// already-ported `ifcShapeRepresentationTypes` (a `reptype.lower()`-keyed dispatch over
+// `typeof()`-membership counts, `default: return INDETERMINATE` for an unrecognized
+// keyword -- see that function's own doc comment for why this exact shape was already
+// established).
+//
+// **`IfcTable_WR1`/`IfcTable_WR2` are confirmed BYTE-IDENTICAL in real source**
+// (re-read directly, not assumed -- both bodies are the exact same "every row's
+// `RowCells` must have the same `hiindex()` as the first row's" check, word for word).
+// Factored into one shared local helper, `ifcTableUniformRowCells`, per this project's
+// own "one registration per real class, shared body via a local helper" precedent
+// (mirrors chunk 1's own `userDefinedOrHasAttribute`, etc.) -- NOT a porting mistake on
+// this chunk's part, a genuine real-source duplicate.
+//
+// **`IfcTypeProduct_WR41`/`IfcWindowLiningProperties_WR34` are this port's FIRST real
+// consumers of `exists(lambda: ...)`** (real source: `exists(lambda:
+// express_getitem(...))`), the lazy-thunk `exists()` branch `runtimeShim.ts`'s own
+// header comment already anticipated in Phase EX-4 chunk 1 but had no real call site
+// for until now. Both are ported using the SAME disclosed eager-`expressGetItem`-then-
+// plain-`exists()` simplification already established by chunk 2's
+// `IfcDoorLiningProperties_WR35`/`IfcDoorPanelProperties_WR31` (byte-identical shape to
+// `IfcWindowLiningProperties_WR34`, just `IfcWindowStyle` instead of `IfcDoorStyle`) --
+// safe because `expressGetItem` never actually throws (it already catches its own
+// out-of-range case internally), so the lambda's only real purpose (guarding a
+// would-be `IndexError`) is structurally unreachable here, matching that earlier
+// chunk's own already-disclosed reasoning exactly.
+//
+// **`IfcTimeSeriesSchedule_WR41` is a DIFFERENT shape from `userDefinedOrHasAttribute`,
+// despite looking similar at a glance** -- real source: `not (TimeSeriesScheduleType ==
+// USERDEFINED) or exists(ObjectType)`, NOT `TimeSeriesScheduleType != USERDEFINED or
+// (TimeSeriesScheduleType == USERDEFINED and exists(ObjectType))`. These two shapes
+// diverge for an `INDETERMINATE` enum value: `userDefinedOrHasAttribute`'s own `!=`
+// (`triNe`) propagates indeterminacy, while a bare Python `not (X == USERDEFINED)`
+// (`pyNot(triEq(...))`, this project's own established "not" idiom, see e.g. line
+// ~4175's own comment) always collapses to a definite boolean. Ported literally as its
+// own distinct shape below, NOT via the shared helper.
+// =============================================================================
+
+/**
+ * Python: `IfcCorrectUnitAssignment(units)` (`IFC2X3.py` line 7652):
+ * ```python
+ * def IfcCorrectUnitAssignment(units):
+ *     namedunitnumber = sizeof([temp for temp in units if 'ifc2x3.ifcnamedunit' in typeof(temp) and not temp.UnitType == USERDEFINED])
+ *     derivedunitnumber = sizeof([temp for temp in units if 'ifc2x3.ifcderivedunit' in typeof(temp) and not temp.UnitType == USERDEFINED])
+ *     monetaryunitnumber = sizeof([temp for temp in units if 'ifc2x3.ifcmonetaryunit' in typeof(temp)])
+ *     namedunitnames = express_set([])
+ *     derivedunitnames = express_set([])
+ *     for i in range(1, sizeof(units) + 1):
+ *         if 'ifc2x3.ifcnamedunit' in typeof(units[i]) and not units[i].UnitType == USERDEFINED:
+ *             namedunitnames = namedunitnames + units[i].UnitType
+ *         if 'ifc2x3.ifcderivedunit' in typeof(units[i]) and not units[i].UnitType == USERDEFINED:
+ *             derivedunitnames = derivedunitnames + units[i].UnitType
+ *     return sizeof(namedunitnames) == namedunitnumber and sizeof(derivedunitnames) == derivedunitnumber and monetaryunitnumber <= 1
+ * ```
+ * (`IfcUnitEnum.USERDEFINED`/`IfcDerivedUnitEnum.USERDEFINED` both compile to the same
+ * bare `'USERDEFINED'` string -- see `userDefinedOrHasAttribute`'s own doc comment for
+ * why every enum member is ported as its bare name regardless of which EXPRESS enum
+ * type declares it.) Checks that every non-`USERDEFINED` named/derived unit has a
+ * unique `UnitType`, and that at most one monetary unit is present -- the real
+ * uniqueness check real Python performs via `express_set`'s own dedup-on-insert
+ * semantics (`sizeof(names) == count` iff no two units share a `UnitType`), same idiom
+ * as this file's own already-ported `ifcUniquePropertyName`.
+ */
+function ifcCorrectUnitAssignment(units: unknown): boolean {
+	const list = asList<EntityInstance>(units);
+	const namedUnitNumber = list.filter(
+		(temp) =>
+			typeOfAttr(temp).has("ifc2x3.ifcnamedunit") &&
+			pyNot(triEq(expressGetAttr(temp, "UnitType", INDETERMINATE), "USERDEFINED")),
+	).length;
+	const derivedUnitNumber = list.filter(
+		(temp) =>
+			typeOfAttr(temp).has("ifc2x3.ifcderivedunit") &&
+			pyNot(triEq(expressGetAttr(temp, "UnitType", INDETERMINATE), "USERDEFINED")),
+	).length;
+	const monetaryUnitNumber = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcmonetaryunit")).length;
+	let namedUnitNames = new ExpressSet<unknown>();
+	let derivedUnitNames = new ExpressSet<unknown>();
+	for (const temp of list) {
+		const unitType = expressGetAttr(temp, "UnitType", INDETERMINATE);
+		if (typeOfAttr(temp).has("ifc2x3.ifcnamedunit") && pyNot(triEq(unitType, "USERDEFINED"))) {
+			namedUnitNames = namedUnitNames.plus(unitType);
+		}
+		if (typeOfAttr(temp).has("ifc2x3.ifcderivedunit") && pyNot(triEq(unitType, "USERDEFINED"))) {
+			derivedUnitNames = derivedUnitNames.plus(unitType);
+		}
+	}
+	return (
+		namedUnitNames.size === namedUnitNumber && derivedUnitNames.size === derivedUnitNumber && monetaryUnitNumber <= 1
+	);
+}
+
+/**
+ * Shared shape, byte-identical in real source, for `IfcTable_WR1`/`IfcTable_WR2`
+ * (`IFC2X3.py` lines 6974/6984) -- see this section's own header comment for why this
+ * is a genuine real-source duplicate, not a porting mistake. Python: `sizeof([temp for
+ * temp in Rows if hiindex(temp.RowCells) != hiindex(Rows[1].RowCells)]) == 0`.
+ */
+function ifcTableUniformRowCells(self: EntityInstance): boolean {
+	const rows = expressGetAttr(self, "Rows", INDETERMINATE);
+	const rowsList = asList<EntityInstance>(rows);
+	const firstRowCells = expressGetAttr(
+		expressGetItem(rows, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+		"RowCells",
+		INDETERMINATE,
+	);
+	const mismatched = rowsList.filter(
+		(temp) => triNe(hiIndex(expressGetAttr(temp, "RowCells", INDETERMINATE)), hiIndex(firstRowCells)) === true,
+	).length;
+	return mismatched === 0;
+}
+
+/**
+ * Python: `IfcTopologyRepresentationTypes(reptype, items)` (`IFC2X3.py` line 8019):
+ * ```python
+ * def IfcTopologyRepresentationTypes(reptype, items):
+ *     count = 0
+ *     if reptype.lower() == 'vertex': count = sizeof([temp for temp in items if 'ifc2x3.ifcvertex' in typeof(temp)])
+ *     elif reptype.lower() == 'edge': count = sizeof([temp for temp in items if 'ifc2x3.ifcedge' in typeof(temp)])
+ *     elif reptype.lower() == 'path': count = sizeof([temp for temp in items if 'ifc2x3.ifcpath' in typeof(temp)])
+ *     elif reptype.lower() == 'face': count = sizeof([temp for temp in items if 'ifc2x3.ifcface' in typeof(temp)])
+ *     elif reptype.lower() == 'shell': count = sizeof([temp for temp in items if 'ifc2x3.ifcopenshell' in typeof(temp) or 'ifc2x3.ifcclosedshell' in typeof(temp)])
+ *     elif reptype.lower() == 'undefined': return True
+ *     else: return None
+ *     return count == sizeof(items)
+ * ```
+ * Structurally identical to chunk 4's own `ifcShapeRepresentationTypes` -- see that
+ * function's own doc comment for why `default: return INDETERMINATE` faithfully ports
+ * real Python's `else: return None` (unlike `ifcShapeRepresentationTypes`, THIS
+ * function's own real source also has an explicit `'undefined'` keyword returning a
+ * DEFINITE `True`, ported as its own `case`, not folded into the default).
+ */
+function ifcTopologyRepresentationTypes(reptype: unknown, items: unknown): Tri {
+	const list = asList<EntityInstance>(items);
+	const kind = typeof reptype === "string" ? reptype.toLowerCase() : undefined;
+	let count: number;
+	switch (kind) {
+		case "vertex":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcvertex")).length;
+			break;
+		case "edge":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcedge")).length;
+			break;
+		case "path":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcpath")).length;
+			break;
+		case "face":
+			count = list.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcface")).length;
+			break;
+		case "shell":
+			count = list.filter((temp) => {
+				const types = typeOfAttr(temp);
+				return types.has("ifc2x3.ifcopenshell") || types.has("ifc2x3.ifcclosedshell");
+			}).length;
+			break;
+		case "undefined":
+			return true;
+		default:
+			return INDETERMINATE;
+	}
+	return count === list.length;
+}
+
+// `IfcSweptSurface_WR1` (line 6928): `not 'ifc2x3.ifcderivedprofiledef' in
+// typeof(SweptCurve)`.
+const IfcSweptSurface_WR1 = entityRule("IfcSweptSurface", "WR1", (self) => {
+	const sweptCurve = expressGetAttr(self, "SweptCurve", INDETERMINATE);
+	assertWhereRule(
+		!typeOfAttr(sweptCurve).has("ifc2x3.ifcderivedprofiledef"),
+		"IfcSweptSurface.SweptCurve must not be an IfcDerivedProfileDef.",
+	);
+});
+
+// `IfcSweptSurface_WR2` (line 6938): `SweptCurve.ProfileType == CURVE`.
+const IfcSweptSurface_WR2 = entityRule("IfcSweptSurface", "WR2", (self) => {
+	const sweptCurve = expressGetAttr(self, "SweptCurve", INDETERMINATE);
+	assertWhereRule(
+		triEq(expressGetAttr(sweptCurve, "ProfileType", INDETERMINATE), "CURVE"),
+		"IfcSweptSurface.SweptCurve.ProfileType must be CURVE.",
+	);
+});
+
+// `IfcTShapeProfileDef_WR1` (line 6952): `FlangeThickness < Depth`.
+const IfcTShapeProfileDef_WR1 = entityRule("IfcTShapeProfileDef", "WR1", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE);
+	const flangeThickness = expressGetAttr(self, "FlangeThickness", INDETERMINATE);
+	assertWhereRule(triLt(flangeThickness, depth), "IfcTShapeProfileDef.FlangeThickness must be less than Depth.");
+});
+
+// `IfcTShapeProfileDef_WR2` (line 6963): `WebThickness < FlangeWidth`.
+const IfcTShapeProfileDef_WR2 = entityRule("IfcTShapeProfileDef", "WR2", (self) => {
+	const flangeWidth = expressGetAttr(self, "FlangeWidth", INDETERMINATE);
+	const webThickness = expressGetAttr(self, "WebThickness", INDETERMINATE);
+	assertWhereRule(triLt(webThickness, flangeWidth), "IfcTShapeProfileDef.WebThickness must be less than FlangeWidth.");
+});
+
+// `IfcTable_WR1` (line 6974): see `ifcTableUniformRowCells` above.
+const IfcTable_WR1 = entityRule("IfcTable", "WR1", (self) => {
+	assertWhereRule(
+		ifcTableUniformRowCells(self),
+		"IfcTable: every row's RowCells must have the same number of cells as the first row.",
+	);
+});
+
+// `IfcTable_WR2` (line 6984): byte-identical real source to `IfcTable_WR1` above.
+const IfcTable_WR2 = entityRule("IfcTable", "WR2", (self) => {
+	assertWhereRule(
+		ifcTableUniformRowCells(self),
+		"IfcTable: every row's RowCells must have the same number of cells as the first row.",
+	);
+});
+
+// `IfcTable_WR3` (line 6994): `0 <= NumberOfHeadings <= 1` (Python chained comparison,
+// ported via `pyAnd`/`triLe` -- same shape as `IfcPixelTexture_WR23`).
+const IfcTable_WR3 = entityRule("IfcTable", "WR3", (self) => {
+	const numberOfHeadings = expressGetAttr(self, "NumberOfHeadings", INDETERMINATE);
+	assertWhereRule(
+		pyAnd(triLe(0, numberOfHeadings), () => triLe(numberOfHeadings, 1)),
+		"IfcTable.NumberOfHeadings must be in [0, 1].",
+	);
+});
+
+// `IfcTankType_WR1` (line 7016).
+const IfcTankType_WR1 = entityRule("IfcTankType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcTankType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcTask_WR1` (line 7026): every `Decomposes` relationship must be an `IfcRelNests`.
+const IfcTask_WR1 = entityRule("IfcTask", "WR1", (self) => {
+	const decomposes = asList<EntityInstance>(expressGetAttr(self, "Decomposes", INDETERMINATE));
+	assertWhereRule(
+		decomposes.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifcrelnests")).length === 0,
+		"IfcTask: every Decomposes relationship must be an IfcRelNests.",
+	);
+});
+
+// `IfcTask_WR2` (line 7035): same shape as `WR1`, over `IsDecomposedBy`.
+const IfcTask_WR2 = entityRule("IfcTask", "WR2", (self) => {
+	const isDecomposedBy = asList<EntityInstance>(expressGetAttr(self, "IsDecomposedBy", INDETERMINATE));
+	assertWhereRule(
+		isDecomposedBy.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifcrelnests")).length === 0,
+		"IfcTask: every IsDecomposedBy relationship must be an IfcRelNests.",
+	);
+});
+
+// `IfcTask_WR3` (line 7044): `exists(Name)`.
+const IfcTask_WR3 = entityRule("IfcTask", "WR3", (self) => {
+	assertWhereRule(exists(expressGetAttr(self, "Name", INDETERMINATE)), "IfcTask.Name must be given.");
+});
+
+// `IfcTelecomAddress_WR1` (line 7053): at least one of TelephoneNumbers/PagerNumber/
+// FacsimileNumbers/ElectronicMailAddresses/WWWHomePageURL must be given (real source's
+// own left-to-right order preserved exactly).
+const IfcTelecomAddress_WR1 = entityRule("IfcTelecomAddress", "WR1", (self) => {
+	const telephoneNumbers = expressGetAttr(self, "TelephoneNumbers", INDETERMINATE);
+	const pagerNumber = expressGetAttr(self, "PagerNumber", INDETERMINATE);
+	const facsimileNumbers = expressGetAttr(self, "FacsimileNumbers", INDETERMINATE);
+	const electronicMailAddresses = expressGetAttr(self, "ElectronicMailAddresses", INDETERMINATE);
+	const wwwHomePageUrl = expressGetAttr(self, "WWWHomePageURL", INDETERMINATE);
+	assertWhereRule(
+		exists(telephoneNumbers) ||
+			exists(pagerNumber) ||
+			exists(facsimileNumbers) ||
+			exists(electronicMailAddresses) ||
+			exists(wwwHomePageUrl),
+		"IfcTelecomAddress: at least one of TelephoneNumbers, PagerNumber, FacsimileNumbers, ElectronicMailAddresses, or WWWHomePageURL must be given.",
+	);
+});
+
+// `IfcTendon_WR1` (line 7067).
+const IfcTendon_WR1 = entityRule("IfcTendon", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ObjectType"),
+		"IfcTendon: if PredefinedType is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcTextLiteralWithExtent_WR31` (line 7077): `not 'ifc2x3.ifcplanarbox' in
+// typeof(Extent)`.
+const IfcTextLiteralWithExtent_WR31 = entityRule("IfcTextLiteralWithExtent", "WR31", (self) => {
+	const extent = expressGetAttr(self, "Extent", INDETERMINATE);
+	assertWhereRule(
+		!typeOfAttr(extent).has("ifc2x3.ifcplanarbox"),
+		"IfcTextLiteralWithExtent.Extent must not be an IfcPlanarBox.",
+	);
+});
+
+/**
+ * Real Python's `entity_instance` wrapping a standalone defined type (e.g. `FontSize`
+ * resolved to an `IfcLengthMeasure`) supports direct arithmetic comparison against a
+ * bare number (`FontSize > 0.0`) because its own dunders unwrap to the underlying value
+ * automatically. This port's `EntityInstance` has no such magic (no `valueOf`/
+ * `Symbol.toPrimitive` override -- confirmed directly against `entityInstance.ts`,
+ * empirically confirmed while building this rule's own test fixture: a bare JS `>`
+ * against a wrapped `EntityInstance` coerces via `Object.prototype.toString`
+ * (`"[object Object]"`) and always compares `false`) -- a genuine gap found while
+ * testing this specific rule, fixed here rather than silently left broken.
+ * `IfcTextStyleFontModel_WR31` (below) is this file's own first rule needing BOTH a
+ * `typeOf()` type-membership check (needs the wrapped `EntityInstance`, to resolve which
+ * SELECT branch it is) AND a numeric comparison (needs the raw underlying value) on the
+ * SAME attribute -- unwraps explicitly via `.getByIndex(0)`, the same "wrappedValue
+ * slot" `runtimeShim.ts`'s own `expressLen`/`expressGetItem` already use for exactly
+ * this case, gated the same way via `isEntity`.
+ */
+function unwrapMeasure(value: unknown): unknown {
+	return value instanceof EntityInstance && !isEntity(value) ? value.getByIndex(0) : value;
+}
+
+// `IfcTextStyleFontModel_WR31` (line 7087): `'ifc2x3.ifclengthmeasure' in
+// typeof(FontSize) and FontSize > 0.0`.
+const IfcTextStyleFontModel_WR31 = entityRule("IfcTextStyleFontModel", "WR31", (self) => {
+	const fontSize = expressGetAttr(self, "FontSize", INDETERMINATE);
+	assertWhereRule(
+		pyAnd(typeOfAttr(fontSize).has("ifc2x3.ifclengthmeasure"), () => triGt(unwrapMeasure(fontSize), 0.0)),
+		"IfcTextStyleFontModel.FontSize must be an IfcLengthMeasure greater than 0.",
+	);
+});
+
+// `IfcTextureMap_WR11` (line 7096): `AnnotatedSurface[1].Item` must be one of 4 named
+// surface-model/brep types.
+const IfcTextureMap_WR11 = entityRule("IfcTextureMap", "WR11", (self) => {
+	const annotatedSurface = expressGetAttr(self, "AnnotatedSurface", INDETERMINATE);
+	const item = expressGetAttr(
+		expressGetItem(annotatedSurface, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+		"Item",
+		INDETERMINATE,
+	);
+	assertWhereRule(
+		typeOfAttr(item).multiply([
+			"ifc2x3.ifcshellbasedsurfacemodel",
+			"ifc2x3.ifcfacebasedsurfacemodel",
+			"ifc2x3.ifcfacetedbrep",
+			"ifc2x3.ifcfacetedbrepwithvoids",
+		]).size >= 1,
+		"IfcTextureMap: AnnotatedSurface[1].Item must be an IfcShellBasedSurfaceModel, IfcFaceBasedSurfaceModel, IfcFacetedBrep, or IfcFacetedBrepWithVoids.",
+	);
+});
+
+// `IfcTimeSeriesSchedule_WR41` (line 7105): see this section's own header comment for
+// why this is NOT `userDefinedOrHasAttribute`'s shape.
+const IfcTimeSeriesSchedule_WR41 = entityRule("IfcTimeSeriesSchedule", "WR41", (self) => {
+	const timeSeriesScheduleType = expressGetAttr(self, "TimeSeriesScheduleType", INDETERMINATE);
+	assertWhereRule(
+		pyOr(pyNot(triEq(timeSeriesScheduleType, "USERDEFINED")), () =>
+			exists(expressGetAttr(self, "ObjectType", INDETERMINATE)),
+		),
+		"IfcTimeSeriesSchedule: if TimeSeriesScheduleType is USERDEFINED, ObjectType must be given.",
+	);
+});
+
+// `IfcTopologyRepresentation_WR21` (line 7115): every `Item` must be an
+// `IfcTopologicalRepresentationItem`.
+const IfcTopologyRepresentation_WR21 = entityRule("IfcTopologyRepresentation", "WR21", (self) => {
+	const items = asList<EntityInstance>(expressGetAttr(self, "Items", INDETERMINATE));
+	assertWhereRule(
+		items.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifctopologicalrepresentationitem")).length === 0,
+		"IfcTopologyRepresentation: every Item must be an IfcTopologicalRepresentationItem.",
+	);
+});
+
+// `IfcTopologyRepresentation_WR22` (line 7124): `exists(RepresentationType)`.
+const IfcTopologyRepresentation_WR22 = entityRule("IfcTopologyRepresentation", "WR22", (self) => {
+	assertWhereRule(
+		exists(expressGetAttr(self, "RepresentationType", INDETERMINATE)),
+		"IfcTopologyRepresentation.RepresentationType must be given.",
+	);
+});
+
+// `IfcTopologyRepresentation_WR23` (line 7133): see `ifcTopologyRepresentationTypes` above.
+const IfcTopologyRepresentation_WR23 = entityRule("IfcTopologyRepresentation", "WR23", (self) => {
+	assertWhereRule(
+		ifcTopologyRepresentationTypes(
+			expressGetAttr(self, "RepresentationType", INDETERMINATE),
+			expressGetAttr(self, "Items", INDETERMINATE),
+		),
+		"IfcTopologyRepresentation: RepresentationType must be consistent with the actual types of Items.",
+	);
+});
+
+// `IfcTrimmedCurve_WR41` (line 7142): `hiindex(Trim1) == 1 or typeof(Trim1[1]) !=
+// typeof(Trim1[2])` -- `!=` between two `typeof()` results ported via `ExpressSet.
+// equals()`, matching this file's own established convention (see e.g. line ~3137).
+const IfcTrimmedCurve_WR41 = entityRule("IfcTrimmedCurve", "WR41", (self) => {
+	const trim1 = expressGetAttr(self, "Trim1", INDETERMINATE);
+	const first = typeOfAttr(expressGetItem(trim1, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE));
+	const second = typeOfAttr(expressGetItem(trim1, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE));
+	assertWhereRule(
+		pyOr(triEq(hiIndex(trim1), 1), () => !first.equals(second)),
+		"IfcTrimmedCurve: Trim1 must have exactly 1 element, or its 2 elements must be of different types.",
+	);
+});
+
+// `IfcTrimmedCurve_WR42` (line 7152): same shape as `WR41`, over `Trim2`.
+const IfcTrimmedCurve_WR42 = entityRule("IfcTrimmedCurve", "WR42", (self) => {
+	const trim2 = expressGetAttr(self, "Trim2", INDETERMINATE);
+	const first = typeOfAttr(expressGetItem(trim2, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE));
+	const second = typeOfAttr(expressGetItem(trim2, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE));
+	assertWhereRule(
+		pyOr(triEq(hiIndex(trim2), 1), () => !first.equals(second)),
+		"IfcTrimmedCurve: Trim2 must have exactly 1 element, or its 2 elements must be of different types.",
+	);
+});
+
+// `IfcTrimmedCurve_WR43` (line 7162): `not 'ifc2x3.ifcboundedcurve' in
+// typeof(BasisCurve)`.
+const IfcTrimmedCurve_WR43 = entityRule("IfcTrimmedCurve", "WR43", (self) => {
+	const basisCurve = expressGetAttr(self, "BasisCurve", INDETERMINATE);
+	assertWhereRule(
+		!typeOfAttr(basisCurve).has("ifc2x3.ifcboundedcurve"),
+		"IfcTrimmedCurve.BasisCurve must not be an IfcBoundedCurve.",
+	);
+});
+
+// `IfcTubeBundleType_WR1` (line 7172).
+const IfcTubeBundleType_WR1 = entityRule("IfcTubeBundleType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcTubeBundleType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcTypeObject_WR1` (line 7182): `exists(Name)`.
+const IfcTypeObject_WR1 = entityRule("IfcTypeObject", "WR1", (self) => {
+	assertWhereRule(exists(expressGetAttr(self, "Name", INDETERMINATE)), "IfcTypeObject.Name must be given.");
+});
+
+// `IfcTypeProduct_WR41` (line 7191): if `ObjectTypeOf[1]` exists, all its
+// `RelatedObjects` must be `IfcProduct` -- see this section's own header comment for
+// the disclosed `exists(lambda: ...)` -> eager-`expressGetItem` simplification.
+const IfcTypeProduct_WR41 = entityRule("IfcTypeProduct", "WR41", (self) => {
+	const objectTypeOf = expressGetAttr(self, "ObjectTypeOf", INDETERMINATE);
+	const first = expressGetItem(objectTypeOf, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	assertWhereRule(
+		pyOr(!exists(first), () => {
+			const relatedObjects = asList<EntityInstance>(expressGetAttr(first, "RelatedObjects", INDETERMINATE));
+			return relatedObjects.filter((temp) => !typeOfAttr(temp).has("ifc2x3.ifcproduct")).length === 0;
+		}),
+		"IfcTypeProduct: if ObjectTypeOf[1] exists, all its RelatedObjects must be IfcProduct.",
+	);
+});
+
+// `IfcUShapeProfileDef_WR21` (line 7200): `FlangeThickness < Depth / 2.0`.
+const IfcUShapeProfileDef_WR21 = entityRule("IfcUShapeProfileDef", "WR21", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE);
+	const flangeThickness = expressGetAttr(self, "FlangeThickness", INDETERMINATE);
+	assertWhereRule(
+		triLt(flangeThickness, triDiv(depth, 2.0)),
+		"IfcUShapeProfileDef.FlangeThickness must be less than half of Depth.",
+	);
+});
+
+// `IfcUShapeProfileDef_WR22` (line 7211): `WebThickness < FlangeWidth`.
+const IfcUShapeProfileDef_WR22 = entityRule("IfcUShapeProfileDef", "WR22", (self) => {
+	const flangeWidth = expressGetAttr(self, "FlangeWidth", INDETERMINATE);
+	const webThickness = expressGetAttr(self, "WebThickness", INDETERMINATE);
+	assertWhereRule(triLt(webThickness, flangeWidth), "IfcUShapeProfileDef.WebThickness must be less than FlangeWidth.");
+});
+
+// `IfcUnitAssignment_WR01` (line 7222): see `ifcCorrectUnitAssignment` above.
+const IfcUnitAssignment_WR01 = entityRule("IfcUnitAssignment", "WR01", (self) => {
+	assertWhereRule(
+		ifcCorrectUnitAssignment(expressGetAttr(self, "Units", INDETERMINATE)),
+		"IfcUnitAssignment.Units: named/derived unit UnitTypes must be unique (excluding USERDEFINED), and at most one monetary unit is allowed.",
+	);
+});
+
+// `IfcUnitaryEquipmentType_WR1` (line 7232).
+const IfcUnitaryEquipmentType_WR1 = entityRule("IfcUnitaryEquipmentType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcUnitaryEquipmentType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcValveType_WR1` (line 7242).
+const IfcValveType_WR1 = entityRule("IfcValveType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcValveType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcVector_WR1` (line 7252): `Magnitude >= 0.0`.
+const IfcVector_WR1 = entityRule("IfcVector", "WR1", (self) => {
+	const magnitude = expressGetAttr(self, "Magnitude", INDETERMINATE);
+	assertWhereRule(triGe(magnitude, 0.0), "IfcVector.Magnitude must be >= 0.");
+});
+
+// `IfcVibrationIsolatorType_WR1` (line 7266).
+const IfcVibrationIsolatorType_WR1 = entityRule("IfcVibrationIsolatorType", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "PredefinedType", "ElementType"),
+		"IfcVibrationIsolatorType: if PredefinedType is USERDEFINED, ElementType must be given.",
+	);
+});
+
+// `IfcWall_WR1` (line 7276): at most one `IfcRelAssociatesMaterial` via
+// `HasAssociations`.
+const IfcWall_WR1 = entityRule("IfcWall", "WR1", (self) => {
+	const hasAssociations = asList<EntityInstance>(expressGetAttr(self, "HasAssociations", INDETERMINATE));
+	assertWhereRule(
+		hasAssociations.filter((temp) => typeOfAttr(temp).has("ifc2x3.ifcrelassociatesmaterial")).length <= 1,
+		"IfcWall: at most one IfcRelAssociatesMaterial may be associated via HasAssociations.",
+	);
+});
+
+// `IfcWallStandardCase_WR1` (line 7285): exactly one `IfcRelAssociatesMaterial`
+// (found via `usedin`) whose `RelatingMaterial` is an `IfcMaterialLayerSetUsage`.
+const IfcWallStandardCase_WR1 = entityRule("IfcWallStandardCase", "WR1", (self) => {
+	const refs = usedIn(self, "ifc2x3.ifcrelassociates.relatedobjects");
+	const matching = refs.filter(
+		(temp) =>
+			typeOfAttr(temp).has("ifc2x3.ifcrelassociatesmaterial") &&
+			typeOfAttr(expressGetAttr(temp, "RelatingMaterial", INDETERMINATE)).has("ifc2x3.ifcmateriallayersetusage"),
+	).length;
+	assertWhereRule(
+		matching === 1,
+		"IfcWallStandardCase: exactly one associated IfcRelAssociatesMaterial must reference an IfcMaterialLayerSetUsage.",
+	);
+});
+
+// `IfcWindowLiningProperties_WR31` (line 7294): `not (not exists(LiningDepth) and
+// exists(LiningThickness))`, ported as `exists(...) || !exists(...)` -- same shape as
+// `IfcDoorLiningProperties_WR31` (chunk 2).
+const IfcWindowLiningProperties_WR31 = entityRule("IfcWindowLiningProperties", "WR31", (self) => {
+	const liningDepth = expressGetAttr(self, "LiningDepth", INDETERMINATE);
+	const liningThickness = expressGetAttr(self, "LiningThickness", INDETERMINATE);
+	assertWhereRule(
+		!(!exists(liningDepth) && exists(liningThickness)),
+		"IfcWindowLiningProperties: LiningThickness must not be given without LiningDepth.",
+	);
+});
+
+// `IfcWindowLiningProperties_WR32` (line 7305): same shape as `WR31`, over
+// `FirstTransomOffset`/`SecondTransomOffset`.
+const IfcWindowLiningProperties_WR32 = entityRule("IfcWindowLiningProperties", "WR32", (self) => {
+	const firstTransomOffset = expressGetAttr(self, "FirstTransomOffset", INDETERMINATE);
+	const secondTransomOffset = expressGetAttr(self, "SecondTransomOffset", INDETERMINATE);
+	assertWhereRule(
+		!(!exists(firstTransomOffset) && exists(secondTransomOffset)),
+		"IfcWindowLiningProperties: SecondTransomOffset must not be given without FirstTransomOffset.",
+	);
+});
+
+// `IfcWindowLiningProperties_WR33` (line 7316): same shape as `WR31`, over
+// `FirstMullionOffset`/`SecondMullionOffset`.
+const IfcWindowLiningProperties_WR33 = entityRule("IfcWindowLiningProperties", "WR33", (self) => {
+	const firstMullionOffset = expressGetAttr(self, "FirstMullionOffset", INDETERMINATE);
+	const secondMullionOffset = expressGetAttr(self, "SecondMullionOffset", INDETERMINATE);
+	assertWhereRule(
+		!(!exists(firstMullionOffset) && exists(secondMullionOffset)),
+		"IfcWindowLiningProperties: SecondMullionOffset must not be given without FirstMullionOffset.",
+	);
+});
+
+// `IfcWindowLiningProperties_WR34` (line 7327): byte-identical shape to
+// `IfcDoorLiningProperties_WR35`/`IfcDoorPanelProperties_WR31` (chunk 2), just
+// `IfcWindowStyle` instead of `IfcDoorStyle` -- see this section's own header comment.
+const IfcWindowLiningProperties_WR34 = entityRule("IfcWindowLiningProperties", "WR34", (self) => {
+	const definesType = expressGetAttr(self, "DefinesType", INDETERMINATE);
+	const first = expressGetItem(definesType, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	assertWhereRule(
+		exists(first) && typeOfAttr(first).has("ifc2x3.ifcwindowstyle"),
+		"IfcWindowLiningProperties must be associated (via DefinesType) with exactly one IfcWindowStyle.",
+	);
+});
+
+// `IfcWorkControl_WR1` (line 7336).
+const IfcWorkControl_WR1 = entityRule("IfcWorkControl", "WR1", (self) => {
+	assertWhereRule(
+		userDefinedOrHasAttribute(self, "WorkControlType", "UserDefinedControlType"),
+		"IfcWorkControl: if WorkControlType is USERDEFINED, UserDefinedControlType must be given.",
+	);
+});
+
+// `IfcZShapeProfileDef_WR21` (line 7346): `FlangeThickness < Depth / 2.0`.
+const IfcZShapeProfileDef_WR21 = entityRule("IfcZShapeProfileDef", "WR21", (self) => {
+	const depth = expressGetAttr(self, "Depth", INDETERMINATE);
+	const flangeThickness = expressGetAttr(self, "FlangeThickness", INDETERMINATE);
+	assertWhereRule(
+		triLt(flangeThickness, triDiv(depth, 2.0)),
+		"IfcZShapeProfileDef.FlangeThickness must be less than half of Depth.",
+	);
+});
+
+// `IfcZone_WR1` (line 7357): every `RelatedObject` of `IsGroupedBy` must be an
+// `IfcZone` or `IfcSpace`.
+const IfcZone_WR1 = entityRule("IfcZone", "WR1", (self) => {
+	const isGroupedBy = expressGetAttr(self, "IsGroupedBy", INDETERMINATE);
+	const relatedObjects = asList<EntityInstance>(expressGetAttr(isGroupedBy, "RelatedObjects", INDETERMINATE));
+	const violating = relatedObjects.filter((temp) => {
+		const types = typeOfAttr(temp);
+		return !(types.has("ifc2x3.ifczone") || types.has("ifc2x3.ifcspace"));
+	}).length;
+	assertWhereRule(violating === 0, "IfcZone: every RelatedObject of IsGroupedBy must be an IfcZone or IfcSpace.");
+});
+
+registerSchemaRules("IFC2X3", [
+	IfcSweptSurface_WR1,
+	IfcSweptSurface_WR2,
+	IfcTShapeProfileDef_WR1,
+	IfcTShapeProfileDef_WR2,
+	IfcTable_WR1,
+	IfcTable_WR2,
+	IfcTable_WR3,
+	IfcTankType_WR1,
+	IfcTask_WR1,
+	IfcTask_WR2,
+	IfcTask_WR3,
+	IfcTelecomAddress_WR1,
+	IfcTendon_WR1,
+	IfcTextLiteralWithExtent_WR31,
+	IfcTextStyleFontModel_WR31,
+	IfcTextureMap_WR11,
+	IfcTimeSeriesSchedule_WR41,
+	IfcTopologyRepresentation_WR21,
+	IfcTopologyRepresentation_WR22,
+	IfcTopologyRepresentation_WR23,
+	IfcTrimmedCurve_WR41,
+	IfcTrimmedCurve_WR42,
+	IfcTrimmedCurve_WR43,
+	IfcTubeBundleType_WR1,
+	IfcTypeObject_WR1,
+	IfcTypeProduct_WR41,
+	IfcUShapeProfileDef_WR21,
+	IfcUShapeProfileDef_WR22,
+	IfcUnitAssignment_WR01,
+	IfcUnitaryEquipmentType_WR1,
+	IfcValveType_WR1,
+	IfcVector_WR1,
+	IfcVibrationIsolatorType_WR1,
+	IfcWall_WR1,
+	IfcWallStandardCase_WR1,
+	IfcWindowLiningProperties_WR31,
+	IfcWindowLiningProperties_WR32,
+	IfcWindowLiningProperties_WR33,
+	IfcWindowLiningProperties_WR34,
+	IfcWorkControl_WR1,
+	IfcZShapeProfileDef_WR21,
+	IfcZone_WR1,
+]);
+
+// =============================================================================
+// SCOPE = 'file' rules, chunk 5 (real source lines 7366-7395, both remaining IFC2X3
+// `SCOPE = 'file'` classes -- `IfcRepresentationContextSameWCS`/
+// `IfcSingleProjectInstance`). **This is the FIRST chunk in this entire project to
+// exercise `SCOPE = 'file'` dispatch** -- confirmed by directly re-reading
+// `ruleDispatch.ts`/`ruleExecutor.ts` before writing any of the below (both already
+// fully support this scope, see `fileRule`'s own doc comment above; NO changes were
+// needed to either file). Landing these 2 rules completes ALL 365 IFC2X3 WHERE-rule
+// classes (339 entity + 24 type + 2 file) -- IFC2X3 is now schema-complete for Phase
+// EX-4.
+//
+// **5 new rule-file-local, non-`calc_*`, non-WHERE-rule EXPRESS-library helpers
+// ported below**, all transitively reached from `IfcRepresentationContextSameWCS`'s own
+// call to `IfcSameValidPrecision`/`IfcSameAxis2Placement` (the task brief's own named
+// two): `ifcSameValidPrecision` (`IFC2X3.py` line 7935), `ifcSameAxis2Placement` (line
+// 7906, itself calling `ifcSameDirection`/`ifcSameCartesianPoint`), `ifcSameDirection`
+// (line 7922), `ifcSameCartesianPoint` (line 7909), and `ifcSameValue` (line 7943, the
+// common epsilon-tolerant fuzzy-equality primitive both of the previous two reduce to).
+// None of these were reachable from any Phase EX-2 `calc_*` function or any of chunks
+// 1-4's own WHERE-rules -- confirmed by grepping every prior chunk's own helper list.
+//
+// **REAL UPSTREAM PYTHON BUG, found and preserved verbatim, disclosed prominently**:
+// `ifcSameAxis2Placement`'s own doc comment below traces it in full -- real Python's
+// `IfcSameAxis2Placement(ap1, ap2, epsilon)` calls `IfcSameCartesianPoint(ap1.Location,
+// ap1.Location, epsilon)` for its own `Location` comparison, i.e. `ap1.Location`
+// against ITSELF, never `ap2.Location`. This makes the function's own stated
+// "same placement" check silently ignore its own `Location`/origin comparison
+// entirely (always trivially "same", any point compared against itself passes any
+// epsilon), leaving only the two axis-direction (`P[1]`/`P[2]`) comparisons as the
+// real, functioning part of the check. Ported AS-IS (not "fixed"), per this project's
+// established precedent for preserving found upstream bugs verbatim (chunk 2's
+// `IfcDimensionCurveDirectedCallout_WR42`, chunk 4's
+// `IfcStructuredDimensionCallout_WR31`).
+// =============================================================================
+
+/**
+ * Python: `IfcSameValue(value1, value2, epsilon)` (`IFC2X3.py` line 7943):
+ * ```python
+ * def IfcSameValue(value1, value2, epsilon):
+ *     defaulteps = 1e-06
+ *     valideps = nvl(epsilon, defaulteps)
+ *     return value1 + valideps > value2 and value1 < value2 + valideps
+ * ```
+ * An epsilon-tolerant fuzzy equality: `value1`/`value2` are "the same" iff they're
+ * within `valideps` of each other (`nvl`'d to `1e-6` when `epsilon` itself is absent).
+ * Ported via `pyAnd`/`triGt`/`triLt` matching this file's own established convention
+ * for every comparison, even though every real call site (below) passes definite
+ * numeric coordinate/direction-ratio components.
+ */
+function ifcSameValue(value1: unknown, value2: unknown, epsilon: unknown): Tri {
+	const defaultEps = 1e-6;
+	const validEps = nvl(epsilon, defaultEps) as number;
+	return pyAnd(triGt((value1 as number) + validEps, value2), () => triLt(value1, (value2 as number) + validEps));
+}
+
+/**
+ * Python: `IfcSameCartesianPoint(cp1, cp2, epsilon)` (`IFC2X3.py` line 7909):
+ * ```python
+ * def IfcSameCartesianPoint(cp1, cp2, epsilon):
+ *     cp1x = cp1.Coordinates[1]
+ *     cp1y = cp1.Coordinates[2]
+ *     cp1z = 0
+ *     cp2x = cp2.Coordinates[1]
+ *     cp2y = cp2.Coordinates[2]
+ *     cp2z = 0
+ *     if sizeof(cp1.Coordinates) > 2: cp1z = cp1.Coordinates[3]
+ *     if sizeof(cp2.Coordinates) > 2: cp2z = cp2.Coordinates[3]
+ *     return IfcSameValue(cp1x, cp2x, epsilon) and IfcSameValue(cp1y, cp2y, epsilon) and IfcSameValue(cp1z, cp2z, epsilon)
+ * ```
+ * Compares two `IfcCartesianPoint`s component-wise (X/Y always present, Z defaulted to
+ * `0` for a 2D point) via `ifcSameValue`.
+ */
+function ifcSameCartesianPoint(cp1: unknown, cp2: unknown, epsilon: unknown): Tri {
+	const cp1Coordinates = expressGetAttr(cp1, "Coordinates", INDETERMINATE);
+	const cp2Coordinates = expressGetAttr(cp2, "Coordinates", INDETERMINATE);
+	const cp1x = expressGetItem(cp1Coordinates, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const cp1y = expressGetItem(cp1Coordinates, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	let cp1z: unknown = 0;
+	const cp2x = expressGetItem(cp2Coordinates, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const cp2y = expressGetItem(cp2Coordinates, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	let cp2z: unknown = 0;
+	if ((sizeof(cp1Coordinates) as number) > 2) {
+		cp1z = expressGetItem(cp1Coordinates, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	}
+	if ((sizeof(cp2Coordinates) as number) > 2) {
+		cp2z = expressGetItem(cp2Coordinates, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	}
+	return pyAnd(ifcSameValue(cp1x, cp2x, epsilon), () =>
+		pyAnd(ifcSameValue(cp1y, cp2y, epsilon), () => ifcSameValue(cp1z, cp2z, epsilon)),
+	);
+}
+
+/**
+ * Python: `IfcSameDirection(dir1, dir2, epsilon)` (`IFC2X3.py` line 7922): identical
+ * shape to `IfcSameCartesianPoint` above, over `DirectionRatios` instead of
+ * `Coordinates`.
+ */
+function ifcSameDirection(dir1: unknown, dir2: unknown, epsilon: unknown): Tri {
+	const dir1Ratios = expressGetAttr(dir1, "DirectionRatios", INDETERMINATE);
+	const dir2Ratios = expressGetAttr(dir2, "DirectionRatios", INDETERMINATE);
+	const dir1x = expressGetItem(dir1Ratios, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const dir1y = expressGetItem(dir1Ratios, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	let dir1z: unknown = 0;
+	const dir2x = expressGetItem(dir2Ratios, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	const dir2y = expressGetItem(dir2Ratios, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	let dir2z: unknown = 0;
+	if ((sizeof(dir1Ratios) as number) > 2) {
+		dir1z = expressGetItem(dir1Ratios, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	}
+	if ((sizeof(dir2Ratios) as number) > 2) {
+		dir2z = expressGetItem(dir2Ratios, 3 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+	}
+	return pyAnd(ifcSameValue(dir1x, dir2x, epsilon), () =>
+		pyAnd(ifcSameValue(dir1y, dir2y, epsilon), () => ifcSameValue(dir1z, dir2z, epsilon)),
+	);
+}
+
+/**
+ * Python: `IfcSameAxis2Placement(ap1, ap2, epsilon)` (`IFC2X3.py` line 7906):
+ * ```python
+ * def IfcSameAxis2Placement(ap1, ap2, epsilon):
+ *     return IfcSameDirection(ap1.P[1], ap2.P[1], epsilon) and IfcSameDirection(ap1.P[2], ap2.P[2], epsilon) and IfcSameCartesianPoint(ap1.Location, ap1.Location, epsilon)
+ * ```
+ *
+ * **REAL UPSTREAM PYTHON BUG, preserved verbatim, disclosed prominently** (per this
+ * project's own verbatim-translation mandate -- see this section's own header comment):
+ * the final `IfcSameCartesianPoint(...)` call passes `ap1.Location` as BOTH its `cp1`
+ * and `cp2` argument -- `ap2` is never referenced anywhere in that third conjunct
+ * (confirmed directly against real source, re-read twice: `express_getattr(ap1,
+ * 'Location', INDETERMINATE)` appears for both the second and third positional
+ * argument). A point compared against itself is trivially "the same value" for any
+ * epsilon, so this conjunct is unconditionally `True` -- `IfcSameAxis2Placement` NEVER
+ * actually compares the two placements' own `Location`s, despite its own real-world
+ * purpose (verifying two `IfcAxis2Placement3D`s represent "the same" placement) clearly
+ * intending it to. In practice this makes the function equivalent to "same axis
+ * DIRECTIONS only" (`P[1]`/`P[2]`, the X and Z axis directions derived by
+ * `calc_IfcAxis2Placement3D_P`) -- its own sole real caller,
+ * `IfcRepresentationContextSameWCS` below, is therefore LESS STRICT than its own
+ * EXPRESS/WHERE-rule intent suggests (two `IfcGeometricRepresentationContext`s with the
+ * same axis orientation but genuinely different `WorldCoordinateSystem` origins would
+ * incorrectly be accepted as "same WCS"). Ported AS-IS -- NOT "fixed" to compare
+ * `ap2.Location`, which would diverge from what real `ifcopenshell-python` actually
+ * validates today (this project's own established precedent: chunk 2's
+ * `IfcDimensionCurveDirectedCallout_WR42`, chunk 4's
+ * `IfcStructuredDimensionCallout_WR31`).
+ */
+function ifcSameAxis2Placement(ap1: unknown, ap2: unknown, epsilon: unknown): Tri {
+	const ap1P = expressGetAttr(ap1, "P", INDETERMINATE);
+	const ap2P = expressGetAttr(ap2, "P", INDETERMINATE);
+	const ap1Location = expressGetAttr(ap1, "Location", INDETERMINATE);
+	return pyAnd(
+		ifcSameDirection(
+			expressGetItem(ap1P, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			expressGetItem(ap2P, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+			epsilon,
+		),
+		() =>
+			pyAnd(
+				ifcSameDirection(
+					expressGetItem(ap1P, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+					expressGetItem(ap2P, 2 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE),
+					epsilon,
+				),
+				// Bug preserved verbatim (see this function's own doc comment above): both
+				// arguments here are `ap1Location` in real Python source -- `ap2` is unused.
+				() => ifcSameCartesianPoint(ap1Location, ap1Location, epsilon),
+			),
+	);
+}
+
+/**
+ * Python: `IfcSameValidPrecision(epsilon1, epsilon2)` (`IFC2X3.py` line 7935):
+ * ```python
+ * def IfcSameValidPrecision(epsilon1, epsilon2):
+ *     defaulteps = 1e-06
+ *     derivationofeps = 1.001
+ *     uppereps = 1.0
+ *     valideps1 = nvl(epsilon1, defaulteps)
+ *     valideps2 = nvl(epsilon2, defaulteps)
+ *     return 0.0 < valideps1 and valideps1 <= derivationofeps * valideps2 and valideps2 <= derivationofeps * valideps1 and valideps2 < uppereps
+ * ```
+ * Checks that two `Precision` values are both positive, within 0.1% of each other
+ * (`derivationofeps = 1.001`), and below the upper bound `1.0` -- each missing
+ * `epsilon` defaults to `1e-6` via `nvl`.
+ */
+function ifcSameValidPrecision(epsilon1: unknown, epsilon2: unknown): Tri {
+	const defaultEps = 1e-6;
+	const derivationOfEps = 1.001;
+	const upperEps = 1.0;
+	const validEps1 = nvl(epsilon1, defaultEps) as number;
+	const validEps2 = nvl(epsilon2, defaultEps) as number;
+	return pyAnd(triLt(0.0, validEps1), () =>
+		pyAnd(triLe(validEps1, derivationOfEps * validEps2), () =>
+			pyAnd(triLe(validEps2, derivationOfEps * validEps1), () => triLt(validEps2, upperEps)),
+		),
+	);
+}
+
+// `IfcRepresentationContextSameWCS` (line 7366): every `IfcGeometricRepresentationContext`
+// in the file must share the same `WorldCoordinateSystem` as the first one found (within
+// precision) -- Python:
+// ```python
+// def __call__(file):
+//     contexts = file.by_type('IfcGeometricRepresentationContext')
+//     isdifferent = False
+//     if sizeof(contexts) > 1:
+//         for i in range(2, hiindex(contexts) + 1):
+//             if contexts[1].WorldCoordinateSystem != contexts[i].WorldCoordinateSystem:
+//                 isdifferent = (not IfcSameValidPrecision(contexts[1].Precision, contexts[i].Precision)
+//                     or not IfcSameAxis2Placement(contexts[1].WorldCoordinateSystem, contexts[i].WorldCoordinateSystem, contexts[1].Precision))
+//                 if isdifferent == True:
+//                     break
+//     assert (isdifferent == False) is not False
+// ```
+// Only compares every OTHER context against the FIRST one found (not all pairs) --
+// ported faithfully, not "improved" to an all-pairs check. `contexts[1].Precision` (the
+// FIRST context's own `Precision`, not `contexts[i]`'s) is reused as the `epsilon` for
+// the `IfcSameAxis2Placement` call too, exactly matching real source's own asymmetric
+// argument choice. `!=`/`==` against `EntityInstance`s go through `triNe`/`triEq`
+// (`.equals()`, `settings.compareInstancesByValue`-aware, toggled on for the whole rule-
+// execution pass by `ruleExecutor.ts`) per this file's own established convention.
+const IfcRepresentationContextSameWCS = fileRule("IfcRepresentationContextSameWCS", (file) => {
+	const contexts = file.byType("IfcGeometricRepresentationContext");
+	let isDifferent: Tri = false;
+	if (contexts.length > 1) {
+		const first = contexts[1 - EXPRESS_ONE_BASED_INDEXING];
+		const firstWcs = expressGetAttr(first, "WorldCoordinateSystem", INDETERMINATE);
+		const firstPrecision = expressGetAttr(first, "Precision", INDETERMINATE);
+		for (const i of expressRange(2, contexts.length + 1)) {
+			const other = contexts[i - EXPRESS_ONE_BASED_INDEXING];
+			const otherWcs = expressGetAttr(other, "WorldCoordinateSystem", INDETERMINATE);
+			if (triNe(firstWcs, otherWcs) === true) {
+				const otherPrecision = expressGetAttr(other, "Precision", INDETERMINATE);
+				isDifferent = pyOr(pyNot(ifcSameValidPrecision(firstPrecision, otherPrecision)), () =>
+					pyNot(ifcSameAxis2Placement(firstWcs, otherWcs, firstPrecision)),
+				);
+				if (isDifferent === true) break;
+			}
+		}
+	}
+	assertWhereRule(
+		triEq(isDifferent, false),
+		"IfcRepresentationContextSameWCS: every IfcGeometricRepresentationContext must share the same WorldCoordinateSystem (within precision) as the first one found.",
+	);
+});
+
+// `IfcSingleProjectInstance` (line 7381): `sizeof(file.by_type('IfcProject')) <= 1`.
+const IfcSingleProjectInstance = fileRule("IfcSingleProjectInstance", (file) => {
+	const projects = file.byType("IfcProject");
+	assertWhereRule(projects.length <= 1, "IfcSingleProjectInstance: a file must contain at most one IfcProject.");
+});
+
+registerSchemaRules("IFC2X3", [IfcRepresentationContextSameWCS, IfcSingleProjectInstance]);
