@@ -226,7 +226,14 @@ function getScratchFile(): IfcFile {
 	return scratchFile;
 }
 
-function ifcDirection(directionRatios: readonly number[]): EntityInstance {
+/**
+ * Python: `IfcDirection` (bare EXPRESS constructor call, not a rule/DERIVE function).
+ * **Exported starting with Phase EX-4's own IFC4X3_ADD2 chunk 3** (`whereRules/
+ * ifc4x3.ts`'s own `IfcExtrudedAreaSolid_ValidExtrusionDirection` needs it), exactly
+ * mirroring `rules/ifc4.ts`'s own identical `ifcDirection` export precedent for
+ * `whereRules/ifc4.ts`'s IFC4 chunk 2 (its own citation for this same rule name).
+ */
+export function ifcDirection(directionRatios: readonly number[]): EntityInstance {
 	return getScratchFile().createEntity("IfcDirection", [...directionRatios]);
 }
 
@@ -330,8 +337,14 @@ export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | 
 	return ifcVector(arg1 as EntityInstance, 0.0);
 }
 
-/** Python: `IfcDotProduct` (`IFC4X3_ADD2.py`) -- byte-identical to `IFC4.py`'s own. */
-function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
+/**
+ * Python: `IfcDotProduct` (`IFC4X3_ADD2.py`) -- byte-identical to `IFC4.py`'s own.
+ * **Exported starting with Phase EX-4's own IFC4X3_ADD2 chunk 3** (`whereRules/
+ * ifc4x3.ts`'s own `IfcExtrudedAreaSolid_ValidExtrusionDirection` needs it, alongside
+ * `ifcDirection` immediately above), exactly mirroring `rules/ifc4.ts`'s own identical
+ * `ifcDotProduct` export precedent.
+ */
+export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
 	if (!exists(arg1) || !exists(arg2)) return null;
 	if (expressGetAttr(arg1, "Dim", INDETERMINATE) !== expressGetAttr(arg2, "Dim", INDETERMINATE)) return null;
 	const vec1 = ifcNormalise(arg1);
