@@ -4148,7 +4148,7 @@ const IfcSectionedSpine_WR1 = entityRule("IfcSectionedSpine", "WR1", (self) => {
 // CrossSections[1].ProfileType != temp.ProfileType]) == 0`.
 const IfcSectionedSpine_WR2 = entityRule("IfcSectionedSpine", "WR2", (self) => {
 	const crossSections = expressGetAttr(self, "CrossSections", INDETERMINATE);
-	const list = isIndeterminate(crossSections) ? [] : (crossSections as EntityInstance[]);
+	const list = asList<EntityInstance>(crossSections);
 	const first = expressGetItem(list, 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
 	const firstProfileType = expressGetAttr(first, "ProfileType", INDETERMINATE);
 	const violating = list.filter(
