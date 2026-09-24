@@ -5952,6 +5952,665 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 		});
 	});
 
+	// =============================================================================
+	// Phase EX-4, IFC4X3_ADD2 FINAL chunk: original, hand-rolled coverage for the last 77
+	// `SCOPE = 'entity'` rules (`IfcTendon_CorrectTypeAssigned` through `IfcZone_WR1`) PLUS
+	// the 2 `SCOPE = 'file'` rules (`IfcRepresentationContextSameWCS`/
+	// `IfcSingleProjectInstance`) that complete ALL 779 IFC4X3_ADD2 WHERE-rule classes --
+	// see `whereRules/ifc4x3.ts`'s own matching header comment for the full rule-range/
+	// helper/bug writeup. Same data-driven `describe.each` pattern established by chunks
+	// 2-6 for the ordinary `_CorrectPredefinedType`/`_CorrectTypeAssigned` rules, plus
+	// individual `describe` blocks for the remaining bespoke rules, in real ADD2 file
+	// order, plus a dedicated `findFileRule`-based block for the 2 file-scope rules
+	// (mirrors `ifc2x3.test.ts`'s/`ifc4.test.ts`'s own identical final-chunk convention).
+	// =============================================================================
+
+	interface CorrectPredefinedTypeCaseFinal {
+		readonly typeName: string;
+		readonly escapeAttr: string;
+		readonly optional: boolean;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own final-chunk
+	// `correctPredefinedType(...)` call sites (real source lines 12372-13140). Every
+	// "occurrence" entity here uses `ObjectType` and every "*Type" entity uses
+	// `ElementType` -- no per-case escape-attribute overrides needed this chunk (unlike
+	// chunk 6's own `IfcSubContractResourceType`/`IfcTaskType` finds).
+	const correctPredefinedTypeCasesFinal: readonly CorrectPredefinedTypeCaseFinal[] = [
+		{ typeName: "IfcTendonAnchor", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTendonAnchorType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTendonConduit", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTendonConduitType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTendonType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTrackElement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTrackElementType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTransformer", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTransformerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTransportElement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTransportElementType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcTubeBundle", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcTubeBundleType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcUnitaryControlElement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcUnitaryControlElementType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcUnitaryEquipment", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcUnitaryEquipmentType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcValve", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcValveType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcVehicle", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcVehicleType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcVibrationDamper", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcVibrationDamperType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcVibrationIsolator", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcVibrationIsolatorType", escapeAttr: "ElementType", optional: false },
+		// `IfcVirtualElement`: a genuinely NEW rule on a pre-existing IFC4 entity (see
+		// `whereRules/ifc4x3.ts`'s own header comment) -- ordinary "occurrence" shape.
+		{ typeName: "IfcVirtualElement", escapeAttr: "ObjectType", optional: true },
+		// `IfcVoidingFeature`: a RULE_NAME rename + shape upgrade from IFC4's own
+		// `HasObjectType` (see `whereRules/ifc4x3.ts`'s own header comment) -- now the FULL
+		// standard shape.
+		{ typeName: "IfcVoidingFeature", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWall", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWallType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcWasteTerminal", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWasteTerminalType", escapeAttr: "ElementType", optional: false },
+		// `IfcWindow`: a genuinely NEW rule (IFC4 has no `PredefinedType` rule on plain
+		// `IfcWindow` at all -- see `whereRules/ifc4x3.ts`'s own header comment).
+		{ typeName: "IfcWindow", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWindowType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcWorkCalendar", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWorkPlan", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcWorkSchedule", escapeAttr: "ObjectType", optional: true },
+	];
+
+	describe.each(correctPredefinedTypeCasesFinal)(
+		"$typeName.CorrectPredefinedType (final chunk)",
+		({ typeName, escapeAttr, optional }) => {
+			test("pass: PredefinedType is a non-USERDEFINED enum value", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "NOTDEFINED");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("pass: PredefinedType is USERDEFINED and the escape attribute is given", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				set(inst, escapeAttr, "a custom value");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("fail: PredefinedType is USERDEFINED but the escape attribute is missing", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				expectFail(typeName, "CorrectPredefinedType", inst);
+			});
+			if (optional) {
+				test("pass: PredefinedType is not given at all (optional on this entity)", () => {
+					const inst = create(typeName);
+					expectPass(typeName, "CorrectPredefinedType", inst);
+				});
+			}
+		},
+	);
+
+	interface CorrectTypeAssignedCaseFinal {
+		readonly typeName: string;
+		readonly expectedTypeName: string;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own final-chunk
+	// `correctTypeAssigned(...)` call sites. `IfcTransformer` is included here (unlike
+	// `whereRules/ifc4.ts`'s own bespoke, bug-preserving version) because ADD2's own real
+	// source has the "Transformer"/"Tranformer" typo FIXED -- see `whereRules/ifc4x3.ts`'s
+	// own header comment -- so the ordinary `correctTypeAssigned` helper (and this ordinary
+	// data-driven test) applies unchanged. `IfcWindow` uses the renamed
+	// `CorrectTypeAssigned` (IFC4's own `CorrectStyleAssigned`).
+	const correctTypeAssignedCasesFinal: readonly CorrectTypeAssignedCaseFinal[] = [
+		{ typeName: "IfcTendon", expectedTypeName: "IfcTendonType" },
+		{ typeName: "IfcTendonAnchor", expectedTypeName: "IfcTendonAnchorType" },
+		{ typeName: "IfcTendonConduit", expectedTypeName: "IfcTendonConduitType" },
+		{ typeName: "IfcTrackElement", expectedTypeName: "IfcTrackElementType" },
+		{ typeName: "IfcTransformer", expectedTypeName: "IfcTransformerType" },
+		{ typeName: "IfcTransportElement", expectedTypeName: "IfcTransportElementType" },
+		{ typeName: "IfcTubeBundle", expectedTypeName: "IfcTubeBundleType" },
+		{ typeName: "IfcUnitaryControlElement", expectedTypeName: "IfcUnitaryControlElementType" },
+		{ typeName: "IfcUnitaryEquipment", expectedTypeName: "IfcUnitaryEquipmentType" },
+		{ typeName: "IfcValve", expectedTypeName: "IfcValveType" },
+		{ typeName: "IfcVehicle", expectedTypeName: "IfcVehicleType" },
+		{ typeName: "IfcVibrationDamper", expectedTypeName: "IfcVibrationDamperType" },
+		{ typeName: "IfcVibrationIsolator", expectedTypeName: "IfcVibrationIsolatorType" },
+		{ typeName: "IfcWall", expectedTypeName: "IfcWallType" },
+		{ typeName: "IfcWasteTerminal", expectedTypeName: "IfcWasteTerminalType" },
+		{ typeName: "IfcWindow", expectedTypeName: "IfcWindowType" },
+	];
+
+	describe.each(correctTypeAssignedCasesFinal)(
+		"$typeName.CorrectTypeAssigned (final chunk)",
+		({ typeName, expectedTypeName }) => {
+			test("pass: no IsTypedBy at all", () => {
+				const inst = create(typeName);
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("pass: IsTypedBy's RelatingType is the expected *Type", () => {
+				const inst = create(typeName);
+				typeAssign(inst, create(expectedTypeName));
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("fail: IsTypedBy's RelatingType is a mismatched *Type", () => {
+				const inst = create(typeName);
+				typeAssign(inst, create("IfcActuatorType"));
+				expectFail(typeName, "CorrectTypeAssigned", inst);
+			});
+		},
+	);
+
+	// Demonstrates the fixed typo directly (contrast with `whereRules/ifc4.ts`'s own
+	// bug-preserving `IfcTransformer_CorrectTypeAssigned` test, which asserts a MISMATCHED
+	// RelatingType still PASSES due to the misspelled membership string): in ADD2, a
+	// mismatched RelatingType now genuinely fails, exactly like every other ordinary
+	// `_CorrectTypeAssigned` rule.
+	describe("IfcTransformer.CorrectTypeAssigned (typo fix confirmation)", () => {
+		test("fail: a mismatched RelatingType is correctly rejected (IFC4's own misspelling is fixed in ADD2)", () => {
+			const inst = create("IfcTransformer");
+			typeAssign(inst, create("IfcActuatorType"));
+			expectFail("IfcTransformer", "CorrectTypeAssigned", inst);
+		});
+	});
+
+	describe("IfcTextLiteralWithExtent.WR31", () => {
+		test("pass/fail", () => {
+			const good = create("IfcTextLiteralWithExtent");
+			const extent = create("IfcPlanarExtent");
+			set(extent, "SizeInX", 1);
+			set(extent, "SizeInY", 1);
+			set(good, "Extent", extent);
+			expectPass("IfcTextLiteralWithExtent", "WR31", good);
+
+			const bad = create("IfcTextLiteralWithExtent");
+			set(bad, "Extent", create("IfcPlanarBox"));
+			expectFail("IfcTextLiteralWithExtent", "WR31", bad);
+		});
+	});
+
+	describe("IfcTextStyleFontModel.MeasureOfFontSize", () => {
+		function lengthMeasure(value: number): EntityInstance {
+			return file.createEntity("IfcPositiveLengthMeasure", value as unknown as never);
+		}
+		function descriptiveMeasure(value: string): EntityInstance {
+			return file.createEntity("IfcDescriptiveMeasure", value as unknown as never);
+		}
+		test("pass/fail", () => {
+			const good = create("IfcTextStyleFontModel");
+			set(good, "FontSize", lengthMeasure(12));
+			expectPass("IfcTextStyleFontModel", "MeasureOfFontSize", good);
+
+			const badValue = create("IfcTextStyleFontModel");
+			set(badValue, "FontSize", lengthMeasure(-1));
+			expectFail("IfcTextStyleFontModel", "MeasureOfFontSize", badValue);
+
+			const badType = create("IfcTextStyleFontModel");
+			set(badType, "FontSize", descriptiveMeasure("12pt"));
+			expectFail("IfcTextStyleFontModel", "MeasureOfFontSize", badType);
+		});
+	});
+
+	describe("IfcTopologyRepresentation", () => {
+		test("WR21 pass/fail", () => {
+			const good = create("IfcTopologyRepresentation");
+			set(good, "Items", [create("IfcVertexPoint")]);
+			expectPass("IfcTopologyRepresentation", "WR21", good);
+
+			const bad = create("IfcTopologyRepresentation");
+			set(bad, "Items", [create("IfcCartesianPoint")]);
+			expectFail("IfcTopologyRepresentation", "WR21", bad);
+		});
+		test("WR22 pass/fail", () => {
+			const good = create("IfcTopologyRepresentation");
+			set(good, "RepresentationType", "Vertex");
+			expectPass("IfcTopologyRepresentation", "WR22", good);
+			expectFail("IfcTopologyRepresentation", "WR22", create("IfcTopologyRepresentation"));
+		});
+		test("WR23 pass/fail", () => {
+			const good = create("IfcTopologyRepresentation");
+			set(good, "RepresentationType", "Vertex");
+			set(good, "Items", [create("IfcVertexPoint")]);
+			expectPass("IfcTopologyRepresentation", "WR23", good);
+
+			const bad = create("IfcTopologyRepresentation");
+			set(bad, "RepresentationType", "Vertex");
+			set(bad, "Items", [create("IfcCartesianPoint")]);
+			expectFail("IfcTopologyRepresentation", "WR23", bad);
+
+			const undefinedKind = create("IfcTopologyRepresentation");
+			set(undefinedKind, "RepresentationType", "Undefined");
+			set(undefinedKind, "Items", [create("IfcCartesianPoint")]);
+			expectPass("IfcTopologyRepresentation", "WR23", undefinedKind);
+		});
+	});
+
+	describe("IfcToroidalSurface.MajorLargerMinor", () => {
+		test("pass/fail", () => {
+			const good = create("IfcToroidalSurface");
+			set(good, "MajorRadius", 10);
+			set(good, "MinorRadius", 2);
+			expectPass("IfcToroidalSurface", "MajorLargerMinor", good);
+
+			const bad = create("IfcToroidalSurface");
+			set(bad, "MajorRadius", 2);
+			set(bad, "MinorRadius", 10);
+			expectFail("IfcToroidalSurface", "MajorLargerMinor", bad);
+		});
+	});
+
+	// `IfcTriangulatedIrregularNetwork` is a wholly new ADD2 entity (see
+	// `whereRules/ifc4x3.ts`'s own header comment) -- original, fresh fixtures, no IFC4
+	// precedent.
+	describe("IfcTriangulatedIrregularNetwork.NotClosed", () => {
+		test("pass/fail", () => {
+			const good = create("IfcTriangulatedIrregularNetwork");
+			set(good, "Closed", false);
+			expectPass("IfcTriangulatedIrregularNetwork", "NotClosed", good);
+
+			const bad = create("IfcTriangulatedIrregularNetwork");
+			set(bad, "Closed", true);
+			expectFail("IfcTriangulatedIrregularNetwork", "NotClosed", bad);
+		});
+	});
+
+	describe("IfcTrimmedCurve", () => {
+		// `Trim1`/`Trim2` are `SET OF IfcTrimmingSelect` (`IfcCartesianPoint` OR the
+		// standalone defined type `IfcParameterValue`) -- matches `ifc4.test.ts`'s own
+		// established "wrap via `file.createEntity`" convention for a SELECT member that is
+		// a bare standalone defined type.
+		function parameterValue(value: number): EntityInstance {
+			return file.createEntity("IfcParameterValue", value as unknown as never);
+		}
+		test("Trim1ValuesConsistent pass: single member", () => {
+			const good = create("IfcTrimmedCurve");
+			set(good, "Trim1", [point3D([0, 0, 0])]);
+			expectPass("IfcTrimmedCurve", "Trim1ValuesConsistent", good);
+		});
+		test("Trim1ValuesConsistent pass: two members of different types", () => {
+			const good = create("IfcTrimmedCurve");
+			set(good, "Trim1", [point3D([0, 0, 0]), parameterValue(0.5)]);
+			expectPass("IfcTrimmedCurve", "Trim1ValuesConsistent", good);
+		});
+		test("Trim1ValuesConsistent fail: two members of the same type", () => {
+			const bad = create("IfcTrimmedCurve");
+			set(bad, "Trim1", [point3D([0, 0, 0]), point3D([1, 1, 1])]);
+			expectFail("IfcTrimmedCurve", "Trim1ValuesConsistent", bad);
+		});
+		test("Trim2ValuesConsistent mirrors Trim1ValuesConsistent", () => {
+			const good = create("IfcTrimmedCurve");
+			set(good, "Trim2", [parameterValue(0.5)]);
+			expectPass("IfcTrimmedCurve", "Trim2ValuesConsistent", good);
+
+			const bad = create("IfcTrimmedCurve");
+			set(bad, "Trim2", [parameterValue(0.1), parameterValue(0.2)]);
+			expectFail("IfcTrimmedCurve", "Trim2ValuesConsistent", bad);
+		});
+		test("NoTrimOfBoundedCurves pass/fail", () => {
+			const good = create("IfcTrimmedCurve");
+			set(good, "BasisCurve", create("IfcLine"));
+			expectPass("IfcTrimmedCurve", "NoTrimOfBoundedCurves", good);
+
+			const bad = create("IfcTrimmedCurve");
+			set(bad, "BasisCurve", polyline3D());
+			expectFail("IfcTrimmedCurve", "NoTrimOfBoundedCurves", bad);
+		});
+	});
+
+	describe("IfcTypeObject", () => {
+		test("NameRequired pass/fail", () => {
+			const good = create("IfcWallType");
+			set(good, "Name", "A wall type");
+			expectPass("IfcTypeObject", "NameRequired", good);
+			expectFail("IfcTypeObject", "NameRequired", create("IfcWallType"));
+		});
+		test("UniquePropertySetNames pass: no HasPropertySets at all", () => {
+			expectPass("IfcTypeObject", "UniquePropertySetNames", create("IfcWallType"));
+		});
+		test("UniquePropertySetNames pass: distinct Names", () => {
+			const typeObj = create("IfcWallType");
+			const ps1 = create("IfcPropertySet");
+			set(ps1, "Name", "Pset_A");
+			const ps2 = create("IfcPropertySet");
+			set(ps2, "Name", "Pset_B");
+			set(typeObj, "HasPropertySets", [ps1, ps2]);
+			expectPass("IfcTypeObject", "UniquePropertySetNames", typeObj);
+		});
+		test("UniquePropertySetNames fail: duplicate Names", () => {
+			const typeObj = create("IfcWallType");
+			const ps1 = create("IfcPropertySet");
+			set(ps1, "Name", "Pset_A");
+			const ps2 = create("IfcPropertySet");
+			set(ps2, "Name", "Pset_A");
+			set(typeObj, "HasPropertySets", [ps1, ps2]);
+			expectFail("IfcTypeObject", "UniquePropertySetNames", typeObj);
+		});
+	});
+
+	describe("IfcTypeProduct.ApplicableOccurrence", () => {
+		test("pass: no Types at all", () => {
+			expectPass("IfcTypeProduct", "ApplicableOccurrence", create("IfcWallType"));
+		});
+		test("pass: every RelatedObjects member is an IfcProduct", () => {
+			const wallType = create("IfcWallType");
+			typeAssign(create("IfcWall"), wallType);
+			expectPass("IfcTypeProduct", "ApplicableOccurrence", wallType);
+		});
+		test("fail: a RelatedObjects member is not an IfcProduct", () => {
+			const wallType = create("IfcWallType");
+			typeAssign(create("IfcOrganization"), wallType);
+			expectFail("IfcTypeProduct", "ApplicableOccurrence", wallType);
+		});
+	});
+
+	describe("IfcUShapeProfileDef / IfcZShapeProfileDef (attrLessThanHalf)", () => {
+		test("IfcUShapeProfileDef.ValidFlangeThickness pass/fail (Depth / 2)", () => {
+			const good = create("IfcUShapeProfileDef");
+			set(good, "Depth", 10);
+			set(good, "FlangeThickness", 2);
+			expectPass("IfcUShapeProfileDef", "ValidFlangeThickness", good);
+
+			const bad = create("IfcUShapeProfileDef");
+			set(bad, "Depth", 10);
+			set(bad, "FlangeThickness", 6);
+			expectFail("IfcUShapeProfileDef", "ValidFlangeThickness", bad);
+		});
+		test("IfcUShapeProfileDef.ValidWebThickness pass/fail", () => {
+			const good = create("IfcUShapeProfileDef");
+			set(good, "FlangeWidth", 10);
+			set(good, "WebThickness", 2);
+			expectPass("IfcUShapeProfileDef", "ValidWebThickness", good);
+
+			const bad = create("IfcUShapeProfileDef");
+			set(bad, "FlangeWidth", 10);
+			set(bad, "WebThickness", 10);
+			expectFail("IfcUShapeProfileDef", "ValidWebThickness", bad);
+		});
+		test("IfcZShapeProfileDef.ValidFlangeThickness pass/fail (Depth / 2)", () => {
+			const good = create("IfcZShapeProfileDef");
+			set(good, "Depth", 10);
+			set(good, "FlangeThickness", 2);
+			expectPass("IfcZShapeProfileDef", "ValidFlangeThickness", good);
+
+			const bad = create("IfcZShapeProfileDef");
+			set(bad, "Depth", 10);
+			set(bad, "FlangeThickness", 6);
+			expectFail("IfcZShapeProfileDef", "ValidFlangeThickness", bad);
+		});
+	});
+
+	describe("IfcUnitAssignment.WR01", () => {
+		function siUnit(unitType: string): EntityInstance {
+			const u = create("IfcSIUnit");
+			set(u, "UnitType", unitType);
+			set(u, "Name", "METRE");
+			return u;
+		}
+		test("pass: distinct UnitTypes, no monetary unit", () => {
+			const ua = create("IfcUnitAssignment");
+			set(ua, "Units", [siUnit("LENGTHUNIT"), siUnit("MASSUNIT")]);
+			expectPass("IfcUnitAssignment", "WR01", ua);
+		});
+		test("pass: exactly one monetary unit", () => {
+			const ua = create("IfcUnitAssignment");
+			set(ua, "Units", [create("IfcMonetaryUnit")]);
+			expectPass("IfcUnitAssignment", "WR01", ua);
+		});
+		test("fail: two monetary units", () => {
+			const ua = create("IfcUnitAssignment");
+			set(ua, "Units", [create("IfcMonetaryUnit"), create("IfcMonetaryUnit")]);
+			expectFail("IfcUnitAssignment", "WR01", ua);
+		});
+		test("fail: duplicate non-USERDEFINED named-unit UnitTypes", () => {
+			const ua = create("IfcUnitAssignment");
+			set(ua, "Units", [siUnit("LENGTHUNIT"), siUnit("LENGTHUNIT")]);
+			expectFail("IfcUnitAssignment", "WR01", ua);
+		});
+	});
+
+	describe("IfcVector.MagGreaterOrEqualZero", () => {
+		test("pass/fail", () => {
+			const good = create("IfcVector");
+			set(good, "Magnitude", 0);
+			expectPass("IfcVector", "MagGreaterOrEqualZero", good);
+
+			const bad = create("IfcVector");
+			set(bad, "Magnitude", -1);
+			expectFail("IfcVector", "MagGreaterOrEqualZero", bad);
+		});
+	});
+
+	/** New this chunk -- see `whereRules/ifc4x3.ts`'s own `hasSoleMaterialUsage` doc comment. */
+	function attachMaterialAssociation(target: EntityInstance, relatingMaterial: EntityInstance): void {
+		const rel = create("IfcRelAssociatesMaterial");
+		set(rel, "RelatedObjects", [target]);
+		set(rel, "RelatingMaterial", relatingMaterial);
+	}
+
+	describe("IfcWallStandardCase.HasMaterialLayerSetUsage", () => {
+		test("pass: associated with exactly one IfcMaterialLayerSetUsage", () => {
+			const wall = create("IfcWallStandardCase");
+			attachMaterialAssociation(wall, create("IfcMaterialLayerSetUsage"));
+			expectPass("IfcWallStandardCase", "HasMaterialLayerSetUsage", wall);
+		});
+		test("fail: no material association at all", () => {
+			expectFail("IfcWallStandardCase", "HasMaterialLayerSetUsage", create("IfcWallStandardCase"));
+		});
+	});
+
+	describe("IfcWindowLiningProperties.WR31/WR32/WR33 (impliesExists)", () => {
+		test("WR31 pass/fail (LiningDepth implies LiningThickness)", () => {
+			const good = create("IfcWindowLiningProperties");
+			set(good, "LiningDepth", 5);
+			set(good, "LiningThickness", 1);
+			expectPass("IfcWindowLiningProperties", "WR31", good);
+			expectPass("IfcWindowLiningProperties", "WR31", create("IfcWindowLiningProperties"));
+
+			const bad = create("IfcWindowLiningProperties");
+			set(bad, "LiningDepth", 5);
+			expectFail("IfcWindowLiningProperties", "WR31", bad);
+		});
+		test("WR32 pass/fail (SecondTransomOffset implies FirstTransomOffset)", () => {
+			const good = create("IfcWindowLiningProperties");
+			set(good, "FirstTransomOffset", 1);
+			set(good, "SecondTransomOffset", 2);
+			expectPass("IfcWindowLiningProperties", "WR32", good);
+
+			const bad = create("IfcWindowLiningProperties");
+			set(bad, "SecondTransomOffset", 2);
+			expectFail("IfcWindowLiningProperties", "WR32", bad);
+		});
+		test("WR33 pass/fail (SecondMullionOffset implies FirstMullionOffset)", () => {
+			const good = create("IfcWindowLiningProperties");
+			set(good, "FirstMullionOffset", 1);
+			set(good, "SecondMullionOffset", 2);
+			expectPass("IfcWindowLiningProperties", "WR33", good);
+
+			const bad = create("IfcWindowLiningProperties");
+			set(bad, "SecondMullionOffset", 2);
+			expectFail("IfcWindowLiningProperties", "WR33", bad);
+		});
+	});
+
+	// `IfcWindowStyle` no longer exists in ADD2's own schema at all (see
+	// `whereRules/ifc4x3.ts`'s own header comment) -- unlike `ifc4.test.ts`'s own
+	// equivalent block, there is no "DefinesType[0] is an IfcWindowStyle" pass case to
+	// mirror here; `IfcWindowType` is now the ONLY passing kind.
+	describe("IfcWindowLiningProperties.WR34 / IfcWindowPanelProperties.ApplicableToType (narrowed: IfcWindowStyle removed)", () => {
+		test("IfcWindowLiningProperties.WR34 pass: DefinesType[0] is an IfcWindowType", () => {
+			const lining = create("IfcWindowLiningProperties");
+			definesTypeVia(lining, create("IfcWindowType"));
+			expectPass("IfcWindowLiningProperties", "WR34", lining);
+		});
+		test("IfcWindowLiningProperties.WR34 fail: DefinesType[0] is neither", () => {
+			const lining = create("IfcWindowLiningProperties");
+			definesTypeVia(lining, create("IfcDoorType"));
+			expectFail("IfcWindowLiningProperties", "WR34", lining);
+		});
+		test("IfcWindowLiningProperties.WR34 fail: no DefinesType at all", () => {
+			expectFail("IfcWindowLiningProperties", "WR34", create("IfcWindowLiningProperties"));
+		});
+		test("IfcWindowPanelProperties.ApplicableToType pass/fail", () => {
+			const panel = create("IfcWindowPanelProperties");
+			definesTypeVia(panel, create("IfcWindowType"));
+			expectPass("IfcWindowPanelProperties", "ApplicableToType", panel);
+
+			const badPanel = create("IfcWindowPanelProperties");
+			definesTypeVia(badPanel, create("IfcDoorType"));
+			expectFail("IfcWindowPanelProperties", "ApplicableToType", badPanel);
+		});
+	});
+
+	/**
+	 * New this chunk -- populates the INVERSE `IsGroupedBy` by creating a real forward
+	 * `IfcRelAssignsToGroup` relationship, same established technique as `ifc2x3.test.ts`'s/
+	 * `ifc4.test.ts`'s own identical `groupedByRelationship` helper.
+	 */
+	function groupedByRelationship(relatingGroup: EntityInstance, relatedObjects: EntityInstance[]): EntityInstance {
+		const rel = create("IfcRelAssignsToGroup");
+		set(rel, "RelatingGroup", relatingGroup);
+		set(rel, "RelatedObjects", relatedObjects);
+		return rel;
+	}
+
+	describe("IfcZone.WR1", () => {
+		test("pass: not grouping anything", () => {
+			expectPass("IfcZone", "WR1", create("IfcZone"));
+		});
+		test("pass: every grouped RelatedObject is an IfcZone/IfcSpace/IfcSpatialZone", () => {
+			const zone = create("IfcZone");
+			groupedByRelationship(zone, [create("IfcSpace"), create("IfcSpatialZone")]);
+			expectPass("IfcZone", "WR1", zone);
+		});
+		test("fail: a grouped RelatedObject is none of the three", () => {
+			const zone = create("IfcZone");
+			groupedByRelationship(zone, [create("IfcWall")]);
+			expectFail("IfcZone", "WR1", zone);
+		});
+	});
+
+	// =============================================================================
+	// Part B -- SCOPE = 'file' rules (2): `IfcRepresentationContextSameWCS`/
+	// `IfcSingleProjectInstance`. Mirrors `ifc2x3.test.ts`'s/`ifc4.test.ts`'s own
+	// identical final-chunk `findFileRule` convention.
+	// =============================================================================
+
+	/**
+	 * Lookup helper for the 2 `SCOPE = 'file'` rules -- mirrors `findRule` above, but keyed
+	 * by `ruleName` alone (a file-scope `RuleDefinition` has no `typeName`).
+	 */
+	function findFileRule(ruleName: string): RuleDefinition {
+		const rule = getSchemaRules("IFC4X3_ADD2").find((r) => r.scope === "file" && r.ruleName === ruleName);
+		if (!rule) throw new Error(`File-scope rule not found in registry: ${ruleName}`);
+		return rule;
+	}
+
+	function pointOn(f: IfcFile, coords: number[]): EntityInstance {
+		const pt = f.createEntity("IfcCartesianPoint");
+		(pt as unknown as { Coordinates: number[] }).Coordinates = coords;
+		return pt;
+	}
+
+	function directionOn(f: IfcFile, ratios: number[]): EntityInstance {
+		const dir = f.createEntity("IfcDirection");
+		(dir as unknown as { DirectionRatios: number[] }).DirectionRatios = ratios;
+		return dir;
+	}
+
+	/** Leaves `Axis`/`RefDirection` unset (defaulting to the +Z axis) unless `axisRatios` is given. */
+	function axisPlacement3DOn(f: IfcFile, location: number[], axisRatios?: number[]): EntityInstance {
+		const ap = f.createEntity("IfcAxis2Placement3D");
+		(ap as unknown as { Location: EntityInstance }).Location = pointOn(f, location);
+		if (axisRatios) (ap as unknown as { Axis: EntityInstance }).Axis = directionOn(f, axisRatios);
+		return ap;
+	}
+
+	function geometricContextOn(f: IfcFile, wcs: EntityInstance, precision?: number): EntityInstance {
+		const ctx = f.createEntity("IfcGeometricRepresentationContext");
+		(ctx as unknown as { CoordinateSpaceDimension: number }).CoordinateSpaceDimension = 3;
+		(ctx as unknown as { WorldCoordinateSystem: EntityInstance }).WorldCoordinateSystem = wcs;
+		if (precision !== undefined) (ctx as unknown as { Precision: number }).Precision = precision;
+		return ctx;
+	}
+
+	describe("IfcSingleProjectInstance (SCOPE = 'file')", () => {
+		test("pass: zero IfcProject instances", () => {
+			const f = blankFile();
+			expect(() => findFileRule("IfcSingleProjectInstance").check(f)).not.toThrow();
+		});
+		test("pass: exactly one IfcProject instance", () => {
+			const f = blankFile();
+			f.createEntity("IfcProject");
+			expect(() => findFileRule("IfcSingleProjectInstance").check(f)).not.toThrow();
+		});
+		test("fail: two IfcProject instances", () => {
+			const f = blankFile();
+			f.createEntity("IfcProject");
+			f.createEntity("IfcProject");
+			expect(() => findFileRule("IfcSingleProjectInstance").check(f)).toThrow();
+		});
+	});
+
+	describe("IfcRepresentationContextSameWCS (SCOPE = 'file')", () => {
+		function check(f: IfcFile): () => void {
+			return () => findFileRule("IfcRepresentationContextSameWCS").check(f);
+		}
+
+		test("pass: zero IfcGeometricRepresentationContext instances", () => {
+			expect(check(blankFile())).not.toThrow();
+		});
+
+		test("pass: exactly one IfcGeometricRepresentationContext instance", () => {
+			const f = blankFile();
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+			expect(check(f)).not.toThrow();
+		});
+
+		test("pass: two contexts with genuinely identical placements", () => {
+			const f = blankFile();
+			const wcs = axisPlacement3DOn(f, [0, 0, 0]);
+			geometricContextOn(f, wcs);
+			geometricContextOn(f, wcs);
+			expect(check(f)).not.toThrow();
+		});
+
+		// **Demonstrates the FIX, contrasting directly with `ifc4.test.ts`'s own
+		// "pass (bug-demonstrating)" test for this identical scenario** (see
+		// `whereRules/ifc4x3.ts`'s own Part B header comment for the full derivation): in
+		// IFC2X3/IFC4, two contexts with DIFFERENT Locations but the SAME axis direction
+		// incorrectly PASS (their own `ifcSameAxis2Placement` bug always compares a point
+		// against itself). In IFC4X3_ADD2, the bug is fixed, so this same scenario now
+		// correctly FAILS.
+		test("fail (bug FIXED in ADD2): different Location, same axis direction", () => {
+			const f = blankFile();
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+			geometricContextOn(f, axisPlacement3DOn(f, [100, 100, 100]));
+			expect(check(f)).toThrow();
+		});
+
+		test("fail: two contexts with different axis directions", () => {
+			const f = blankFile();
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0], [1, 0, 0]));
+			expect(check(f)).toThrow();
+		});
+
+		test("fail: two contexts with the same axis direction but incompatible Precision", () => {
+			const f = blankFile();
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+			geometricContextOn(f, axisPlacement3DOn(f, [1, 0, 0]), 0.5);
+			expect(check(f)).toThrow();
+		});
+
+		test("fail: 3 contexts -- the 3rd differs from the 1st even though the 2nd doesn't (loop continues past a passing comparison)", () => {
+			const f = blankFile();
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0]));
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0])); // identical -- passes
+			geometricContextOn(f, axisPlacement3DOn(f, [0, 0, 0], [1, 0, 0])); // different axis -- fails
+			expect(check(f)).toThrow();
+		});
+	});
+
 	describe("executeRules -- end-to-end wiring against the real registered IFC4X3_ADD2 rules", () => {
 		test("an entity-scope violation (IfcApproval.HasIdentifierOrName) is detected", () => {
 			const wiringFile = blankFile();
@@ -6111,5 +6770,66 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 			const violations = executeRules(wiringFile);
 			expect(violations).toEqual([]);
 		});
+
+		test("a final-chunk rule-rename-and-shape-upgrade violation (IfcVoidingFeature.CorrectPredefinedType, IFC4's own IfcVoidingFeature.HasObjectType) is detected under its real ADD2 name", () => {
+			const wiringFile = blankFile();
+			const voidingFeature = wiringFile.createEntity("IfcVoidingFeature");
+			(voidingFeature as unknown as Record<string, unknown>).PredefinedType = "USERDEFINED";
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcVoidingFeature.CorrectPredefinedType"))).toBe(true);
+			expect(violations.some((v) => v.message.includes("IfcVoidingFeature.HasObjectType"))).toBe(false);
+		});
+
+		test("a final-chunk rule-rename violation (IfcWindow.CorrectTypeAssigned, IFC4's own IfcWindow.CorrectStyleAssigned) is detected under its real ADD2 name, and a genuinely NEW rule (IfcWindow.CorrectPredefinedType, absent in IFC4) also fires", () => {
+			const wiringFile = blankFile();
+			const window = wiringFile.createEntity("IfcWindow");
+			const rel = wiringFile.createEntity("IfcRelDefinesByType");
+			(rel as unknown as Record<string, unknown>).RelatedObjects = [window];
+			(rel as unknown as Record<string, unknown>).RelatingType = wiringFile.createEntity("IfcDoorType");
+			(window as unknown as Record<string, unknown>).PredefinedType = "USERDEFINED";
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcWindow.CorrectTypeAssigned"))).toBe(true);
+			expect(violations.some((v) => v.message.includes("IfcWindow.CorrectStyleAssigned"))).toBe(false);
+			expect(violations.some((v) => v.message.includes("IfcWindow.CorrectPredefinedType"))).toBe(true);
+		});
+
+		test("a final-chunk genuinely-new-entity violation (IfcTrackElement.CorrectPredefinedType, a wholly new ADD2 entity) is detected", () => {
+			const wiringFile = blankFile();
+			const trackElement = wiringFile.createEntity("IfcTrackElement");
+			(trackElement as unknown as Record<string, unknown>).PredefinedType = "USERDEFINED";
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcTrackElement.CorrectPredefinedType"))).toBe(true);
+		});
+
+		test("a final-chunk narrowed-SELECT violation (IfcWindowLiningProperties.WR34, IfcWindowStyle no longer accepted) is detected", () => {
+			const wiringFile = blankFile();
+			const lining = wiringFile.createEntity("IfcWindowLiningProperties");
+			definesTypeVia(lining, wiringFile.createEntity("IfcDoorType"));
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcWindowLiningProperties.WR34"))).toBe(true);
+		});
+
+		test("a well-formed instance produces zero violations from all 779 registered rules -- IFC4X3_ADD2 is schema-complete", () => {
+			const wiringFile = blankFile();
+			const approval = wiringFile.createEntity("IfcApproval");
+			(approval as unknown as Record<string, unknown>).Name = "A well-formed approval, final chunk";
+
+			const violations = executeRules(wiringFile);
+			expect(violations).toEqual([]);
+		});
+	});
+
+	// =============================================================================
+	// Final-chunk milestone check: landing this chunk brings IFC4X3_ADD2 to 779/779
+	// (752 entity + 25 type + 2 file) -- IFC4X3_ADD2 IS NOW SCHEMA-COMPLETE, and ALL OF
+	// PHASE EX-4 IS NOW COMPLETE (1,823 WHERE-rule classes across IFC2X3/IFC4/
+	// IFC4X3_ADD2), matching `PROGRESS.md`'s own already-corrected Phase EX-4 total.
+	// =============================================================================
+	test("exactly 779 IFC4X3_ADD2 WHERE-rules are registered after the final chunk -- IFC4X3_ADD2 is schema-complete", () => {
+		expect(getSchemaRules("IFC4X3_ADD2")).toHaveLength(779);
 	});
 });
