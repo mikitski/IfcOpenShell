@@ -361,6 +361,41 @@ export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
 	return scalar;
 }
 
+/**
+ * Python: `IfcDimensionalExponents` (bare EXPRESS constructor call, not a rule/DERIVE
+ * function). **Exported starting with Phase EX-4's own IFC4X3_ADD2 chunk 4**
+ * (`whereRules/ifc4x3.ts`'s own `ifcCorrectDimensions`, used by `IfcNamedUnit_WR1`, needs
+ * a bare 7-arg `IfcDimensionalExponents(...)` constructor for each of its own 29
+ * unit-type branches) -- exactly mirrors `rules/ifc4.ts`'s own identical
+ * `ifcDimensionalExponents` export precedent (that file's own IFC4 chunk 4 citation for
+ * this same rule name), which itself already disclosed the same rationale (its only real
+ * caller lives in another file, not a second in-file consumer). `IfcCorrectDimensions`'s
+ * own real body independently confirmed BYTE-IDENTICAL between `IFC4.py` (line 11439) and
+ * `IFC4X3_ADD2.py` (line 13256) via direct `diff` -- no schema-evolution difference this
+ * time (unlike `rules/ifc4.ts`'s own IFC2X3-vs-IFC4 `ELECTRICCAPACITANCEUNIT`/`FARAD`
+ * finding, cross-referenced there, not re-disclosed here since IFC4-vs-ADD2 has none).
+ */
+export function ifcDimensionalExponents(
+	lengthExponent: number,
+	massExponent: number,
+	timeExponent: number,
+	electricCurrentExponent: number,
+	thermodynamicTemperatureExponent: number,
+	amountOfSubstanceExponent: number,
+	luminousIntensityExponent: number,
+): EntityInstance {
+	return getScratchFile().createEntity(
+		"IfcDimensionalExponents",
+		lengthExponent,
+		massExponent,
+		timeExponent,
+		electricCurrentExponent,
+		thermodynamicTemperatureExponent,
+		amountOfSubstanceExponent,
+		luminousIntensityExponent,
+	);
+}
+
 /** Python: `IfcScalarTimesVector` (`IFC4X3_ADD2.py`) -- see this file's own header comment on the `'ifc4x3_add2.ifcvector'` namespace-string difference vs. `IFC4.py`'s own `'ifc4.ifcvector'`. */
 function ifcScalarTimesVector(scalar: unknown, vec: unknown): EntityInstance | null {
 	if (!exists(scalar) || !exists(vec)) return null;

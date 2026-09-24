@@ -2580,6 +2580,941 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 	});
 
 	// =============================================================================
+	// Phase EX-4, IFC4X3_ADD2 chunk 4: original, hand-rolled coverage for the 120 rules
+	// ported in `whereRules/ifc4x3.ts`'s own 4th `registerSchemaRules("IFC4X3_ADD2", [...])`
+	// call (`IfcGeometricRepresentationSubContext_NoCoordOperation` through
+	// `IfcPositioningElement_HasPlacement`). Same data-driven `describe.each` pattern
+	// established by chunks 2/3 for the 72 ordinary `_CorrectPredefinedType`/
+	// `_CorrectTypeAssigned` rules, plus individual `describe` blocks for the 48 bespoke
+	// rules, in real ADD2 file order.
+	// =============================================================================
+
+	interface CorrectPredefinedTypeCaseChunk4 {
+		readonly typeName: string;
+		readonly escapeAttr: string;
+		readonly optional: boolean;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own chunk 4 `correctPredefinedType(...)`
+	// call sites (real source lines 8643-9897). `IfcLaborResourceType`'s own `escapeAttr:
+	// "ResourceType"` (not the usual `"ElementType"`) matches `correctPredefinedType`'s
+	// already-existing `escapeAttrName` parameter -- no new shape.
+	const correctPredefinedTypeCasesChunk4: readonly CorrectPredefinedTypeCaseChunk4[] = [
+		{ typeName: "IfcGeotechnicalStratum", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcHeatExchanger", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcHeatExchangerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcHumidifier", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcHumidifierType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcImpactProtectionDevice", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcImpactProtectionDeviceType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcInterceptor", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcInterceptorType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcJunctionBox", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcJunctionBoxType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcKerb", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcKerbType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcLaborResource", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcLaborResourceType", escapeAttr: "ResourceType", optional: false },
+		{ typeName: "IfcLamp", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcLampType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcLightFixture", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcLightFixtureType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcLiquidTerminal", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcLiquidTerminalType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMarineFacility", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMarinePart", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMechanicalFastener", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMechanicalFastenerType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMedicalDevice", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMedicalDeviceType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMember", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMemberType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMobileTelecommunicationsAppliance", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMobileTelecommunicationsApplianceType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMooringDevice", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMooringDeviceType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcMotorConnection", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcMotorConnectionType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcNavigationElement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcNavigationElementType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcOpeningElement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcOutlet", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcOutletType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcPavement", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcPavementType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcPile", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcPileType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcPipeFitting", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcPipeFittingType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcPipeSegment", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcPipeSegmentType", escapeAttr: "ElementType", optional: false },
+		{ typeName: "IfcPlate", escapeAttr: "ObjectType", optional: true },
+		{ typeName: "IfcPlateType", escapeAttr: "ElementType", optional: false },
+	];
+
+	describe.each(correctPredefinedTypeCasesChunk4)(
+		"$typeName.CorrectPredefinedType (chunk 4)",
+		({ typeName, escapeAttr, optional }) => {
+			test("pass: PredefinedType is a non-USERDEFINED enum value", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "NOTDEFINED");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("pass: PredefinedType is USERDEFINED and the escape attribute is given", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				set(inst, escapeAttr, "a custom value");
+				expectPass(typeName, "CorrectPredefinedType", inst);
+			});
+			test("fail: PredefinedType is USERDEFINED but the escape attribute is missing", () => {
+				const inst = create(typeName);
+				set(inst, "PredefinedType", "USERDEFINED");
+				expectFail(typeName, "CorrectPredefinedType", inst);
+			});
+			if (optional) {
+				test("pass: PredefinedType is not given at all (optional on this entity)", () => {
+					const inst = create(typeName);
+					expectPass(typeName, "CorrectPredefinedType", inst);
+				});
+			}
+		},
+	);
+
+	interface CorrectTypeAssignedCaseChunk4 {
+		readonly typeName: string;
+		readonly expectedTypeName: string;
+	}
+
+	// Hand-derived directly from `whereRules/ifc4x3.ts`'s own chunk 4 `correctTypeAssigned(...)`
+	// call sites (real source lines 8643-9897).
+	const correctTypeAssignedCasesChunk4: readonly CorrectTypeAssignedCaseChunk4[] = [
+		{ typeName: "IfcHeatExchanger", expectedTypeName: "IfcHeatExchangerType" },
+		{ typeName: "IfcHumidifier", expectedTypeName: "IfcHumidifierType" },
+		{ typeName: "IfcImpactProtectionDevice", expectedTypeName: "IfcImpactProtectionDeviceType" },
+		{ typeName: "IfcInterceptor", expectedTypeName: "IfcInterceptorType" },
+		{ typeName: "IfcJunctionBox", expectedTypeName: "IfcJunctionBoxType" },
+		{ typeName: "IfcKerb", expectedTypeName: "IfcKerbType" },
+		{ typeName: "IfcLamp", expectedTypeName: "IfcLampType" },
+		{ typeName: "IfcLightFixture", expectedTypeName: "IfcLightFixtureType" },
+		{ typeName: "IfcLiquidTerminal", expectedTypeName: "IfcLiquidTerminalType" },
+		{ typeName: "IfcMechanicalFastener", expectedTypeName: "IfcMechanicalFastenerType" },
+		{ typeName: "IfcMedicalDevice", expectedTypeName: "IfcMedicalDeviceType" },
+		{ typeName: "IfcMember", expectedTypeName: "IfcMemberType" },
+		{ typeName: "IfcMobileTelecommunicationsAppliance", expectedTypeName: "IfcMobileTelecommunicationsApplianceType" },
+		{ typeName: "IfcMooringDevice", expectedTypeName: "IfcMooringDeviceType" },
+		{ typeName: "IfcMotorConnection", expectedTypeName: "IfcMotorConnectionType" },
+		{ typeName: "IfcNavigationElement", expectedTypeName: "IfcNavigationElementType" },
+		{ typeName: "IfcOutlet", expectedTypeName: "IfcOutletType" },
+		{ typeName: "IfcPavement", expectedTypeName: "IfcPavementType" },
+		{ typeName: "IfcPile", expectedTypeName: "IfcPileType" },
+		{ typeName: "IfcPipeFitting", expectedTypeName: "IfcPipeFittingType" },
+		{ typeName: "IfcPipeSegment", expectedTypeName: "IfcPipeSegmentType" },
+		{ typeName: "IfcPlate", expectedTypeName: "IfcPlateType" },
+	];
+
+	describe.each(correctTypeAssignedCasesChunk4)(
+		"$typeName.CorrectTypeAssigned (chunk 4)",
+		({ typeName, expectedTypeName }) => {
+			test("pass: no IsTypedBy at all", () => {
+				const inst = create(typeName);
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("pass: IsTypedBy's RelatingType is the expected *Type", () => {
+				const inst = create(typeName);
+				typeAssign(inst, create(expectedTypeName));
+				expectPass(typeName, "CorrectTypeAssigned", inst);
+			});
+			test("fail: IsTypedBy's RelatingType is a mismatched *Type", () => {
+				const inst = create(typeName);
+				// `IfcActuatorType` (chunk 1) is a real, always-available *Type entity not equal
+				// to any `expectedTypeName` this chunk's own cases use.
+				typeAssign(inst, create("IfcActuatorType"));
+				expectFail(typeName, "CorrectTypeAssigned", inst);
+			});
+		},
+	);
+
+	describe("IfcGeometricRepresentationSubContext (chunk 4 additions)", () => {
+		test("NoCoordOperation pass/fail", () => {
+			// `HasCoordinateOperation` is an INVERSE attribute (of `IfcMapConversion.SourceCRS`)
+			// -- not settable directly; populate it the real way via an actual `IfcMapConversion`.
+			const sub = create("IfcGeometricRepresentationSubContext");
+			expectPass("IfcGeometricRepresentationSubContext", "NoCoordOperation", sub);
+
+			const badSub = create("IfcGeometricRepresentationSubContext");
+			const mapConversion = create("IfcMapConversion");
+			set(mapConversion, "SourceCRS", badSub);
+			expectFail("IfcGeometricRepresentationSubContext", "NoCoordOperation", badSub);
+		});
+		test("ParentNoSub pass/fail", () => {
+			const sub = create("IfcGeometricRepresentationSubContext");
+			set(sub, "ParentContext", create("IfcGeometricRepresentationContext"));
+			expectPass("IfcGeometricRepresentationSubContext", "ParentNoSub", sub);
+
+			const badSub = create("IfcGeometricRepresentationSubContext");
+			set(badSub, "ParentContext", create("IfcGeometricRepresentationSubContext"));
+			expectFail("IfcGeometricRepresentationSubContext", "ParentNoSub", badSub);
+		});
+		test("UserTargetProvided pass/fail", () => {
+			const sub = create("IfcGeometricRepresentationSubContext");
+			set(sub, "TargetView", "MODEL_VIEW");
+			expectPass("IfcGeometricRepresentationSubContext", "UserTargetProvided", sub);
+
+			const userDefinedSub = create("IfcGeometricRepresentationSubContext");
+			set(userDefinedSub, "TargetView", "USERDEFINED");
+			set(userDefinedSub, "UserDefinedTargetView", "Custom");
+			expectPass("IfcGeometricRepresentationSubContext", "UserTargetProvided", userDefinedSub);
+
+			const badSub = create("IfcGeometricRepresentationSubContext");
+			set(badSub, "TargetView", "USERDEFINED");
+			expectFail("IfcGeometricRepresentationSubContext", "UserTargetProvided", badSub);
+		});
+	});
+
+	describe("IfcGeometricSet.ConsistentDim", () => {
+		test("pass: every Elements member shares the first's Dim", () => {
+			const gs = create("IfcGeometricSet");
+			set(gs, "Elements", [point3D([0, 0, 0]), point3D([1, 1, 1])]);
+			expectPass("IfcGeometricSet", "ConsistentDim", gs);
+		});
+		test("fail: an Elements member has a different Dim", () => {
+			const gs = create("IfcGeometricSet");
+			set(gs, "Elements", [point3D([0, 0, 0]), point2D([1, 1])]);
+			expectFail("IfcGeometricSet", "ConsistentDim", gs);
+		});
+	});
+
+	describe("IfcGridAxis (chunk 4)", () => {
+		test("WR1 pass/fail", () => {
+			const axis = create("IfcGridAxis");
+			set(axis, "AxisCurve", polyline2D());
+			expectPass("IfcGridAxis", "WR1", axis);
+
+			const badAxis = create("IfcGridAxis");
+			set(badAxis, "AxisCurve", polyline3D());
+			expectFail("IfcGridAxis", "WR1", badAxis);
+		});
+		// `PartOfU`/`PartOfV`/`PartOfW` are INVERSE attributes (of `IfcGrid.UAxes`/`VAxes`/
+		// `WAxes`) -- not settable directly; populate them via an actual `IfcGrid` instance.
+		test("WR2 pass: exactly one of PartOfU/V/W has a member", () => {
+			const axis = create("IfcGridAxis");
+			const grid = create("IfcGrid");
+			set(grid, "UAxes", [axis]);
+			expectPass("IfcGridAxis", "WR2", axis);
+		});
+		test("WR2 fail: none of PartOfU/V/W has a member", () => {
+			const axis = create("IfcGridAxis");
+			expectFail("IfcGridAxis", "WR2", axis);
+		});
+	});
+
+	describe("IfcIShapeProfileDef (chunk 4)", () => {
+		function baseProfile(): EntityInstance {
+			const p = create("IfcIShapeProfileDef");
+			set(p, "ProfileType", "AREA");
+			set(p, "OverallWidth", 100);
+			set(p, "OverallDepth", 200);
+			set(p, "WebThickness", 10);
+			set(p, "FlangeThickness", 20);
+			return p;
+		}
+
+		test("ValidFilletRadius pass/fail", () => {
+			const profile = baseProfile();
+			expectPass("IfcIShapeProfileDef", "ValidFilletRadius", profile); // not given -- passes
+
+			const okProfile = baseProfile();
+			set(okProfile, "FilletRadius", 5);
+			expectPass("IfcIShapeProfileDef", "ValidFilletRadius", okProfile);
+
+			const badProfile = baseProfile();
+			set(badProfile, "FilletRadius", 1000);
+			expectFail("IfcIShapeProfileDef", "ValidFilletRadius", badProfile);
+		});
+		test("ValidFlangeThickness pass/fail", () => {
+			expectPass("IfcIShapeProfileDef", "ValidFlangeThickness", baseProfile());
+
+			const badProfile = baseProfile();
+			set(badProfile, "FlangeThickness", 150);
+			expectFail("IfcIShapeProfileDef", "ValidFlangeThickness", badProfile);
+		});
+		test("ValidWebThickness pass/fail", () => {
+			expectPass("IfcIShapeProfileDef", "ValidWebThickness", baseProfile());
+
+			const badProfile = baseProfile();
+			set(badProfile, "WebThickness", 200);
+			expectFail("IfcIShapeProfileDef", "ValidWebThickness", badProfile);
+		});
+	});
+
+	describe("IfcIndexedPolyCurve.Consecutive (chunk 4 -- ADD2's own `not exists` guard, see whereRules/ifc4x3.ts's own header comment)", () => {
+		test("pass: Segments not set at all (the ADD2-specific short-circuit)", () => {
+			const curve = create("IfcIndexedPolyCurve");
+			expectPass("IfcIndexedPolyCurve", "Consecutive", curve);
+		});
+		test("pass: an empty Segments list", () => {
+			const curve = create("IfcIndexedPolyCurve");
+			set(curve, "Segments", []);
+			expectPass("IfcIndexedPolyCurve", "Consecutive", curve);
+		});
+		test("pass: consecutive segments share their common point index", () => {
+			const curve = create("IfcIndexedPolyCurve");
+			set(curve, "Segments", [
+				[1, 2],
+				[2, 3],
+			]);
+			expectPass("IfcIndexedPolyCurve", "Consecutive", curve);
+		});
+		test("fail: a gap between consecutive segments' point indices", () => {
+			const curve = create("IfcIndexedPolyCurve");
+			set(curve, "Segments", [
+				[1, 2],
+				[3, 4],
+			]);
+			expectFail("IfcIndexedPolyCurve", "Consecutive", curve);
+		});
+	});
+
+	describe("IfcIntersectionCurve (chunk 4)", () => {
+		test("DistinctSurfaces pass/fail", () => {
+			// Each surface gets its own distinct `Position` -- `settings.compareInstancesByValue`
+			// is on for this whole test file, so two BLANK `IfcPlane` instances (no attributes
+			// set) would otherwise compare as structurally EQUAL despite being different objects.
+			function distinctPlaneAt(x: number): EntityInstance {
+				const plane = planeSurface();
+				const placement = create("IfcAxis2Placement3D");
+				set(placement, "Location", point3D([x, 0, 0]));
+				set(plane, "Position", placement);
+				return plane;
+			}
+
+			const surfaceA = distinctPlaneAt(1);
+			const surfaceB = distinctPlaneAt(2);
+			const curve = create("IfcIntersectionCurve");
+			set(curve, "AssociatedGeometry", [pcurveOn(surfaceA), pcurveOn(surfaceB)]);
+			expectPass("IfcIntersectionCurve", "DistinctSurfaces", curve);
+
+			const sameSurface = distinctPlaneAt(3);
+			const badCurve = create("IfcIntersectionCurve");
+			set(badCurve, "AssociatedGeometry", [pcurveOn(sameSurface), pcurveOn(sameSurface)]);
+			expectFail("IfcIntersectionCurve", "DistinctSurfaces", badCurve);
+		});
+		test("TwoPCurves pass/fail", () => {
+			const curve = create("IfcIntersectionCurve");
+			set(curve, "AssociatedGeometry", [pcurveOn(planeSurface()), pcurveOn(planeSurface())]);
+			expectPass("IfcIntersectionCurve", "TwoPCurves", curve);
+
+			const badCurve = create("IfcIntersectionCurve");
+			set(badCurve, "AssociatedGeometry", [pcurveOn(planeSurface())]);
+			expectFail("IfcIntersectionCurve", "TwoPCurves", badCurve);
+		});
+	});
+
+	describe("IfcLShapeProfileDef.ValidThickness (chunk 4)", () => {
+		test("pass: Thickness less than Depth, Width not given", () => {
+			const profile = create("IfcLShapeProfileDef");
+			set(profile, "ProfileType", "AREA");
+			set(profile, "Depth", 100);
+			set(profile, "Thickness", 10);
+			expectPass("IfcLShapeProfileDef", "ValidThickness", profile);
+		});
+		test("pass: Thickness less than both Depth and Width", () => {
+			const profile = create("IfcLShapeProfileDef");
+			set(profile, "ProfileType", "AREA");
+			set(profile, "Depth", 100);
+			set(profile, "Width", 80);
+			set(profile, "Thickness", 10);
+			expectPass("IfcLShapeProfileDef", "ValidThickness", profile);
+		});
+		test("fail: Thickness not less than Depth", () => {
+			const profile = create("IfcLShapeProfileDef");
+			set(profile, "ProfileType", "AREA");
+			set(profile, "Depth", 10);
+			set(profile, "Thickness", 10);
+			expectFail("IfcLShapeProfileDef", "ValidThickness", profile);
+		});
+		test("fail: Thickness not less than Width", () => {
+			const profile = create("IfcLShapeProfileDef");
+			set(profile, "ProfileType", "AREA");
+			set(profile, "Depth", 100);
+			set(profile, "Width", 10);
+			set(profile, "Thickness", 10);
+			expectFail("IfcLShapeProfileDef", "ValidThickness", profile);
+		});
+	});
+
+	describe("IfcLine.SameDim", () => {
+		test("pass: Dir.Dim equals Pnt.Dim", () => {
+			const line = create("IfcLine");
+			set(line, "Pnt", point3D([0, 0, 0]));
+			set(line, "Dir", direction3D([1, 0, 0]));
+			expectPass("IfcLine", "SameDim", line);
+		});
+		test("fail: Dir.Dim differs from Pnt.Dim", () => {
+			const line = create("IfcLine");
+			set(line, "Pnt", point3D([0, 0, 0]));
+			set(line, "Dir", direction3D([1, 0]));
+			expectFail("IfcLine", "SameDim", line);
+		});
+	});
+
+	describe("IfcLocalPlacement.WR21 (chunk 4)", () => {
+		test("pass: no PlacementRelTo at all", () => {
+			const placement = create("IfcLocalPlacement");
+			set(placement, "RelativePlacement", create("IfcAxis2Placement3D"));
+			expectPass("IfcLocalPlacement", "WR21", placement);
+		});
+		test("pass: PlacementRelTo is an IfcGridPlacement (always passes)", () => {
+			const placement = create("IfcLocalPlacement");
+			set(placement, "RelativePlacement", create("IfcAxis2Placement3D"));
+			set(placement, "PlacementRelTo", create("IfcGridPlacement"));
+			expectPass("IfcLocalPlacement", "WR21", placement);
+		});
+		test("pass: PlacementRelTo is an IfcLocalPlacement with a 2D RelativePlacement", () => {
+			const relTo = create("IfcLocalPlacement");
+			set(relTo, "RelativePlacement", create("IfcAxis2Placement2D"));
+			const placement = create("IfcLocalPlacement");
+			set(placement, "RelativePlacement", create("IfcAxis2Placement2D"));
+			set(placement, "PlacementRelTo", relTo);
+			expectPass("IfcLocalPlacement", "WR21", placement);
+		});
+		test("pass: PlacementRelTo is an IfcLocalPlacement whose own RelativePlacement.Dim is 3, and this placement's own RelativePlacement is 3D", () => {
+			const relTo = create("IfcLocalPlacement");
+			const relToPlacement = create("IfcAxis2Placement3D");
+			set(relToPlacement, "Location", point3D([0, 0, 0]));
+			set(relTo, "RelativePlacement", relToPlacement);
+			const placement = create("IfcLocalPlacement");
+			set(placement, "RelativePlacement", create("IfcAxis2Placement3D"));
+			set(placement, "PlacementRelTo", relTo);
+			expectPass("IfcLocalPlacement", "WR21", placement);
+		});
+		test("fail: PlacementRelTo is an IfcLocalPlacement whose own RelativePlacement.Dim is 2, but this placement's own RelativePlacement is 3D", () => {
+			const relTo = create("IfcLocalPlacement");
+			const relToPlacement = create("IfcAxis2Placement2D");
+			set(relToPlacement, "Location", point2D([0, 0]));
+			set(relTo, "RelativePlacement", relToPlacement);
+			const placement = create("IfcLocalPlacement");
+			set(placement, "RelativePlacement", create("IfcAxis2Placement3D"));
+			set(placement, "PlacementRelTo", relTo);
+			expectFail("IfcLocalPlacement", "WR21", placement);
+		});
+	});
+
+	describe("IfcMapConversion.TargetCRSOnlyProjected (chunk 4 -- a genuinely new rule on a pre-existing IFC4 entity)", () => {
+		test("pass: TargetCRS is an IfcProjectedCRS", () => {
+			const mapConversion = create("IfcMapConversion");
+			set(mapConversion, "TargetCRS", create("IfcProjectedCRS"));
+			expectPass("IfcMapConversion", "TargetCRSOnlyProjected", mapConversion);
+		});
+		test("fail: TargetCRS is a plain IfcCoordinateReferenceSystem, not an IfcProjectedCRS", () => {
+			const mapConversion = create("IfcMapConversion");
+			set(mapConversion, "TargetCRS", create("IfcCoordinateReferenceSystem"));
+			expectFail("IfcMapConversion", "TargetCRSOnlyProjected", mapConversion);
+		});
+	});
+
+	describe("IfcMaterialDefinitionRepresentation.OnlyStyledRepresentations (chunk 4)", () => {
+		test("pass: every Representations member is an IfcStyledRepresentation", () => {
+			const rep = create("IfcMaterialDefinitionRepresentation");
+			set(rep, "Representations", [create("IfcStyledRepresentation")]);
+			expectPass("IfcMaterialDefinitionRepresentation", "OnlyStyledRepresentations", rep);
+		});
+		test("fail: a Representations member is a plain IfcShapeRepresentation", () => {
+			const rep = create("IfcMaterialDefinitionRepresentation");
+			set(rep, "Representations", [create("IfcShapeRepresentation")]);
+			expectFail("IfcMaterialDefinitionRepresentation", "OnlyStyledRepresentations", rep);
+		});
+	});
+
+	describe("IfcMaterialLayer.NormalizedPriority (chunk 4)", () => {
+		test("pass: Priority not given", () => {
+			expectPass("IfcMaterialLayer", "NormalizedPriority", create("IfcMaterialLayer"));
+		});
+		test("pass: Priority in [0, 100]", () => {
+			const layer = create("IfcMaterialLayer");
+			set(layer, "Priority", 50);
+			expectPass("IfcMaterialLayer", "NormalizedPriority", layer);
+		});
+		test("fail: Priority out of range", () => {
+			const layer = create("IfcMaterialLayer");
+			set(layer, "Priority", 150);
+			expectFail("IfcMaterialLayer", "NormalizedPriority", layer);
+		});
+	});
+
+	describe("IfcMaterialProfile.NormalizedPriority (chunk 4)", () => {
+		test("pass: Priority not given", () => {
+			expectPass("IfcMaterialProfile", "NormalizedPriority", create("IfcMaterialProfile"));
+		});
+		test("fail: Priority out of range", () => {
+			const profile = create("IfcMaterialProfile");
+			set(profile, "Priority", -1);
+			expectFail("IfcMaterialProfile", "NormalizedPriority", profile);
+		});
+	});
+
+	describe("IfcNamedUnit.WR1 (chunk 4)", () => {
+		// `IfcConversionBasedUnit`, not `IfcSIUnit`, deliberately -- `IfcSIUnit.Dimensions`
+		// is itself a DERIVE-overridden attribute, so directly `set()`-ing it is silently
+		// ignored. `IfcConversionBasedUnit` inherits `Dimensions` as a genuine, directly-
+		// stored `IfcNamedUnit` attribute with no such override.
+		function dimensions(length: number, mass: number): EntityInstance {
+			const dims = create("IfcDimensionalExponents");
+			set(dims, "LengthExponent", length);
+			set(dims, "MassExponent", mass);
+			set(dims, "TimeExponent", 0);
+			set(dims, "ElectricCurrentExponent", 0);
+			set(dims, "ThermodynamicTemperatureExponent", 0);
+			set(dims, "AmountOfSubstanceExponent", 0);
+			set(dims, "LuminousIntensityExponent", 0);
+			return dims;
+		}
+		test("pass: UnitType/Dimensions are dimensionally consistent (LENGTHUNIT)", () => {
+			const unit = create("IfcConversionBasedUnit");
+			set(unit, "UnitType", "LENGTHUNIT");
+			set(unit, "Dimensions", dimensions(1, 0));
+			expectPass("IfcNamedUnit", "WR1", unit);
+		});
+		test("fail: UnitType/Dimensions are NOT dimensionally consistent", () => {
+			const unit = create("IfcConversionBasedUnit");
+			set(unit, "UnitType", "LENGTHUNIT");
+			set(unit, "Dimensions", dimensions(0, 1));
+			expectFail("IfcNamedUnit", "WR1", unit);
+		});
+	});
+
+	// `IsDefinedBy` is an INVERSE attribute (computed from every `IfcRelDefinesByProperties`
+	// whose own `RelatedObjects` includes this object) -- like `typeAssign` above, it can
+	// never be `set()` directly; the real forward relationship is built instead.
+	function propertySetRel(target: EntityInstance, propertySet: EntityInstance): EntityInstance {
+		const rel = create("IfcRelDefinesByProperties");
+		set(rel, "RelatedObjects", [target]);
+		set(rel, "RelatingPropertyDefinition", propertySet);
+		return rel;
+	}
+
+	describe("IfcObject.UniquePropertySetNames (chunk 4)", () => {
+		test("pass: no IsDefinedBy at all", () => {
+			expectPass("IfcObject", "UniquePropertySetNames", create("IfcWall"));
+		});
+		test("pass: every attached IfcPropertySet has a distinct Name", () => {
+			const wall = create("IfcWall");
+			const ps1 = create("IfcPropertySet");
+			set(ps1, "Name", "Pset_A");
+			propertySetRel(wall, ps1);
+			const ps2 = create("IfcPropertySet");
+			set(ps2, "Name", "Pset_B");
+			propertySetRel(wall, ps2);
+			expectPass("IfcObject", "UniquePropertySetNames", wall);
+		});
+		test("fail: two attached IfcPropertySets share the same Name", () => {
+			const wall = create("IfcWall");
+			const ps1 = create("IfcPropertySet");
+			set(ps1, "Name", "Pset_A");
+			propertySetRel(wall, ps1);
+			const ps2 = create("IfcPropertySet");
+			set(ps2, "Name", "Pset_A");
+			propertySetRel(wall, ps2);
+			expectFail("IfcObject", "UniquePropertySetNames", wall);
+		});
+	});
+
+	describe("IfcObjective.WR21 (chunk 4)", () => {
+		test("pass: ObjectiveQualifier is not USERDEFINED", () => {
+			const objective = create("IfcObjective");
+			set(objective, "ObjectiveQualifier", "REQUIREMENT");
+			expectPass("IfcObjective", "WR21", objective);
+		});
+		test("pass: ObjectiveQualifier is USERDEFINED and UserDefinedQualifier is given", () => {
+			const objective = create("IfcObjective");
+			set(objective, "ObjectiveQualifier", "USERDEFINED");
+			set(objective, "UserDefinedQualifier", "Something");
+			expectPass("IfcObjective", "WR21", objective);
+		});
+		test("fail: ObjectiveQualifier is USERDEFINED but UserDefinedQualifier is missing", () => {
+			const objective = create("IfcObjective");
+			set(objective, "ObjectiveQualifier", "USERDEFINED");
+			expectFail("IfcObjective", "WR21", objective);
+		});
+	});
+
+	describe("IfcOccupant.WR31 (chunk 4)", () => {
+		test("pass: PredefinedType is not USERDEFINED", () => {
+			const occupant = create("IfcOccupant");
+			set(occupant, "PredefinedType", "ASSIGNEE");
+			expectPass("IfcOccupant", "WR31", occupant);
+		});
+		test("pass: PredefinedType is USERDEFINED and ObjectType is given", () => {
+			const occupant = create("IfcOccupant");
+			set(occupant, "PredefinedType", "USERDEFINED");
+			set(occupant, "ObjectType", "Something");
+			expectPass("IfcOccupant", "WR31", occupant);
+		});
+		test("fail: PredefinedType is USERDEFINED but ObjectType is missing", () => {
+			const occupant = create("IfcOccupant");
+			set(occupant, "PredefinedType", "USERDEFINED");
+			expectFail("IfcOccupant", "WR31", occupant);
+		});
+	});
+
+	describe("IfcOffsetCurve2D.DimIs2D (chunk 4)", () => {
+		test("pass/fail: BasisCurve.Dim must equal 2", () => {
+			const curve2D = create("IfcOffsetCurve2D");
+			set(curve2D, "BasisCurve", polyline2D());
+			expectPass("IfcOffsetCurve2D", "DimIs2D", curve2D);
+
+			const curve3D = create("IfcOffsetCurve2D");
+			set(curve3D, "BasisCurve", polyline3D());
+			expectFail("IfcOffsetCurve2D", "DimIs2D", curve3D);
+		});
+	});
+
+	describe("IfcOffsetCurve3D.DimIs2D (chunk 4 -- real body checks Dim == 3, a naming quirk reconfirmed from IFC4's own disclosure)", () => {
+		test("pass/fail: BasisCurve.Dim must equal 3", () => {
+			const curve3D = create("IfcOffsetCurve3D");
+			set(curve3D, "BasisCurve", polyline3D());
+			expectPass("IfcOffsetCurve3D", "DimIs2D", curve3D);
+
+			const curve2D = create("IfcOffsetCurve3D");
+			set(curve2D, "BasisCurve", polyline2D());
+			expectFail("IfcOffsetCurve3D", "DimIs2D", curve2D);
+		});
+	});
+
+	describe("IfcOpenCrossProfileDef (chunk 4, genuinely new in ADD2)", () => {
+		test("CorrectProfileType pass/fail", () => {
+			const profile = create("IfcOpenCrossProfileDef");
+			set(profile, "ProfileType", "CURVE");
+			expectPass("IfcOpenCrossProfileDef", "CorrectProfileType", profile);
+
+			const badProfile = create("IfcOpenCrossProfileDef");
+			set(badProfile, "ProfileType", "AREA");
+			expectFail("IfcOpenCrossProfileDef", "CorrectProfileType", badProfile);
+		});
+		test("CorrespondingSlopeWidths pass/fail", () => {
+			const profile = create("IfcOpenCrossProfileDef");
+			set(profile, "Slopes", [0.1, 0.2]);
+			set(profile, "Widths", [1, 2]);
+			expectPass("IfcOpenCrossProfileDef", "CorrespondingSlopeWidths", profile);
+
+			const badProfile = create("IfcOpenCrossProfileDef");
+			set(badProfile, "Slopes", [0.1, 0.2]);
+			set(badProfile, "Widths", [1]);
+			expectFail("IfcOpenCrossProfileDef", "CorrespondingSlopeWidths", badProfile);
+		});
+		test("CorrespondingTags pass/fail", () => {
+			const profile = create("IfcOpenCrossProfileDef");
+			set(profile, "Slopes", [0.1, 0.2]);
+			expectPass("IfcOpenCrossProfileDef", "CorrespondingTags", profile); // Tags not given
+
+			const okProfile = create("IfcOpenCrossProfileDef");
+			set(okProfile, "Slopes", [0.1, 0.2]);
+			set(okProfile, "Tags", ["a", "b", "c"]);
+			expectPass("IfcOpenCrossProfileDef", "CorrespondingTags", okProfile);
+
+			const badProfile = create("IfcOpenCrossProfileDef");
+			set(badProfile, "Slopes", [0.1, 0.2]);
+			set(badProfile, "Tags", ["a", "b"]);
+			expectFail("IfcOpenCrossProfileDef", "CorrespondingTags", badProfile);
+		});
+	});
+
+	describe("IfcOrientedEdge.EdgeElementNotOriented (chunk 4)", () => {
+		test("pass: EdgeElement is a plain IfcEdge", () => {
+			const oe = create("IfcOrientedEdge");
+			set(oe, "EdgeElement", create("IfcEdge"));
+			expectPass("IfcOrientedEdge", "EdgeElementNotOriented", oe);
+		});
+		test("fail: EdgeElement is itself an IfcOrientedEdge", () => {
+			const oe = create("IfcOrientedEdge");
+			set(oe, "EdgeElement", create("IfcOrientedEdge"));
+			expectFail("IfcOrientedEdge", "EdgeElementNotOriented", oe);
+		});
+	});
+
+	describe("IfcOwnerHistory.CorrectChangeAction (chunk 4)", () => {
+		test("pass: LastModifiedDate is given", () => {
+			const oh = create("IfcOwnerHistory");
+			set(oh, "LastModifiedDate", 12345);
+			expectPass("IfcOwnerHistory", "CorrectChangeAction", oh);
+		});
+		test("pass: LastModifiedDate absent, ChangeAction absent", () => {
+			expectPass("IfcOwnerHistory", "CorrectChangeAction", create("IfcOwnerHistory"));
+		});
+		test("pass: LastModifiedDate absent, ChangeAction is NOCHANGE", () => {
+			const oh = create("IfcOwnerHistory");
+			set(oh, "ChangeAction", "NOCHANGE");
+			expectPass("IfcOwnerHistory", "CorrectChangeAction", oh);
+		});
+		test("fail: LastModifiedDate absent, ChangeAction is MODIFIED", () => {
+			const oh = create("IfcOwnerHistory");
+			set(oh, "ChangeAction", "MODIFIED");
+			expectFail("IfcOwnerHistory", "CorrectChangeAction", oh);
+		});
+	});
+
+	function edgeCurve(edgeStart: EntityInstance, edgeEnd: EntityInstance): EntityInstance {
+		const ec = create("IfcEdgeCurve");
+		set(ec, "EdgeStart", edgeStart);
+		set(ec, "EdgeEnd", edgeEnd);
+		return ec;
+	}
+
+	describe("IfcPath.IsContinuous (chunk 4)", () => {
+		test("pass: fewer than 2 edges (nothing to check)", () => {
+			const path = create("IfcPath");
+			const oe = create("IfcOrientedEdge");
+			set(oe, "EdgeElement", edgeCurve(create("IfcVertexPoint"), create("IfcVertexPoint")));
+			set(path, "EdgeList", [oe]);
+			expectPass("IfcPath", "IsContinuous", path);
+		});
+		test("pass: consecutive edges share EdgeEnd/EdgeStart", () => {
+			const shared = create("IfcVertexPoint");
+			const oe1 = create("IfcOrientedEdge");
+			set(oe1, "EdgeElement", edgeCurve(create("IfcVertexPoint"), shared));
+			const oe2 = create("IfcOrientedEdge");
+			set(oe2, "EdgeElement", edgeCurve(shared, create("IfcVertexPoint")));
+			const path = create("IfcPath");
+			set(path, "EdgeList", [oe1, oe2]);
+			expectPass("IfcPath", "IsContinuous", path);
+		});
+		test("fail: consecutive edges do NOT share EdgeEnd/EdgeStart", () => {
+			// Each vertex is given a distinct `VertexGeometry` -- `settings.compareInstancesByValue`
+			// is on for this whole file, so two bare, all-null `IfcVertexPoint` instances would
+			// otherwise compare structurally EQUAL to each other and defeat this fail case.
+			function vertex(coords: number[]): EntityInstance {
+				const v = create("IfcVertexPoint");
+				set(v, "VertexGeometry", point3D(coords));
+				return v;
+			}
+			const oe1 = create("IfcOrientedEdge");
+			set(oe1, "EdgeElement", edgeCurve(vertex([0, 0, 0]), vertex([1, 0, 0])));
+			const oe2 = create("IfcOrientedEdge");
+			set(oe2, "EdgeElement", edgeCurve(vertex([2, 0, 0]), vertex([3, 0, 0])));
+			const path = create("IfcPath");
+			set(path, "EdgeList", [oe1, oe2]);
+			expectFail("IfcPath", "IsContinuous", path);
+		});
+	});
+
+	describe("IfcPcurve.DimIs2D (chunk 4)", () => {
+		test("pass/fail: ReferenceCurve.Dim must equal 2", () => {
+			const pcurve2D = create("IfcPcurve");
+			set(pcurve2D, "ReferenceCurve", polyline2D());
+			expectPass("IfcPcurve", "DimIs2D", pcurve2D);
+
+			const pcurve3D = create("IfcPcurve");
+			set(pcurve3D, "ReferenceCurve", polyline3D());
+			expectFail("IfcPcurve", "DimIs2D", pcurve3D);
+		});
+	});
+
+	describe("IfcPerson.IdentifiablePerson (chunk 4)", () => {
+		test("pass: Identification given", () => {
+			const person = create("IfcPerson");
+			set(person, "Identification", "ID1");
+			expectPass("IfcPerson", "IdentifiablePerson", person);
+		});
+		test("pass: FamilyName given", () => {
+			const person = create("IfcPerson");
+			set(person, "FamilyName", "Smith");
+			expectPass("IfcPerson", "IdentifiablePerson", person);
+		});
+		test("fail: none given", () => {
+			expectFail("IfcPerson", "IdentifiablePerson", create("IfcPerson"));
+		});
+	});
+
+	describe("IfcPerson.ValidSetOfNames (chunk 4)", () => {
+		test("pass: MiddleNames not given", () => {
+			expectPass("IfcPerson", "ValidSetOfNames", create("IfcPerson"));
+		});
+		test("pass: MiddleNames given and FamilyName also given", () => {
+			const person = create("IfcPerson");
+			set(person, "MiddleNames", ["A."]);
+			set(person, "FamilyName", "Smith");
+			expectPass("IfcPerson", "ValidSetOfNames", person);
+		});
+		test("fail: MiddleNames given but neither FamilyName nor GivenName given", () => {
+			const person = create("IfcPerson");
+			set(person, "MiddleNames", ["A."]);
+			expectFail("IfcPerson", "ValidSetOfNames", person);
+		});
+	});
+
+	describe("IfcPhysicalComplexQuantity.NoSelfReference (chunk 4)", () => {
+		test("pass: HasQuantities does not contain self", () => {
+			const complex = create("IfcPhysicalComplexQuantity");
+			set(complex, "HasQuantities", [create("IfcQuantityCount")]);
+			expectPass("IfcPhysicalComplexQuantity", "NoSelfReference", complex);
+		});
+		test("fail: HasQuantities contains self", () => {
+			const complex = create("IfcPhysicalComplexQuantity");
+			set(complex, "HasQuantities", [complex]);
+			expectFail("IfcPhysicalComplexQuantity", "NoSelfReference", complex);
+		});
+	});
+
+	describe("IfcPhysicalComplexQuantity.UniqueQuantityNames (chunk 4)", () => {
+		test("pass: every HasQuantities member has a distinct Name", () => {
+			const q1 = create("IfcQuantityCount");
+			set(q1, "Name", "Count1");
+			const q2 = create("IfcQuantityCount");
+			set(q2, "Name", "Count2");
+			const complex = create("IfcPhysicalComplexQuantity");
+			set(complex, "HasQuantities", [q1, q2]);
+			expectPass("IfcPhysicalComplexQuantity", "UniqueQuantityNames", complex);
+		});
+		test("fail: two HasQuantities members share the same Name", () => {
+			const q1 = create("IfcQuantityCount");
+			set(q1, "Name", "Count1");
+			const q2 = create("IfcQuantityCount");
+			set(q2, "Name", "Count1");
+			const complex = create("IfcPhysicalComplexQuantity");
+			set(complex, "HasQuantities", [q1, q2]);
+			expectFail("IfcPhysicalComplexQuantity", "UniqueQuantityNames", complex);
+		});
+	});
+
+	describe("IfcPixelTexture (chunk 4)", () => {
+		function pixelTexture(width: number, height: number, colourComponents: number, pixel: string[]): EntityInstance {
+			const t = create("IfcPixelTexture");
+			set(t, "Width", width);
+			set(t, "Height", height);
+			set(t, "ColourComponents", colourComponents);
+			set(t, "Pixel", pixel);
+			return t;
+		}
+		test("MinPixelInS pass/fail: Width >= 1", () => {
+			expectPass("IfcPixelTexture", "MinPixelInS", pixelTexture(1, 1, 1, ["a"]));
+			expectFail("IfcPixelTexture", "MinPixelInS", pixelTexture(0, 1, 1, []));
+		});
+		test("MinPixelInT pass/fail: Height >= 1", () => {
+			expectPass("IfcPixelTexture", "MinPixelInT", pixelTexture(1, 1, 1, ["a"]));
+			expectFail("IfcPixelTexture", "MinPixelInT", pixelTexture(1, 0, 1, []));
+		});
+		test("NumberOfColours pass/fail: ColourComponents in [1, 4]", () => {
+			expectPass("IfcPixelTexture", "NumberOfColours", pixelTexture(1, 1, 4, ["a", "b", "c", "d"]));
+			expectFail("IfcPixelTexture", "NumberOfColours", pixelTexture(1, 1, 5, []));
+		});
+		test("SizeOfPixelList pass/fail: Pixel size must equal Width * Height", () => {
+			expectPass("IfcPixelTexture", "SizeOfPixelList", pixelTexture(2, 2, 1, ["a", "b", "c", "d"]));
+			expectFail("IfcPixelTexture", "SizeOfPixelList", pixelTexture(2, 2, 1, ["a"]));
+		});
+		test("PixelAsByteAndSameLength pass: every Pixel member is 8 bits and shares the first member's own length", () => {
+			expectPass("IfcPixelTexture", "PixelAsByteAndSameLength", pixelTexture(1, 2, 1, ["00000000", "11111111"]));
+		});
+		test("PixelAsByteAndSameLength fail: a Pixel member's length is not a multiple of 8", () => {
+			expectFail("IfcPixelTexture", "PixelAsByteAndSameLength", pixelTexture(1, 1, 1, ["0000000"]));
+		});
+		test("PixelAsByteAndSameLength fail: Pixel members have mismatched lengths", () => {
+			expectFail(
+				"IfcPixelTexture",
+				"PixelAsByteAndSameLength",
+				pixelTexture(1, 2, 1, ["00000000", "1111111100000000"]),
+			);
+		});
+	});
+
+	describe("IfcPolyLoop.AllPointsSameDim (chunk 4)", () => {
+		test("pass: every Polygon member shares the same Dim", () => {
+			const loop = create("IfcPolyLoop");
+			set(loop, "Polygon", [point2D([0, 0]), point2D([1, 0]), point2D([1, 1])]);
+			expectPass("IfcPolyLoop", "AllPointsSameDim", loop);
+		});
+		test("fail: a Polygon member has a different Dim", () => {
+			const loop = create("IfcPolyLoop");
+			set(loop, "Polygon", [point2D([0, 0]), point3D([1, 0, 0])]);
+			expectFail("IfcPolyLoop", "AllPointsSameDim", loop);
+		});
+	});
+
+	describe("IfcPolygonalBoundedHalfSpace (chunk 4)", () => {
+		test("BoundaryDim pass/fail: PolygonalBoundary.Dim must equal 2", () => {
+			const half2D = create("IfcPolygonalBoundedHalfSpace");
+			set(half2D, "PolygonalBoundary", polyline2D());
+			expectPass("IfcPolygonalBoundedHalfSpace", "BoundaryDim", half2D);
+
+			const half3D = create("IfcPolygonalBoundedHalfSpace");
+			set(half3D, "PolygonalBoundary", polyline3D());
+			expectFail("IfcPolygonalBoundedHalfSpace", "BoundaryDim", half3D);
+		});
+		test("BoundaryType pass/fail: PolygonalBoundary must be IfcPolyline/IfcCompositeCurve/IfcIndexedPolyCurve", () => {
+			const halfPoly = create("IfcPolygonalBoundedHalfSpace");
+			set(halfPoly, "PolygonalBoundary", polyline2D());
+			expectPass("IfcPolygonalBoundedHalfSpace", "BoundaryType", halfPoly);
+
+			// The genuinely new-in-ADD2 case (see whereRules/ifc4x3.ts's own header comment):
+			// IFC4's own version does NOT accept an IfcIndexedPolyCurve here.
+			const halfIndexed = create("IfcPolygonalBoundedHalfSpace");
+			set(halfIndexed, "PolygonalBoundary", create("IfcIndexedPolyCurve"));
+			expectPass("IfcPolygonalBoundedHalfSpace", "BoundaryType", halfIndexed);
+
+			const halfBad = create("IfcPolygonalBoundedHalfSpace");
+			set(halfBad, "PolygonalBoundary", create("IfcCartesianPoint"));
+			expectFail("IfcPolygonalBoundedHalfSpace", "BoundaryType", halfBad);
+		});
+	});
+
+	describe("IfcPolyline.SameDim (chunk 4)", () => {
+		test("pass: every Points member shares the same Dim", () => {
+			expectPass("IfcPolyline", "SameDim", polyline2D());
+		});
+		test("fail: a Points member has a different Dim", () => {
+			const pl = create("IfcPolyline");
+			set(pl, "Points", [point2D([0, 0]), point3D([1, 0, 0])]);
+			expectFail("IfcPolyline", "SameDim", pl);
+		});
+	});
+
+	describe("IfcPolynomialCurve (chunk 4, genuinely new in ADD2)", () => {
+		test("CorrectPositionDim pass: 2D position with no CoefficientsZ", () => {
+			const curve = create("IfcPolynomialCurve");
+			const placement2D = create("IfcAxis2Placement2D");
+			set(placement2D, "Location", point2D([0, 0]));
+			set(curve, "Position", placement2D);
+			expectPass("IfcPolynomialCurve", "CorrectPositionDim", curve);
+		});
+		test("CorrectPositionDim pass: 3D position (CoefficientsZ irrelevant)", () => {
+			const curve = create("IfcPolynomialCurve");
+			const placement = create("IfcAxis2Placement3D");
+			set(placement, "Location", point3D([0, 0, 0]));
+			set(curve, "Position", placement);
+			expectPass("IfcPolynomialCurve", "CorrectPositionDim", curve);
+		});
+		test("CorrectPositionDim fail: 2D position WITH CoefficientsZ", () => {
+			const curve = create("IfcPolynomialCurve");
+			const placement = create("IfcAxis2Placement2D");
+			set(placement, "Location", point2D([0, 0]));
+			set(curve, "Position", placement);
+			set(curve, "CoefficientsZ", [0, 1]);
+			expectFail("IfcPolynomialCurve", "CorrectPositionDim", curve);
+		});
+		test("ValidCoefficients pass: at least two of X/Y/Z given", () => {
+			const curve = create("IfcPolynomialCurve");
+			set(curve, "CoefficientsX", [0, 1]);
+			set(curve, "CoefficientsY", [0, 1]);
+			expectPass("IfcPolynomialCurve", "ValidCoefficients", curve);
+		});
+		test("ValidCoefficients fail: only one of X/Y/Z given", () => {
+			const curve = create("IfcPolynomialCurve");
+			set(curve, "CoefficientsX", [0, 1]);
+			expectFail("IfcPolynomialCurve", "ValidCoefficients", curve);
+		});
+	});
+
+	describe("IfcPositioningElement.HasPlacement (chunk 4, genuinely new in ADD2)", () => {
+		test("pass: ObjectPlacement is given", () => {
+			const posEl = create("IfcPositioningElement");
+			set(posEl, "ObjectPlacement", create("IfcLocalPlacement"));
+			expectPass("IfcPositioningElement", "HasPlacement", posEl);
+		});
+		test("fail: ObjectPlacement is not given", () => {
+			expectFail("IfcPositioningElement", "HasPlacement", create("IfcPositioningElement"));
+		});
+	});
+
+	// =============================================================================
 	// End-to-end wiring: `executeRules(file)` against the REAL registered rules above,
 	// on a dedicated, freshly-constructed file -- mirrors `ifc2x3.test.ts`'s/
 	// `ifc4.test.ts`'s own identical end-to-end block, closing the same "registry ->
@@ -2663,7 +3598,47 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 			expect(violations.some((v) => v.message.includes("IfcDoor.CorrectTypeAssigned"))).toBe(true);
 		});
 
-		test("a well-formed instance produces zero violations from any of the 340 registered rules", () => {
+		test("a chunk-4 genuinely-new-in-ADD2 rule violation (IfcKerbType.CorrectPredefinedType) is detected", () => {
+			const wiringFile = blankFile();
+			const kerbType = wiringFile.createEntity("IfcKerbType");
+			(kerbType as unknown as Record<string, unknown>).PredefinedType = "USERDEFINED";
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcKerbType.CorrectPredefinedType"))).toBe(true);
+		});
+
+		test("a chunk-4 genuinely-new-rule-on-a-pre-existing-entity violation (IfcMapConversion.TargetCRSOnlyProjected) is detected", () => {
+			const wiringFile = blankFile();
+			const mapConversion = wiringFile.createEntity("IfcMapConversion");
+			(mapConversion as unknown as Record<string, unknown>).TargetCRS =
+				wiringFile.createEntity("IfcCoordinateReferenceSystem");
+
+			const violations = executeRules(wiringFile);
+			expect(violations.some((v) => v.message.includes("IfcMapConversion.TargetCRSOnlyProjected"))).toBe(true);
+		});
+
+		test("a chunk-4 removed-rule finding, CONFIRMED (not just hypothesized) by this very test: IfcGrid_HasPlacement no longer exists in ADD2, but IfcGrid is dispatched against IfcPositioningElement.HasPlacement instead -- proving IfcGrid is now a real subtype of the new IfcPositioningElement entity, not merely a coincidental field-layout match", () => {
+			const wiringFile = blankFile();
+			const grid = wiringFile.createEntity("IfcGrid");
+			(grid as unknown as Record<string, unknown>).UAxes = [];
+			(grid as unknown as Record<string, unknown>).VAxes = [];
+
+			// No ObjectPlacement given -- no `IfcGrid`-named rule exists any more (confirmed:
+			// no violation message contains "IfcGrid_HasPlacement"), but the engine's own
+			// real by_type/subtype dispatch still catches this via the NEW supertype rule.
+			const violationsWithoutPlacement = executeRules(wiringFile);
+			expect(violationsWithoutPlacement.some((v) => v.message.includes("IfcGrid_HasPlacement"))).toBe(false);
+			expect(violationsWithoutPlacement.some((v) => v.message.includes("IfcPositioningElement.HasPlacement"))).toBe(
+				true,
+			);
+
+			// Giving it a real ObjectPlacement clears the violation.
+			(grid as unknown as Record<string, unknown>).ObjectPlacement = wiringFile.createEntity("IfcLocalPlacement");
+			const violationsWithPlacement = executeRules(wiringFile);
+			expect(violationsWithPlacement.some((v) => v.message.includes("IfcPositioningElement.HasPlacement"))).toBe(false);
+		});
+
+		test("a well-formed instance produces zero violations from any of the 460 registered rules", () => {
 			const wiringFile = blankFile();
 			const approval = wiringFile.createEntity("IfcApproval");
 			(approval as unknown as Record<string, unknown>).Name = "A well-formed approval";
