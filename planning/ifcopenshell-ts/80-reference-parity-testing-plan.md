@@ -152,6 +152,26 @@ One JSON object per fixture, keyed by STEP id (stable, comparable across both la
 - Any real mismatch gets root-caused like every other finding this project makes — a real bug fix,
   or a disclosed, pinned divergence — never a silently-adjusted golden.
 
+```
+  ONE-TIME, OFFLINE -- orchestrating session only (needs live Python + network)
+  ────────────────────────────────────────────────────────────────────────────
+    reference .ifc  ──(reference_dump_python.py,          golden JSON
+    (bSI corpus,   )    real ifcopenshell)          ──>    (checked into
+     30 files)                                             the repo)
+                                                                 │
+  ────────────────────────────────────────────────────────────┼──────────────
+  EVERY TEST RUN / PR CI -- no Python, no network                │
+  ────────────────────────────────────────────────────────────┼──────────────
+                                                                 │
+    same .ifc file ──(TS dump())──> TS JSON dump ──(approxEqual  │
+                                                      diff, ~1e-9)┘
+                                                          │
+                                                    match / mismatch
+                                                  (mismatch => root-cause:
+                                                   real bug fix or disclosed,
+                                                   pinned divergence)
+```
+
 **Chunk 2 — Round-trip write-back parity.**
 - For each of the 30 fixtures: TS reads it, writes it back out (`IfcFile.write()`), then re-parses
   the newly-written output **via TS's own dump function** (not a second live-Python pass) and diffs
@@ -163,6 +183,39 @@ One JSON object per fixture, keyed by STEP id (stable, comparable across both la
   pure TS-to-TS round-tripping structurally can't see (TS's dump and TS's write sharing the same
   wrong understanding of some value). Document this as a known, accepted limitation of the
   automated version, not silently ignored.
+
+```
+  EVERY TEST RUN / PR CI -- reuses chunk 1's golden, no second Python pass needed
+  ───────────────────────────────────────────────────────────────────────────────
+    reference .ifc ──(TS read)──> in-memory ──(TS write())──> new .ifc bytes
+    (same file           file                                       │
+     chunk 1 used)                                                  │
+                                                            (TS read again)
+                                                                      │
+                                                                      ▼
+                                                              in-memory file'
+                                                                      │
+                                                              (TS dump())
+                                                                      │
+                                                                      ▼
+                                                              TS JSON dump'
+                                                                      │
+                                                      approxEqual diff against
+                                                      chunk 1's SAME golden
+                                                      (goldenDump(f), not a
+                                                       fresh Python re-dump)
+                                                                      │
+                                                              match => write path
+                                                              round-trips faithfully
+
+  OCCASIONAL, MANUAL, ORCHESTRATING-SESSION-ONLY SANITY PASS (not CI, not automated)
+  ───────────────────────────────────────────────────────────────────────────────
+    new .ifc bytes ──(real ifcopenshell)──> Python dump' ──> spot-check against
+                                                              goldenDump(f) too --
+                                                              catches the one blind
+                                                              spot pure TS<->TS
+                                                              round-tripping can't see
+```
 
 **Chunk 3 — Mutation differential battery.**
 - Explicitly acknowledged limitation up front (the user's own point): read/round-trip parity gets
@@ -179,6 +232,28 @@ One JSON object per fixture, keyed by STEP id (stable, comparable across both la
   and scripting the operation sequences themselves.
 - Deliberately excluded from "v1 done" or any completeness claim — this is an ongoing, growable
   battery, not a one-time backfill with a defined end state.
+
+```
+  ONE-TIME, OFFLINE, PER SCENARIO -- orchestrating session only (needs live Python + network)
+  ─────────────────────────────────────────────────────────────────────────────────────────
+    base .ifc file  ┐
+    (blank or a     ├──(apply scripted op sequence,──> golden JSON
+     chunk-1 ref.   ┘    real ifcopenshell.api.*)       (checked into
+     file)                                               the repo, one per
+                                                          scenario)
+                                                                │
+  ─────────────────────────────────────────────────────────────┼───────────────
+  EVERY TEST RUN / PR CI -- no Python, no network                │
+  ─────────────────────────────────────────────────────────────┼───────────────
+                                                                 │
+    SAME base file ─(apply IDENTICAL scripted            approxEqual │
+                      op sequence, TS api.*)──> TS dump ──diff, ~1e-9┘
+                                                              │
+                                                        match / mismatch
+                                            (battery is best-effort/growable --
+                                             new scenarios added over time, no
+                                             claim of exhaustive mutation coverage)
+```
 
 **Not in this plan, noted for later**: tightening the existing 138/38 `test_rules.py`/
 `test_validate.py` fixtures from count-only matching to a full live-diff of exact rule
