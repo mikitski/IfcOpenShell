@@ -4398,3 +4398,42 @@ mechanism is generic and could mask other cases.
 relies on `getSupertypes()`/`isA()` returning a complete answer for a multiply-inherited entity as far as
 this finding's own investigation went (not exhaustively audited). This entry tracks the open question for
 whoever next needs a full "is this really a subtype" check outside the rule engine's own `byType()` path.
+
+### Native primitive-layer gap: `LOGICAL`-typed attribute reads always return a raw `0`/`1`/`2` JS number, never Python's `true`/`false`/`"UNKNOWN"`
+
+**Found:** 2026-09-25, while building the reference-model parity testing plan's chunk 1 (PR #252,
+`test/referenceParity/`) -- the TS half of a read-parity harness diffing this port's own attribute reads
+against real `ifcopenshell-python`'s, over 30 real buildingSMART reference fixtures.
+
+**Root cause, confirmed directly against native source:** `src/wrappergen/generated_napi/
+ifcopenshell_native.cpp`'s `IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_LOGICAL` case (line ~771-772) does
+`napi_create_int64(env, value.logical_value, &js_result)` -- i.e. every EXPRESS `LOGICAL`-typed
+attribute read comes back as a raw JS number (`0`=false/`1`=true/`2`=UNKNOWN), never real Python's own
+`True`/`False`/`"UNKNOWN"` tri-state values.
+
+**Confirmed real and non-trivial, not a one-off**: independently re-verified via a real installed
+`ifcopenshell-python`, walking every entity declaration's attributes across all 3 supported schemas and
+checking each attribute's `type_of_attribute()` for a `LOGICAL` (or `IfcLogical`-defined-type-wrapped)
+underlying type -- found 29 in IFC2X3, 45 in IFC4, 48 in IFC4X3 real, non-SELECT-wrapped `LOGICAL`-typed
+declared attributes (e.g. `IfcBSplineCurve.ClosedCurve`/`SelfIntersect`, `IfcBSplineSurface.UClosed`/
+`VClosed`, `IfcMaterialLayer.IsVentilated`, `IfcPresentationLayerWithStyle.LayerOn`/`LayerFrozen`/
+`LayerBlocked`, `IfcShapeAspect.ProductDefinitional`, `IfcAppliedValue.AppliedValue` via a SELECT branch,
+and more).
+
+**Currently latent, confirmed directly, not assumed**: none of the 30 real vendored reference-parity
+fixtures (`test/fixtures/reference/`) contains an instance of any LOGICAL-attribute-bearing declaration
+-- checked every fixture's own golden JSON directly (`grep`-style scan for each declaration name), zero
+hits across all 30. This is why chunk 1's read-parity suite reports zero mismatches despite this gap
+being real: the specific corpus in hand doesn't happen to exercise it.
+
+**Not fixed.** This is a native primitive-layer issue (the N-API marshaling code itself), not something
+fixable from TS -- needs a `wrappergen`/native-addon change to marshal `LOGICAL` attribute values as a
+proper tri-state (boolean-or-`"UNKNOWN"`, matching this port's own already-established `Tri`/
+`Indeterminate` convention from the EXPRESS rules work, `express/runtimeShim.ts`) rather than a raw
+int64. Out of scope for the reference-parity testing chunk that found it.
+
+**Impact:** any future reference fixture, mutation-battery scenario (chunk 3 of the reference-parity
+plan), or ordinary API/util work that reads one of the ~29-48 LOGICAL-typed attributes above will get a
+raw `0`/`1`/`2` number instead of a proper boolean/tri-state value -- a real, reachable read-path
+divergence from real Python, currently masked only by this port's existing test corpus not touching any
+of these attributes yet.
