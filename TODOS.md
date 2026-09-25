@@ -653,7 +653,7 @@ for anyone who wants an in-memory (no disk I/O) version later, but nothing curre
 
 ---
 
-### `util.unit.convert_file_length_units` -- genuinely blocked, not yet portable
+### `util.unit.convert_file_length_units` -- genuinely blocked, not yet portable -- **RESOLVED, stale entry never flipped (found during the 2026-09-25 TODOS.md sweep)**
 
 **What:** `ifcopenshell/util/unit.py`'s `convert_file_length_units` (the file's only function not
 ported by the Phase 3 `util.unit` chunk) transitively imports `ifcopenshell.api.unit`,
@@ -685,6 +685,13 @@ same reason.
 
 **Depends on / blocked by:** `util.geolocation` dependency resolved. Still blocked on Phase 6's
 `api.unit`/`api.georeference` landing first.
+
+**RESOLVED (found stale during the 2026-09-25 TODOS.md sweep):** both remaining dependencies
+(`api.unit`, `api.georeference`) landed long ago as part of Phase 6/10's own `api` module work --
+`convertFileLengthUnits` is fully implemented in `src/util/unit.ts` (confirmed directly: its own
+header comment says "now ported below too, now that all three [dependencies] have landed"). This
+entry was simply never flipped/archived after the dependency chain closed -- no code work needed,
+just this documentation update.
 
 ### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch -- **RESOLVED 2026-09-23 for the shared gate itself; see "Resolved" below for exactly what's verified vs. what remains (each individual consequence's own test file still needs its own follow-up flip from "throws" to the real assertion)**
 
@@ -1429,7 +1436,9 @@ would benefit from the same root-level fix.
 
 ### `util.selector.get_element_value`'s positional/geolocated keys and `"profiles"`'s extrusion
 ### fallback -- genuinely blocked, not yet portable (positional `x`/`y`/`z`/`easting`/`northing`/
-### `elevation` RESOLVED 2026-09-11; only `rotation_*` and `"profiles"`'s extrusion fallback remain)
+### `elevation`/`rotation_x`/`rotation_y`/`rotation_z` ALL RESOLVED -- `rotation_*` fixed
+### 2026-09-25 during the TODOS.md sweep, once `util.shape_builder` landed; only
+### `"profiles"`'s extrusion fallback remains)
 
 **What:** Phase 3's `util.selector` chunk (`src/util/selector.ts`, `get_element_value`/the
 key-path mini-language) originally ported every key `_get_element_value` supports except two
@@ -1511,11 +1520,20 @@ only the parts it *can* reproduce: the blocker firing with a clear error for the
 `rotation_*` keys, the real `x`/`y`/`z`/`easting`/`northing`/`elevation` computation, and the
 no-`ObjectPlacement`-set `null` case.
 
-**Depends on / blocked by:** Item 1's `x`/`y`/`z`/`easting`/`northing`/`elevation` are all
-resolved. The remaining `rotation_*` are blocked on `util.shape_builder` landing;
-`"profiles"`'s extrusion fallback is now blocked only on `util.shape` landing (`util.representation`
-resolved 2026-09-11) -- both Tier B, `planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet
-scheduled in detail.
+**Depends on / blocked by:** Item 1's `x`/`y`/`z`/`easting`/`northing`/`elevation`/`rotation_x`/
+`rotation_y`/`rotation_z` are ALL now resolved. Only `"profiles"`'s extrusion fallback remains,
+blocked on `util.shape` landing (`util.representation` resolved 2026-09-11) -- Tier B,
+`planning/ifcopenshell-ts/20-roadmap.md` Phase 4-ish, not yet scheduled in detail.
+
+**RESOLVED 2026-09-25 (`rotation_x`/`rotation_y`/`rotation_z`, found during the TODOS.md sweep):**
+`util.shape_builder` had already landed (`util/shapeBuilder.ts`'s `npMatrixToEuler`) but the
+mechanical follow-up this entry's own "Fix" section already anticipated was never done.
+`src/util/selector.ts`'s `positionalRotationValue` now calls the real `npMatrixToEuler` on the same
+matrix the `x`/`y`/`z` branch already computes, converting radians to degrees exactly like real
+Python's own `np.degrees` call -- `throwPositionalKeyBlocked` removed entirely (no longer
+reachable). `test/util/selector.test.ts` now has a full port of real Python's own
+`test_selecting_an_elements_rotation_using_a_query`, verified against the exact expected values
+(0, 0, 30 degrees for a 30° Z-rotation).
 
 ---
 
@@ -2724,7 +2742,14 @@ FIFTH independent confirmations of this exact idiom.
 
 ---
 
-### `api.unit.addMonetaryUnit`/`editMonetaryUnit` tests use `"ZWL"`/`"DOLLARYDOO"` currency codes that don't exist in IFC2X3's `IfcCurrencyEnum` -- another `SCHEMA_VERSIONS=4`-only silent-skip casualty
+### `api.unit.addMonetaryUnit`/`editMonetaryUnit` tests use `"ZWL"`/`"DOLLARYDOO"` currency codes that don't exist in IFC2X3's `IfcCurrencyEnum` -- another `SCHEMA_VERSIONS=4`-only silent-skip casualty -- **RESOLVED, stale entry never flipped (found during the 2026-09-25 TODOS.md sweep)**
+
+**RESOLVED:** both test files already fix this -- `addMonetaryUnit.test.ts`'s "defaults to
+DOLLARYDOO" case is `test.skipIf(schema === "IFC2X3")`-guarded, and the undo/redo tests in both
+files use `"USD"`/`"GBP"` (valid on all 3 schemas), not `"ZWL"`. Confirmed directly against current
+source -- no code work needed, this entry was just never flipped/archived after the fix landed
+(likely as part of the 2026-09-22 "Reconcile IFC2X3 test failures newly exposed by CI schema
+widening" fix pass).
 
 **What:** `test/api/unit/addMonetaryUnit.test.ts`/`editMonetaryUnit.test.ts` (already-landed, PR
 #74) use `describe.each(AVAILABLE_SCHEMAS)` and hardcode currency strings `"ZWL"`/`"DOLLARYDOO"`
@@ -2759,7 +2784,13 @@ entry already tracks).
 
 ---
 
-### `api.material` `editLayer`/`editLayerUsage`/`reorderSetItem` tests crash on IFC2X3 by calling `addMaterial` with `category` -- a third `SCHEMA_VERSIONS=4`-only silent-skip casualty
+### `api.material` `editLayer`/`editLayerUsage`/`reorderSetItem` tests crash on IFC2X3 by calling `addMaterial` with `category` -- a third `SCHEMA_VERSIONS=4`-only silent-skip casualty -- **RESOLVED, stale entry never flipped (found during the 2026-09-25 TODOS.md sweep)**
+
+**RESOLVED:** none of the three test files pass a `category` to `addMaterial` anymore -- confirmed
+directly against current source (each file's own header comment now documents the IFC2X3-safe,
+no-`category` fixture convention). No code work needed, this entry was just never flipped/archived
+after the fix landed (likely the same 2026-09-22 "Reconcile IFC2X3 test failures" fix pass as the
+`addMonetaryUnit`/`editMonetaryUnit` entry above).
 
 **What:** `test/api/material/editLayer.test.ts`/`editLayerUsage.test.ts`/`reorderSetItem.test.ts`
 (already-landed, PR #97) use `describe.each(AVAILABLE_SCHEMAS)` with no IFC2X3 filter, and their
@@ -2800,7 +2831,7 @@ addon to verify against.
 
 ---
 
-### `api.pset.addPset`'s IFC2X3 material-properties dedup scan would crash on a malformed file with an unset `Material`
+### `api.pset.addPset`'s IFC2X3 material-properties dedup scan would crash on a malformed file with an unset `Material` -- **RESOLVED 2026-09-25 (TODOS.md sweep)**
 
 **What:** `src/ifcopenshell-ts/src/api/pset/addPset.ts`'s `IfcMaterialDefinition`/`IfcMaterial`
 branch, on IFC2X3, dedups existing `IfcMaterialProperties` instances via
@@ -2832,9 +2863,12 @@ very low practical risk. Not independently exercised against a real IFC2X3 file 
 **Depends on / blocked by:** None -- a trivial, one-line defensive fix whenever someone picks up
 a small `api.pset` follow-up chunk.
 
+**RESOLVED 2026-09-25:** guarded exactly as this entry's own "Fix" section specified
+(`(d.get("Material") as EntityInstance | null)?.equals(product) ?? false`).
+
 ---
 
-### `util.element.copyDeep`/`copy` cannot copy a "simple"/defined-type instance (e.g. `IfcLabel`) at all
+### `util.element.copyDeep`/`copy` cannot copy a "simple"/defined-type instance (e.g. `IfcLabel`) at all -- **RESOLVED 2026-09-25 (TODOS.md sweep)**
 
 **What:** `src/ifcopenshell-ts/src/util/element.ts`'s `copy`/`copyDeep` both throw ("No forward
 attribute at index 0 for instance of type '<Class>'") when asked to copy a "simple"/defined-type
@@ -2882,6 +2916,15 @@ assumed from the stack trace alone) before writing this entry.
 **Depends on / blocked by:** None -- a self-contained fix to `util/element.ts`'s existing
 `copy`/`copyDeep`, whenever someone picks up a follow-up chunk touching either function (or wants
 to fully unblock `copyMaterial.test.ts`'s pinned "throws" test above).
+
+**RESOLVED 2026-09-25:** both functions now special-case `!element.isEntity()` up front (empirically
+confirmed `setByIndex(0, value)` on a freshly-created simple-type instance works fine -- the
+`attribute_kind_of`-on-a-new-target gate other chunks hit is a DIFFERENT code path, materializing a
+defined-type value as an ENTITY's own attribute, not writing directly to a standalone simple-type
+instance's own single wrapped-value slot) and copy the single wrapped value directly via
+`getByIndex(0)`/`setByIndex(0, ...)`, skipping the by-name `GlobalId` lookup entirely (a defined
+type can never be `IfcRoot`-derived). `copyMaterial.test.ts`'s pinned "throws" test was flipped to
+a real assertion matching real Python's own full `test_copy_a_material_with_properties`.
 
 ---
 
@@ -3912,7 +3955,7 @@ and test expectations needed correcting. A native-layer fix (option (a) above) w
 `cmake` build environment to implement and verify, same as this file's other native-primitive-layer
 entries.
 
-### `api.resource.editResourceTime`'s `calculate_resource_usage`-under-lock blocker is now resolvable -- `api.sequence.calculateTaskDuration` has landed
+### `api.resource.editResourceTime`'s `calculate_resource_usage`-under-lock blocker is now resolvable -- `api.sequence.calculateTaskDuration` has landed -- **RESOLVED 2026-09-25 (TODOS.md sweep)**
 
 **What:** `api.resource`'s PROGRESS.md row (PR #103) disclosed that `editResourceTime`'s
 `ScheduleUsage`-under-a-hard-`Usage.ScheduleWork`-constraint branch needs
@@ -3937,6 +3980,13 @@ small, dedicated follow-up chunk.
 **Context:** Found while updating `PROGRESS.md` after `api.sequence` chunk 4 landed (2026-09-20) --
 re-reading `api.resource`'s own PROGRESS.md row for context surfaced the now-stale "has no TS port
 of any kind" framing.
+
+**RESOLVED 2026-09-25:** `editResourceTime.ts`'s blocked call site now calls the real
+`calculateTaskDuration(file, { task })` directly. The pinned "throws" test in
+`editResourceTime.test.ts` was flipped to a real end-to-end assertion (sets `ScheduleWork: "P4D"`
+before locking it, then edits `ScheduleUsage: 2.0`, verifying the resulting `TaskTime
+.ScheduleDuration` is computed correctly as `"P2D"` -- 4 days of work at 2x usage, matching
+`calculateTaskDuration.ts`'s own formula with the default 8-hour workday).
 
 ### `enumeration_type::enumeration_items()` never bound -- `util.attribute.getEnumItems` has no forward enum-item-name lookup, and `util.fm.getFmhemClasses` is unconditionally blocked by it
 

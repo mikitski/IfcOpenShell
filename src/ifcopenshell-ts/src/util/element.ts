@@ -1744,6 +1744,16 @@ export function getReferencedElements(reference: EntityInstance): Set<EntityInst
 export function copy(ifcFile: IfcFile | null, element: EntityInstance): EntityInstance {
 	const file = ifcFile ?? (element.file as IfcFile);
 	const result = file.createEntity(element.isA());
+	// A "simple"/defined-type instance (e.g. a standalone `IfcLabel`) has no
+	// entity-declaration attribute metadata for `attributeNameAt` to look up (it's an
+	// EXPRESS `TYPE`, not an `ENTITY`) -- and can never be `IfcRoot`-derived, so there's
+	// no `GlobalId` concern to begin with. Copy its single wrapped value directly and
+	// skip the by-name lookup entirely (TODOS.md).
+	if (!element.isEntity()) {
+		const value = element.getByIndex(0);
+		if (value !== null) result.setByIndex(0, value);
+		return result;
+	}
 	const count = element.attributeCount();
 	for (let i = 0; i < count; i++) {
 		const attribute = element.getByIndex(i);
@@ -1793,6 +1803,17 @@ export function copyDeep(
 	const result = file.createEntity(element.isA());
 	if (element.id()) {
 		copiedMap.set(element.id(), result);
+	}
+
+	// See `copy`'s own identical guard above: a simple/defined-type instance has no
+	// entity-declaration attribute metadata for `attributeNameAt`, and can never be
+	// `IfcRoot`-derived -- copy its single wrapped value directly (TODOS.md). Never
+	// recurses further (a defined type's own single "attribute" is always a plain
+	// scalar, never an `EntityInstance`/aggregate-of-entities).
+	if (!element.isEntity()) {
+		const value = element.getByIndex(0);
+		if (value !== null) result.setByIndex(0, value);
+		return result;
 	}
 
 	const count = element.attributeCount();

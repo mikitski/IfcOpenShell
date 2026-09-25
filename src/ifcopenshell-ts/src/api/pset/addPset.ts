@@ -173,7 +173,12 @@ function addPsetUsecase(file: IfcFile, settings: AddPsetSettings): EntityInstanc
 			ifcClass = settings.ifc2x3Subclass || "IfcExtendedMaterialProperties";
 			definitions = file
 				.byType("IfcMaterialProperties")
-				.filter((d) => (d.get("Material") as EntityInstance).equals(product));
+				// Python: `d.Material == product` tolerates `d.Material` being `None`
+				// (`None == product` is `False`) -- a schema-valid file can never
+				// actually have this unset (`Material` is mandatory), but a malformed
+				// one could; guarded to match Python's graceful behavior rather than
+				// throwing (TODOS.md).
+				.filter((d) => (d.get("Material") as EntityInstance | null)?.equals(product) ?? false);
 		} else {
 			ifcClass = "IfcMaterialProperties";
 			definitions = (product.get("HasProperties") as EntityInstance[] | null) ?? [];

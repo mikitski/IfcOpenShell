@@ -96,20 +96,18 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.copyMaterial (%s)", (schema) => {
 		expect(getElementsByMaterial(file, copy).size).toBe(0);
 	});
 
-	// Real Python: `test_copy_a_material_with_properties`, split in two -- see this
-	// file's own header comment's newly-disclosed `util.element.copyDeep`/`copy`
-	// finding. The structural half (a pset with a property attached, deep-copied
-	// correctly) passes for real; the VALUE half (the property actually carrying a
-	// typed `NominalValue`, which real Python's own assertions check gets copied too)
-	// is pinned separately as a "throws the disclosed blocked error" regression test.
+	// Real Python: `test_copy_a_material_with_properties` -- full port. `util.element
+	// .copyDeep`/`copy`'s own former inability to copy a "simple"/defined-type instance
+	// (e.g. `IfcLabel("bar")`) at all, whether as the top-level argument or reached via
+	// recursion into a forward attribute, is fixed (TODOS.md) -- `NominalValue` now
+	// copies correctly like every other real Python assertion here expects.
 	test("copying a material with a property pset (structure only -- see the value-copying test below)", () => {
 		const file = createTestFile(schema);
 		const material = withAttrs(file, "IfcMaterial", { Name: "CON01" });
 		const pset = addPset(file, { product: material, name: "Foo_Bar" });
 		const propsAttribute = schema === "IFC2X3" ? "ExtendedProperties" : "Properties";
 		// A `null` `NominalValue` needs no value-materialization/deep-copy at all --
-		// see this file's own header comment for why a REAL value hits a different,
-		// disclosed gap.
+		// the test below covers a real, populated value.
 		const prop = file.createEntity("IfcPropertySingleValue", "foo", null, null, null);
 		pset.set(propsAttribute, [prop]);
 
@@ -129,19 +127,14 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.copyMaterial (%s)", (schema) => {
 		expect(newProps[0].get("NominalValue")).toBeNull();
 	});
 
-	// This file's own header comment: a NEWLY-DISCLOSED, pre-existing
-	// `util.element.copyDeep`/`copy` limitation (not introduced by this chunk, not
-	// something this chunk's own scope should fix) -- neither function can copy a
-	// "simple"/defined-type instance (e.g. `IfcLabel("bar")`) at all, whether as the
-	// top-level argument or reached via recursion into a forward attribute. `copy_
-	// material.py`'s own `_copy_material_with_inverses` calls `copy_deep` on each
-	// property SET (an `IfcPropertySingleValue`, a real composite entity -- fine on
-	// its own), but that set's own `NominalValue` forward attribute, when populated,
-	// is exactly such a defined-type instance -- so `copyDeep` throws recursing into
-	// it. `copyMaterial.ts` itself calls `copyDeep` correctly, matching real Python's
-	// own `copy_deep(file, pset)` call exactly; the throw comes from the shared,
-	// already-merged `util/element.ts` utility, not from anything in this chunk.
-	test("copying a material with a property VALUE throws (util.element.copyDeep cannot copy a simple/defined-type value)", () => {
+	// Real Python: `test_copy_a_material_with_properties`'s VALUE half (the property
+	// actually carrying a typed `NominalValue`) -- `util.element.copyDeep`/`copy` can
+	// now copy a "simple"/defined-type instance (e.g. `IfcLabel("bar")`), whether as the
+	// top-level argument or reached via recursion into a forward attribute (TODOS.md).
+	// `copyMaterial.ts` itself calls `copyDeep` correctly, matching real Python's own
+	// `copy_deep(file, pset)` call exactly -- this was always a shared,
+	// already-merged `util/element.ts` utility gap, not anything specific to this file.
+	test("copying a material with a property VALUE copies the value too", () => {
 		const file = createTestFile(schema);
 		const material = withAttrs(file, "IfcMaterial", { Name: "CON01" });
 		const pset = addPset(file, { product: material, name: "Foo_Bar" });
@@ -156,7 +149,19 @@ describe.each(AVAILABLE_SCHEMAS)("api.material.copyMaterial (%s)", (schema) => {
 		);
 		pset.set(propsAttribute, [prop]);
 
-		expect(() => copyMaterial(file, { material })).toThrow(/No forward attribute at index 0/);
+		const copy = copyMaterial(file, { material });
+
+		const propsOld = getMaterialProps(file, material)[0];
+		const propsNew = getMaterialProps(file, copy)[0];
+		const oldProps = propsOld.get(propsAttribute) as EntityInstance[];
+		const newProps = propsNew.get(propsAttribute) as EntityInstance[];
+		expect(oldProps[0].equals(newProps[0])).toBe(false);
+		// Real Python: `props_new.ExtendedProperties[0].NominalValue.wrappedValue == "bar"`
+		// -- `.get("NominalValue")` returns the wrapped defined-type `EntityInstance`
+		// itself (not auto-unwrapped, matching `editPset.test.ts`'s own established
+		// `getByIndex(0)`-to-read-`.wrappedValue` convention for this exact shape).
+		const nominalValue = newProps[0].get("NominalValue") as EntityInstance;
+		expect(nominalValue.getByIndex(0)).toBe("bar");
 	});
 
 	test("copying a material with a style representation", () => {
