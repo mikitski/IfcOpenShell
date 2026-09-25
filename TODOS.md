@@ -695,6 +695,18 @@ just this documentation update.
 
 ### `EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value into a freshly created simple/defined-type instance -- blocks `Migrator.migrate`'s `id() === 0` (SELECT-typed value) branch -- **RESOLVED 2026-09-23 for the shared gate itself; see "Resolved" below for exactly what's verified vs. what remains (each individual consequence's own test file still needs its own follow-up flip from "throws" to the real assertion)**
 
+**BACKLOG FULLY CLOSED (2026-09-25):** all 29 files / 199 tests originally left `test.skip`'d to keep
+CI green while this gate's own shared fix landed have now been processed across 5 module-grouped
+chunks (PRs #260-#264, all merged) -- 196 flipped to real, verified assertions; the remaining 3
+(`addPositioningReferent.test.ts`/`addStationingReferent.test.ts`/`updateKeyPointReferents.test.ts`'s
+own composite-curve-branch regression tests, chunk 4) stay genuinely skipped, correctly re-attributed
+to a SEPARATE, independent, already-tracked gap (`getAxis2placement`'s `IfcAxis2PlacementLinear`
+fallback needing `ifcopenshell.geom`) rather than force-passed. Full-suite skip count went from 218
+(199 from this gate + 19 pre-existing/intentional) down to 22 (19 pre-existing/intentional + those
+same 3 re-attributed cases) -- confirmed via a from-scratch multi-schema native rebuild + full run on
+the final merged `v0.9.0` tip, 11167 passed / 22 skipped / 0 failed (11189 total). No further
+follow-up needed on this entry.
+
 **Resolved (2026-09-23):** Fixed at the exact root this entry always pointed at --
 `src/wrappergen/shim/attribute_value_shim.cpp`'s `entity_declaration_of` (the helper both
 `attribute_kind_of`, backing `EntityInstance.setByIndex`, and `get_attribute_type_name`, backing
