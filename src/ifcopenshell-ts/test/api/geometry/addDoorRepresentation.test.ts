@@ -24,30 +24,41 @@
 //    schema (see below) and is pinned with real, non-throwing geometry assertions.
 //
 // **UPDATE (Phase EX-2 chunk 2, `planning/ifcopenshell-ts/70-express-rules-plan.md` §4)**:
-// finding 2's `Dim` gap is now CLOSED for IFC2X3 -- Phase EX-2 chunks 1+2 ported enough of the
+// finding 2's `Dim` gap closed for IFC2X3 first -- Phase EX-2 chunks 1+2 ported enough of the
 // `calc_*` `Dim`-DERIVE family (`calc_IfcCartesianPoint_Dim`, `calc_IfcCurve_Dim`,
 // `calc_IfcElementarySurface_Dim`, ...) that `.profile()`'s own `Dim` read (via `extrude()`'s
-// internal auto-wrap) now resolves for real IFC2X3 geometry. Re-verified directly against the
-// real, built multi-schema native addon (not assumed) before updating these tests:
-// `addDoorRepresentation` now completes end-to-end on IFC2X3 for every `operationType`/view
-// combination below, producing a real `IfcShapeRepresentation` each time. The tests below now
-// assert a deliberately MINIMAL, structural-sanity shape for the IFC2X3 case (return value's
-// type, `RepresentationIdentifier`/`RepresentationType`, and `Items` count/entity-type) -- NOT
-// full geometric-fidelity verification (exact panel/lining/frame placement, swing-arc geometry,
-// L-shape lining offsets, etc. for every one of the 9 door types). That deeper verification is
-// real, disclosed, scoped-out follow-up work (tracked in `TODOS.md`), comparable in size to its
-// own dedicated verification chunk.
+// internal auto-wrap) resolved for real IFC2X3 geometry. `addDoorRepresentation` completed
+// end-to-end on IFC2X3 for every `operationType`/view combination, producing a real
+// `IfcShapeRepresentation` each time.
 //
-// IFC4/IFC4X3 are UNCHANGED: `rectangle()`/`polyline(closed=true)`'s OWN `IfcLineIndex`/
-// `IfcArcIndex` gap (finding 2's other half, unrelated to Phase EX-2) still fires first, for
-// every branch and every `operationType` -- `.profile()`'s `Dim` gap is never actually reached
-// there, so IFC4/IFC4X3 still throw exactly as before.
+// **UPDATE 2 (reference-parity chunk 5 of 5): BOTH gaps are now closed on IFC4/IFC4X3 too --
+// every test below is genuinely unblocked on ALL 3 SCHEMAS.** Independently, Phase EX-2's own
+// later, separate IFC4/IFC4X3 `calc_*`-porting chunks (see `TODOS.md`'s "`util.representation
+// .guessType`'s `Curve2D`/... branches..." entry, "UPDATE"/"UPDATE 2" through "UPDATE 5", and
+// `src/util/representation.ts`'s own header comment) finished closing finding 2's `Dim` half for
+// IFC4/IFC4X3 as well, and TODOS.md's "`EntityInstance.setByIndex`/`IfcFile.createEntity` ..."
+// entry's shared native gate (finding 2's OTHER half, the `IfcLineIndex`/`IfcArcIndex`
+// defined-type-creation blocker) was fixed 2026-09-23. Both fixes landed independently, well
+// before this chunk, but nothing had re-verified their COMBINED effect on this file's own tests
+// until now. Re-verified directly (not assumed) with a throwaway script against a fresh,
+// from-scratch multi-schema native rebuild before updating these tests: every previously-skipped
+// case below now produces a real `IfcShapeRepresentation`/geometry result on IFC4/IFC4X3 too,
+// with item COUNTS and STRUCTURE identical to IFC2X3's own already-asserted values in every case
+// -- the only schema-observable difference is which concrete curve class `ShapeBuilder.rectangle
+// ()`/`.polyline(closed=true)` build (a real, disclosed, pre-existing `util/shapeBuilder.ts`
+// finding, not new here): IFC2X3 (no `IfcIndexedPolyCurve`/`IfcLineIndex`/`IfcArcIndex` in that
+// schema) builds a plain `IfcPolyline`; IFC4/IFC4X3 build an `IfcIndexedPolyCurve` instead. The
+// tests below now assert a deliberately MINIMAL, structural-sanity shape (return value's type,
+// `RepresentationIdentifier`/`RepresentationType`, and `Items` count/entity-type, using the
+// correct per-schema curve class where a curve item's own class is checked at all) -- NOT full
+// geometric-fidelity verification (exact panel/lining/frame placement, swing-arc geometry,
+// L-shape lining offsets, etc. for every one of the 9 door types, on any schema). That deeper
+// verification is real, disclosed, scoped-out follow-up work (tracked in `TODOS.md`), comparable
+// in size to its own dedicated verification chunk.
 //
-// Run against `AVAILABLE_SCHEMAS` throughout (no hardcoded schema `describe`); the real,
-// disclosed IFC2X3-vs-IFC4+ divergence above is handled with an `if (schema === "IFC2X3")`
-// branch inside each otherwise schema-agnostic test body (this environment's locally-built
-// native addon for this chunk registers all 3 schemas, so these branches are genuinely
-// exercised here, not merely written defensively for a future wider build).
+// Run against `AVAILABLE_SCHEMAS` throughout (no hardcoded schema `describe`); the one remaining
+// real, disclosed schema-observable divergence (curve item class) is handled with a small
+// `curveItemClass(schema)` helper below.
 
 import { describe, expect, test } from "vitest";
 import { addContext } from "../../../src/api/context/addContext";
@@ -84,20 +95,22 @@ function context(
 
 /** The settings-order-bug error (see this file's/`addDoorRepresentation.ts`'s own header comment). */
 const SETTINGS_BUG_ERROR = /evaluation-order bug/;
-/** `util/shapeBuilder.ts`'s own defined-type-creation error (`.rectangle()`/
- * `.polyline(closed=true)`'s `IfcLineIndex`/`IfcArcIndex` gap) -- still real on IFC4/IFC4X3,
- * and now the ONLY blocked outcome left in this file (the `.profile()`-level `Dim` gap this
- * file used to also pin, via a `DIM_ERROR` regex, is closed on IFC2X3 as of Phase EX-2 -- see
- * this file's own header comment -- and `rectangle()`/`polyline(closed=true)` always runs
- * before `.profile()`/`extrude()`'s auto-wrap in every code path this file exercises, so
- * IFC4/IFC4X3 never reach the now-fixed `Dim` gap in the first place, before or after this
- * chunk). */
-const DEFINED_TYPE_ERROR = /Attribute access is only supported on entity instances/;
 
 /**
- * Asserts the MINIMAL, structural-sanity shape a genuinely-unblocked IFC2X3
- * `addDoorRepresentation`/`createIfcDoorLining`/`createIfcBox` call now produces (see this
- * file's own header comment) -- deliberately not a full geometric-correctness check.
+ * `util/shapeBuilder.ts`'s `rectangle()`/`polyline(closed=true)` build a plain `IfcPolyline` on
+ * IFC2X3 (no `IfcIndexedPolyCurve`/`IfcLineIndex`/`IfcArcIndex` in that schema), but an
+ * `IfcIndexedPolyCurve` on IFC4/IFC4X3 -- the one real, disclosed, schema-observable difference
+ * left now that both primitive-layer gaps this file's own header comment describes are closed on
+ * every schema (see that comment for the full history).
+ */
+function curveItemClass(schema: string): string {
+	return schema === "IFC2X3" ? "IfcPolyline" : "IfcIndexedPolyCurve";
+}
+
+/**
+ * Asserts the MINIMAL, structural-sanity shape a genuinely-unblocked
+ * `addDoorRepresentation`/`createIfcDoorLining`/`createIfcBox` call now produces on ANY schema
+ * (see this file's own header comment) -- deliberately not a full geometric-correctness check.
  */
 function expectStructurallySaneRepresentation(
 	result: EntityInstance | null | undefined,
@@ -174,63 +187,39 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addDoorRepresentation (%s)", (sch
 		file.dispose();
 	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): PR #179 fixed the native
-	// `attribute_value_shim.cpp` gate the `else` branch below pinned via
-	// `DEFINED_TYPE_ERROR` (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) -- IFC4/IFC4X3 no
-	// longer throw here either, so this test's own `if (schema === "IFC2X3")` real
-	// assertions should now apply on ALL schemas. The IFC2X3 branch already passes
-	// today (unaffected, kept running); real expected result for IFC4/IFC4X3 is the
-	// same structural-sanity shape the IFC2X3 branch already asserts -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skipIf(schema !== "IFC2X3")(
-		"ELEVATION_VIEW: genuinely unblocked on IFC2X3 once both dimensions are supplied (bypassing the settings bug); still blocked earlier on IFC4/IFC4X3",
-		() => {
-			const file = createTestFile(schema);
-			const body = context(file, "ELEVATION_VIEW");
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 (see this
+	// file's own header comment) -- once both dimensions bypass the settings bug, this
+	// completes end-to-end everywhere now.
+	test("ELEVATION_VIEW: genuinely unblocked on every schema once both dimensions are supplied (bypassing the settings bug)", () => {
+		const file = createTestFile(schema);
+		const body = context(file, "ELEVATION_VIEW");
 
-			if (schema === "IFC2X3") {
-				const rep = addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 });
-				expectStructurallySaneRepresentation(rep as EntityInstance, {
-					identifier: "Body",
-					type: "Curve3D",
-					itemCount: 1,
-					itemClass: "IfcPolyline",
-				});
-			} else {
-				expect(() => addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 })).toThrow(
-					DEFINED_TYPE_ERROR,
-				);
-			}
+		const rep = addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 });
+		expectStructurallySaneRepresentation(rep as EntityInstance, {
+			identifier: "Body",
+			type: "Curve3D",
+			itemCount: 1,
+			itemClass: curveItemClass(schema),
+		});
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3")(
-		"PLAN_VIEW (non-Annotation): genuinely unblocked on IFC2X3 once both dimensions are supplied; still blocked earlier on IFC4/IFC4X3",
-		() => {
-			const file = createTestFile(schema);
-			const body = context(file, "PLAN_VIEW");
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test("PLAN_VIEW (non-Annotation): genuinely unblocked on every schema once both dimensions are supplied", () => {
+		const file = createTestFile(schema);
+		const body = context(file, "PLAN_VIEW");
 
-			if (schema === "IFC2X3") {
-				const rep = addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 });
-				expectStructurallySaneRepresentation(rep as EntityInstance, {
-					identifier: "Body",
-					type: "Curve2D",
-					itemCount: 4,
-				});
-			} else {
-				expect(() => addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 })).toThrow(
-					DEFINED_TYPE_ERROR,
-				);
-			}
+		const rep = addDoorRepresentation(file, { context: body, overallHeight: 2.0, overallWidth: 0.9 });
+		expectStructurallySaneRepresentation(rep as EntityInstance, {
+			identifier: "Body",
+			type: "Curve2D",
+			itemCount: 4,
+		});
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 
 	if (schema === "IFC2X3") {
 		test("PLAN_VIEW on IFC2X3: genuinely UNBLOCKED -- every lining/panel polyline/rectangle succeeds, producing a real Curve2D representation, not a partial-progress throw", () => {
@@ -342,156 +331,102 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.addDoorRepresentation (%s)", (sch
 		fileRight.dispose();
 	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3").each(SUPPORTED_DOOR_TYPES)(
-		"MODEL_VIEW (default target view): operationType %s is genuinely unblocked on IFC2X3; still blocked earlier on IFC4/IFC4X3",
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test.each(SUPPORTED_DOOR_TYPES)(
+		"MODEL_VIEW (default target view): operationType %s is genuinely unblocked on every schema",
 		(operationType) => {
 			const file = createTestFile(schema);
 			const body = context(file, "MODEL_VIEW");
 
-			if (schema === "IFC2X3") {
-				const rep = addDoorRepresentation(file, {
-					context: body,
-					overallHeight: 2.0,
-					overallWidth: 0.9,
-					operationType,
-				});
-				expectStructurallySaneRepresentation(rep as EntityInstance, {
-					identifier: "Body",
-					type: "SweptSolid",
-					itemCount: MODEL_VIEW_ITEM_COUNTS[operationType],
-					itemClass: "IfcExtrudedAreaSolid",
-				});
-			} else {
-				expect(() =>
-					addDoorRepresentation(file, {
-						context: body,
-						overallHeight: 2.0,
-						overallWidth: 0.9,
-						operationType,
-					}),
-				).toThrow(DEFINED_TYPE_ERROR);
-			}
+			const rep = addDoorRepresentation(file, {
+				context: body,
+				overallHeight: 2.0,
+				overallWidth: 0.9,
+				operationType,
+			});
+			expectStructurallySaneRepresentation(rep as EntityInstance, {
+				identifier: "Body",
+				type: "SweptSolid",
+				itemCount: MODEL_VIEW_ITEM_COUNTS[operationType],
+				itemClass: "IfcExtrudedAreaSolid",
+			});
 
 			file.dispose();
 		},
 	);
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3")(
-		"MODEL_VIEW: a partOfProduct is accepted (never itself the cause of a different error); genuinely unblocked on IFC2X3",
-		() => {
-			const file = createTestFile(schema);
-			const body = context(file, "MODEL_VIEW");
-			const door = createEntity(file, { ifcClass: "IfcDoor" });
-			const productShape = file.createEntity("IfcProductDefinitionShape", null, null, []);
-			door.set("Representation", productShape);
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test("MODEL_VIEW: a partOfProduct is accepted (never itself the cause of a different error); genuinely unblocked on every schema", () => {
+		const file = createTestFile(schema);
+		const body = context(file, "MODEL_VIEW");
+		const door = createEntity(file, { ifcClass: "IfcDoor" });
+		const productShape = file.createEntity("IfcProductDefinitionShape", null, null, []);
+		door.set("Representation", productShape);
 
-			if (schema === "IFC2X3") {
-				const rep = addDoorRepresentation(file, {
-					context: body,
-					overallHeight: 2.0,
-					overallWidth: 0.9,
-					partOfProduct: productShape,
-				});
-				expectStructurallySaneRepresentation(rep as EntityInstance, {
-					identifier: "Body",
-					type: "SweptSolid",
-					itemCount: MODEL_VIEW_ITEM_COUNTS.SINGLE_SWING_LEFT,
-					itemClass: "IfcExtrudedAreaSolid",
-				});
-			} else {
-				expect(() =>
-					addDoorRepresentation(file, {
-						context: body,
-						overallHeight: 2.0,
-						overallWidth: 0.9,
-						partOfProduct: productShape,
-					}),
-				).toThrow(DEFINED_TYPE_ERROR);
-			}
+		const rep = addDoorRepresentation(file, {
+			context: body,
+			overallHeight: 2.0,
+			overallWidth: 0.9,
+			partOfProduct: productShape,
+		});
+		expectStructurallySaneRepresentation(rep as EntityInstance, {
+			identifier: "Body",
+			type: "SweptSolid",
+			itemCount: MODEL_VIEW_ITEM_COUNTS.SINGLE_SWING_LEFT,
+			itemClass: "IfcExtrudedAreaSolid",
+		});
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3")(
-		"custom liningProperties/panelProperties are accepted; genuinely unblocked on IFC2X3",
-		() => {
-			const file = createTestFile(schema);
-			const body = context(file, "MODEL_VIEW");
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test("custom liningProperties/panelProperties are accepted; genuinely unblocked on every schema", () => {
+		const file = createTestFile(schema);
+		const body = context(file, "MODEL_VIEW");
 
-			if (schema === "IFC2X3") {
-				const rep = addDoorRepresentation(file, {
-					context: body,
-					overallHeight: 2.1,
-					overallWidth: 1.0,
-					liningProperties: { liningDepth: 0.1, liningThickness: 0.08, transomThickness: 0.05 },
-					panelProperties: { frameDepth: 0.05, frameThickness: 0.04, panelWidth: 0.9 },
-				});
-				expectStructurallySaneRepresentation(rep as EntityInstance, {
-					identifier: "Body",
-					type: "SweptSolid",
-					itemCount: 12,
-					itemClass: "IfcExtrudedAreaSolid",
-				});
-			} else {
-				expect(() =>
-					addDoorRepresentation(file, {
-						context: body,
-						overallHeight: 2.1,
-						overallWidth: 1.0,
-						liningProperties: { liningDepth: 0.1, liningThickness: 0.08, transomThickness: 0.05 },
-						panelProperties: { frameDepth: 0.05, frameThickness: 0.04, panelWidth: 0.9 },
-					}),
-				).toThrow(DEFINED_TYPE_ERROR);
-			}
+		const rep = addDoorRepresentation(file, {
+			context: body,
+			overallHeight: 2.1,
+			overallWidth: 1.0,
+			liningProperties: { liningDepth: 0.1, liningThickness: 0.08, transomThickness: 0.05 },
+			panelProperties: { frameDepth: 0.05, frameThickness: 0.04, panelWidth: 0.9 },
+		});
+		expectStructurallySaneRepresentation(rep as EntityInstance, {
+			identifier: "Body",
+			type: "SweptSolid",
+			itemCount: 12,
+			itemClass: "IfcExtrudedAreaSolid",
+		});
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3")(
-		"createIfcDoorLining (exported, matches real Python's public create_ifc_door_lining): the closed polyline is what's actually blocked on IFC4/IFC4X3; genuinely unblocked on IFC2X3",
-		() => {
-			const file = createTestFile(schema);
-			const builder = new ShapeBuilder(file);
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test("createIfcDoorLining (exported, matches real Python's public create_ifc_door_lining): genuinely unblocked on every schema", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
 
-			if (schema === "IFC2X3") {
-				const result = createIfcDoorLining(builder, [1.0, 0.05, 2.0], [0.05, 0.05]);
-				expect(result.isA()).toBe("IfcExtrudedAreaSolid");
-			} else {
-				expect(() => createIfcDoorLining(builder, [1.0, 0.05, 2.0], [0.05, 0.05])).toThrow(DEFINED_TYPE_ERROR);
-			}
+		const result = createIfcDoorLining(builder, [1.0, 0.05, 2.0], [0.05, 0.05]);
+		expect(result.isA()).toBe("IfcExtrudedAreaSolid");
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the
-	// ELEVATION_VIEW test above -- see that comment.
-	test.skipIf(schema !== "IFC2X3")(
-		"createIfcBox (exported, matches real Python's public create_ifc_box): genuinely unblocked on IFC2X3 via its own rectangle()/extrude() call; still blocked on IFC4/IFC4X3",
-		() => {
-			const file = createTestFile(schema);
-			const builder = new ShapeBuilder(file);
+	// Genuinely unblocked on ALL 3 SCHEMAS as of reference-parity chunk 5 of 5 -- same
+	// gate/reasoning as the ELEVATION_VIEW test above.
+	test("createIfcBox (exported, matches real Python's public create_ifc_box): genuinely unblocked on every schema via its own rectangle()/extrude() call", () => {
+		const file = createTestFile(schema);
+		const builder = new ShapeBuilder(file);
 
-			if (schema === "IFC2X3") {
-				const result = createIfcBox(builder, [0.9, 0.1, 0.03]);
-				expect(result.isA()).toBe("IfcExtrudedAreaSolid");
-			} else {
-				expect(() => createIfcBox(builder, [0.9, 0.1, 0.03])).toThrow(DEFINED_TYPE_ERROR);
-			}
+		const result = createIfcBox(builder, [0.9, 0.1, 0.03]);
+		expect(result.isA()).toBe("IfcExtrudedAreaSolid");
 
-			file.dispose();
-		},
-	);
+		file.dispose();
+	});
 });
 
 describe("api.geometry.addDoorRepresentation -- schema-agnostic pure-logic coverage", () => {
@@ -523,19 +458,18 @@ describe("api.geometry.addDoorRepresentation -- schema-agnostic pure-logic cover
 		expect(doorLShapeCheck(0.02, 0.05, 0.02, [0.01, 0.05])).toBe(true);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `DEFINED_TYPE_ERROR` pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) -- `createIfcDoorLining`
-	// no longer throws on IFC4. Real expected result: a real `IfcExtrudedAreaSolid`
-	// (matching the IFC2X3 branch's own assertion elsewhere in this file), for both the
-	// scalar and list `thickness` call shapes -- left to a follow-up chunk to verify.
-	test.skip("createIfcDoorLining accepts a single scalar thickness (applied to both SIDE and TOP), matching real Python's Union[list[float], float]", () => {
+	// Genuinely unblocked as of reference-parity chunk 5 of 5 (see this file's own header
+	// comment) -- `createIfcDoorLining` no longer throws on IFC4. Re-verified directly:
+	// a real `IfcExtrudedAreaSolid` (matching the list-`thickness` call shape's own
+	// assertion elsewhere in this file) for the scalar `thickness` call shape too.
+	test("createIfcDoorLining accepts a single scalar thickness (applied to both SIDE and TOP), matching real Python's Union[list[float], float]", () => {
 		const file = createTestFile("IFC4");
 		const builder = new ShapeBuilder(file);
 
-		// Same disclosed blocker either way -- this just confirms the scalar-vs-list call
-		// shape doesn't change which error is thrown.
-		expect(() => createIfcDoorLining(builder, [1.0, 0.05, 2.0], 0.05)).toThrow(DEFINED_TYPE_ERROR);
+		// Same call site either way -- this just confirms the scalar-vs-list call shape
+		// produces the same real, non-throwing result.
+		const result = createIfcDoorLining(builder, [1.0, 0.05, 2.0], 0.05);
+		expect(result.isA()).toBe("IfcExtrudedAreaSolid");
 
 		file.dispose();
 	});

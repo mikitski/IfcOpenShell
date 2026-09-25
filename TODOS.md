@@ -914,9 +914,27 @@ now-fixed gate, already diagnosed in this entry's own UPDATE history below unles
   downstream of `guessType`'s `Dim` dispatch; on closer inspection during this chunk's own full-suite
   run, at least part of each of these files' newly-failing cases trace to THIS gate too (standalone
   measure/defined-type construction inside the same geometry helpers), not solely the separate
-  EXPRESS-DERIVE gate -- both gates are real and independent, and untangling exactly which failure
-  belongs to which gate file-by-file is left to whichever follow-up chunk actually flips these
-  files' assertions, not re-diagnosed line-by-line here.
+  EXPRESS-DERIVE gate -- both gates are real and independent. **DONE (chunk 5 of 5, the LAST chunk of
+  this backlog): all 85 tests across these 4 files un-skipped and flipped to real, verified
+  assertions on ALL 3 schemas** -- by the time this chunk ran, the separate EXPRESS-DERIVE `.get
+  ("Dim")` gap these 4 files ALSO hit (`util.representation.guessType`'s own entry below) had
+  independently finished closing for IFC4/IFC4X3 too (Phase EX-2's later, per-schema `calc_*`-porting
+  chunks, PRs already merged well before this one -- see that entry's "UPDATE" through "UPDATE 5"),
+  so BOTH gates this file group depends on were already closed on every schema going in. Re-verified
+  directly (not assumed) with a throwaway script against a fresh, from-scratch multi-schema native
+  rebuild before touching any test: every one of the 85 previously-skipped cases now produces a real,
+  non-throwing result on IFC2X3, IFC4, AND IFC4X3 alike, with item counts/structure identical across
+  schemas (the only schema-observable difference being which concrete curve class `ShapeBuilder
+  .rectangle()`/`.polyline(closed=true)` build -- `IfcPolyline` on IFC2X3, `IfcIndexedPolyCurve` on
+  IFC4/IFC4X3, a real, pre-existing, already-disclosed `util/shapeBuilder.ts` finding, not new here).
+  Full-suite, from-scratch multi-schema rebuild, before vs. after this chunk alone (same native
+  build both times): 11039 passed/150 skipped -> 11124 passed/65 skipped (11189 total either way,
+  0 failures both times) -- exactly the 85-test delta this chunk's own scope predicts, no more, no
+  less. No test in any of these 4 files needed to stay skipped or be re-attributed to a different
+  gap; deep geometric-fidelity verification (exact panel/lining/join/mitre placement per
+  operationType/partitionType/connection shape, on any schema) remains real, disclosed, scoped-out
+  follow-up work, comparable in size to its own dedicated verification chunk, per each file's own
+  test-file header comment.
 
 **What this resolution does NOT cover (left to follow-up, module-grouped chunks, per this entry's own
 established phasing recommendation):** flipping each of the 29 files above from `test.skip`/
@@ -927,7 +945,13 @@ owner/reviewer can independently verify the *correct* unblocked value (not just 
 against real Python before un-skipping and flipping its assertions. IFC4/IFC4X3's own separate
 EXPRESS-DERIVE `.get("Dim")` gap (this file's own dedicated entry below, "`util.representation
 .guessType`'s `Curve2D`/.../ blocked by the pre-existing `entityInstance.ts` DERIVED-attribute gap")
-remains genuinely unresolved for those two schemas and is unrelated to (though sometimes co-occurring
+remained genuinely unresolved for those two schemas AS OF THIS PARAGRAPH'S OWN 2026-09-23 WRITING --
+**stale as of chunk 5 of 5 (this backlog's LAST chunk): that entry's own later "UPDATE" through
+"UPDATE 5" independently closed it for IFC4/IFC4X3 too, well before this backlog's own chunk 5 ran**
+(see that entry's own updates for the full per-schema history, and this entry's own file-list item
+for `addDoorRepresentation.test.ts`/etc. above for how that combined with THIS gate's own fix to
+unblock all 85 of those files' tests). This sentence is left otherwise unrewritten (historical
+narrative describing what was true at the time), and is unrelated to (though sometimes co-occurring
 with, per `addDoorRepresentation.test.ts`/etc. above) this entry's own gate.
 
 <details><summary>Original TODO text</summary>
