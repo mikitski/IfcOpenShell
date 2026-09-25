@@ -366,11 +366,62 @@ EX-4 needs are already fully available. The first real dispatch can be an ordina
 
 ### Phase EX-5 — final integration + test-fidelity backfill
 
-Wire Phase EX-3's base checks and Phase EX-4's rule execution into one unified `validate(file,
-{rules?: boolean})` TS entry point matching real Python's own option shape. Port real Python's own
-`validate.py`/rule-execution test suite for fidelity verification once the file(s) and their sizes
-are confirmed (not yet investigated in detail — do so as part of scoping this phase, following this
-project's own established test-fidelity-backfill precedent from `api.alignment`).
+**Scoped 2026-09-25** (dedicated investigation, mirroring the Phase EX-0/EX-3/EX-4 precedent), now that
+all 1,823 WHERE-rule classes across all 3 schemas are ported (Phase EX-4 fully complete). Read real
+Python's own integration point directly, not assumed: `validate.py`'s own `validate(f, logger,
+express_rules=False)` (line 419) does the unification in exactly 5 lines at its own tail (line 625-629):
+`if express_rules: ... ifcopenshell.express.rule_executor.run(f, logger)`. Nothing more — no shared
+state, no combined pass, just "run the rule engine too, appending to the same logger." This port's own
+`validate()` (`src/validate.ts`) and `executeRules()` (`src/express/ruleExecutor.ts`) already share the
+exact same `(f: IfcFile) => ValidationError[]` return shape (confirmed directly against both function
+signatures) — unlike real Python's own stateful, duck-typed `Logger`/`json_logger` object, this port's
+own array-returning design (locked back in Phase EX-3's own scoping specifically to avoid a Phase EX-5
+redesign) means the unification is genuinely a small, mechanical wiring change: extend `validate()`'s own
+signature to `validate(f: IfcFile, options?: { rules?: boolean }): ValidationError[]`, matching real
+Python's own `express_rules` parameter shape, and concatenate `executeRules(f)`'s own results when
+`options.rules` is `true`. **One design point the dispatch should investigate and decide, not
+pre-answered here**: `ruleExecutor.ts` (and transitively `whereRules/index.ts`, which side-effect-imports
+all 3 schema rule modules, ~15,000+ lines of rule definitions) is currently NOT imported by `validate.ts`
+at all — wiring the two together creates a new import edge from `validate.ts` into the entire rules
+registry. Real Python's own `validate.py` unconditionally imports `ifcopenshell.express.rule_executor` at
+module scope regardless of whether `express_rules` is ever passed `True`, so this port doing the same
+(a static top-of-file import, not a dynamic/lazy one) would be a faithful match — but confirm this is
+actually acceptable for this port's own module-loading/tree-shaking conventions before committing to it,
+disclosing whichever choice is made.
+
+**Test-fidelity backfill, the substantial remaining piece**: unlike the unification wiring, this is
+real, non-trivial work. Read both real Python test files directly, not assumed: `test/test_validate.py`
+(67 lines) and `test/test_rules.py` (53 lines) are separate, independent pytest suites — **critically,
+neither one exercises the unified `express_rules=True` path**; `test_validate.py` calls bare `validate()`
+with no rules, and `test_rules.py` calls `rule_executor.run()` directly, bypassing `validate()` entirely.
+This means Phase EX-3's own `test/validate.orchestrator.test.ts` (chunk 4, 38 real fixtures from
+`test/fixtures/validate/`) already IS the full real-world fidelity backfill for the non-rules half of
+`validate.py` — nothing new needed there. **What's genuinely missing**: an equivalent orchestrator suite
+for `test_rules.py`'s own real 138 `.ifc` fixtures in `test/fixtures/rules/` (already vendored
+byte-identical into `src/ifcopenshell-ts/test/fixtures/rules/`, confirmed via `diff` back when Phase EX-4
+was first scoped) run end-to-end through `executeRules()` — every one of Phase EX-4's 18 implementation
+chunks tested its own ported rules with hand-rolled synthetic fixtures (`create("IfcXxx")` +
+`set(...)`), never against these real, production-derived `.ifc` files exercising many rules
+simultaneously in combination. **Fixture distribution, independently confirmed**: 138 total — 112
+IFC2X3, 18 IFC4, 8 IFC4X3_ADD2 (roughly proportional to relative rule-count share, not fixture-count
+share, since IFC2X3 was both the first schema ported and evidently the best-covered by real Python's own
+existing fixture suite). **Naming/parsing convention, confirmed directly against
+`test/fixture_generate.py`'s own `parse_result()`**: `pass-*.ifc` expects zero violations; `fail-*.ifc`
+expects exactly 1; `fail-expected-N-*.ifc` expects exactly `N` — the exact same convention Phase EX-3's
+own `validate.orchestrator.test.ts` already implements for its own 38 fixtures, directly reusable here.
+**Expect real divergences, following Phase EX-3's own precedent** (13 of 38 fixtures there needed
+disclosed, pinned divergence from the naive expected count, all traced to already-known, already-locked
+scope decisions) — do not assume all 138 will match on the first pass; investigate every mismatch back
+to a real cause (an already-disclosed primitive gap, a genuine new finding, or a real bug in this port)
+rather than silently adjusting the expected count.
+
+**Estimated scope: a single chunk.** No new native primitive work is anticipated (both halves already
+work independently, at full fidelity, across all 3 schemas); the unification wiring is mechanical; the
+138-fixture backfill is comparable in kind (though larger in fixture count) to Phase EX-3's own single
+chunk-4 backfill effort, which combined its own orchestrator wiring with its own 38-fixture backfill in
+one PR. If the actual dispatch finds the 138-fixture investigation surfaces enough genuine, distinct
+findings to warrant it, splitting into a second chunk is a reasonable mid-flight call for the dispatch
+itself to make and disclose, not a decision to force in advance here.
 
 ## 5. Definition of done for this plan
 
