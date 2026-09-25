@@ -4350,6 +4350,50 @@ helpers, not specific to the WHERE-rules work) to answer "is X a subtype of Y" f
 than one direct EXPRESS supertype would get a false negative. The WHERE-rules engine itself is NOT
 affected, since it dispatches via real `byType()`, not these helpers.
 
+### `runtimeShim.ts`'s `expressGetAttr` catches ANY exception when reading an attribute, unlike real Python's `getattr(obj, name, default)`, which only swallows `AttributeError`
+
+**Found:** 2026-09-24, Phase EX-5 chunk 1 (PR #247), while wiring up the real 138-fixture
+`test/fixtures/rules/` suite (`test/rules.orchestrator.test.ts`) and investigating why a pre-existing
+pinned regression test (`ifc4.test.ts`/`ifc4x3.test.ts`,
+`IfcRationalBSplineSurfaceWithKnots.WeightValuesGreaterZero`) started behaving differently once that
+chunk's own `expressGetItem` fix landed (see below).
+
+**Real Python:** `rule_compiler.py`'s `express_getattr(aggr, name, default)` is `v = getattr(aggr, name,
+default); return default if v is None else v` -- i.e. it relies entirely on Python's builtin `getattr`,
+which substitutes `default` ONLY for a genuine `AttributeError` (the attribute doesn't exist). Any OTHER
+exception raised while evaluating the attribute (e.g. a `TypeError` thrown deep inside a DERIVE formula
+via `entity_instance.__getattr__` calling a `calc_*` function) propagates straight through `getattr`
+uncaught -- confirmed directly against `rule_compiler.py`'s own source and by running real Python's
+installed `ifcopenshell` package end-to-end against a concrete input that exercises this exact path.
+
+**This port:** `runtimeShim.ts`'s `expressGetAttr` wraps its whole attribute-read in a blanket
+`try { ... } catch { return defaultValue; }`, silently substituting `INDETERMINATE` for ANY thrown
+exception, not just a "missing attribute" case. Concretely: `IfcRationalBSplineSurfaceWithKnots`'s
+`Weights` DERIVE attribute (`calc_IfcRationalBSplineSurfaceWithKnots_Weights` -> `IfcMakeArrayOfArray`)
+has an already-disclosed, verbatim-preserved upstream bug that unconditionally throws a `TypeError` for
+any well-formed surface (see `rules/ifc4.ts`'s own header comment) -- real Python's own rule genuinely
+throws for this input (confirmed empirically against the real installed package), while this port's
+`WeightValuesGreaterZero` now silently reports NO violation for the identical input, because
+`expressGetAttr(self, "Weights", INDETERMINATE)` swallows that `TypeError` into `INDETERMINATE` instead
+of propagating it. (Before Phase EX-5's own `expressGetItem` fix landed in the same PR, this was masked
+by an unrelated crash one line later, which is what the old pinned test was actually observing -- see
+that PR's `ifc4.test.ts`/`ifc4x3.test.ts` diff for the full history.)
+
+**Not fixed.** `expressGetAttr` is consumed by essentially every one of Phase EX-2's/EX-4's ~1,823
+already-ported, already-tested WHERE-rules and DERIVE-attribute call sites -- narrowing its catch to
+mirror Python's `AttributeError`-only semantics is a broad, cross-cutting change (what counts as "this
+port's equivalent of `AttributeError`" needs its own design pass) requiring a full re-verification sweep
+across all 3 schemas' rule/test files, not a small, well-scoped fix. Tracked here rather than folded into
+Phase EX-5.
+
+**Impact:** any rule (or DERIVE calculation) that reads an attribute whose value would genuinely throw in
+real Python for a non-"missing attribute" reason will silently diverge from real Python's behavior in
+this port -- real Python raises/reports a violation, this port swallows it to `INDETERMINATE` and
+typically reports no violation. Currently confirmed for exactly one rule
+(`IfcRationalBSplineSurfaceWithKnots.WeightValuesGreaterZero`, itself already unconditionally blocked by
+the separate `IfcMakeArrayOfArray` bug regardless of this gap), but the underlying `expressGetAttr`
+mechanism is generic and could mask other cases.
+
 **Depends on / blocked by:** nothing blocks other work in the meantime -- no code in this port currently
 relies on `getSupertypes()`/`isA()` returning a complete answer for a multiply-inherited entity as far as
 this finding's own investigation went (not exhaustively audited). This entry tracks the open question for
