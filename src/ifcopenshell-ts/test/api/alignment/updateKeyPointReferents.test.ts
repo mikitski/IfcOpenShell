@@ -15,15 +15,29 @@
 //    `test_provided_rel_nests_with_wrong_relating_object_raises_type_error`/
 //    `test_no_real_segments_produces_no_referents`/`test_clear_true_removes_old
 //    _referents_and_psets`.
-// 2. Every scenario with at least one REAL segment throws at one of 2 independent,
-//    already-disclosed primitive-layer gaps (see
+// 2. Every scenario with at least one REAL segment used to throw at one of 2
+//    independent, already-disclosed primitive-layer gaps (see
 //    `../../../src/api/alignment/updateKeyPointReferents.ts`'s own header comment for
-//    the full writeup, confirmed EMPIRICALLY against this chunk's own built native
-//    addon before writing this file) -- pinned here as dedicated regression tests
-//    (one per gap), plus a test confirming the `relNests`-from-an-ancestor naming
-//    override (real Python's own `test_rel_nests_from_ancestor_used_for_naming_and
-//    _nesting`) still resolves correctly for the ONE referent that gets created before
-//    the throw.
+//    the full writeup).
+//
+// **Reference-parity chunk 4 of 5 update (2026-09-25):** `TODOS.md`'s "EntityInstance
+// .setByIndex/IfcFile.createEntity ..." gate (PR #179) is now fixed, and the
+// `editPset`-new-property gate (`api.pset` chunk) was already flipped in chunk 2 of 5.
+// The non-composite-curve scenarios below (this file's own hand-rolled layouts never
+// attach an "Axis" representation to their alignment, so `getLayoutCurve` returns
+// `null` and every key-point referent takes the fallback-placement branch) now succeed
+// completely, creating one real `IfcReferent` PER key point (not just the first one)
+// -- flipped to their real, verified assertions, confirmed against this chunk's own
+// freshly-built native addon.
+//
+// The composite-curve scenario, however, turned out to be MORE complicated than this
+// file's own original pinning comment assumed -- see
+// `addPositioningReferent.test.ts`'s own detailed writeup of the same finding: fixing
+// the `IfcLengthMeasure` gate un-blocks `IfcPointByDistanceExpression` construction,
+// but `updateFallbackPosition`'s own `getAxis2placement` call then hits a SEPARATE,
+// already-tracked, still-open `ifcopenshell.geom` gap (`TODOS.md`'s dedicated
+// `getAxis2placement` entry). Left skipped rather than forced to a fudged "succeeds"
+// assertion.
 
 import { describe, expect, test } from "vitest";
 import { updateKeyPointReferents } from "../../../src/api/alignment/updateKeyPointReferents";
@@ -33,7 +47,7 @@ import type { IfcFile } from "../../../src/file";
 import * as guid from "../../../src/guid";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
-const BLOCKED_ERROR = "Attribute access is only supported on entity instances";
+const GEOM_GAP_ERROR = /ifcopenshell\.geom/;
 
 function alignmentAt(file: IfcFile, name: string, coordinates: readonly [number, number, number]): EntityInstance {
 	return file.createEntity(
@@ -175,34 +189,39 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.updateKeyP
 		});
 	});
 
-	describe("blocked by 2 independent, already-disclosed primitive-layer gaps (see updateKeyPointReferents.ts's own header comment)", () => {
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp`
-		// gate the `editPset` call inside `updateKeyPointReferents` threw through
-		// (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..." entry,
-		// now RESOLVED for the shared gate) -- no longer throws here. Real expected
-		// result: the same "P.O.B." `IfcReferent` this test already asserts, with
-		// its `Pset_Stationing.Station === 0.0` actually written -- left to a
-		// follow-up module-grouped chunk to verify and flip.
-		test.skip("a real, non-composite-curve layout: creates ONE real IfcReferent (the P.O.B. marker) then throws at the disclosed editPset gap", () => {
+	describe("real segments", () => {
+		// Reference-parity chunk 4 of 5: this layout has no "Axis" representation at
+		// all, so `getLayoutCurve` returns `null` and every key-point referent takes
+		// the fully-portable fallback-placement branch -- now succeeds completely for
+		// EVERY segment (P.O.B., the interior P.I., and P.O.E.), not just the first
+		// one. Verified against this chunk's own freshly-built native addon.
+		test("a real, non-composite-curve layout: creates one real IfcReferent per key point", () => {
 			const file = createTestFile("IFC4X3");
 			const alignment = alignmentAt(file, "A1", [0, 0, 0]);
 			const horizontal = buildHorizontalLayout(file, alignment, [100.0, 50.0]);
 
-			expect(() => updateKeyPointReferents(file, horizontal)).toThrow(BLOCKED_ERROR);
+			const nest = updateKeyPointReferents(file, horizontal);
 
 			const referents = file.byType("IfcReferent");
-			expect(referents).toHaveLength(1);
-			expect(referents[0].get("Name")).toBe("A1 0+000.000 (P.O.B.)");
-			expect(referents[0].get("PredefinedType")).toBe("POSITION");
+			expect(referents).toHaveLength(3);
+			expect(referents.map((r) => r.get("Name"))).toEqual([
+				"A1 0+000.000 (P.O.B.)",
+				"A1 0+100.000 (P.I.)",
+				"A1 0+150.000 (P.O.E.)",
+			]);
+			expect(referents.every((r) => r.get("PredefinedType") === "POSITION")).toBe(true);
+			expect(referents.every((r) => (r.get("ObjectPlacement") as EntityInstance).isA("IfcLocalPlacement"))).toBe(true);
+			expect(nest.get("RelatedObjects") as EntityInstance[]).toHaveLength(3);
 		});
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp`
-		// gate this test pinned (TODOS.md's "EntityInstance.setByIndex/
-		// IfcFile.createEntity ..." entry, now RESOLVED for the shared gate) --
-		// no longer throws here. Real expected result: a real `IfcReferent`/
-		// `Pset_Stationing.Station` for the composite-curve layout (this file's
-		// own header comment) -- left to a follow-up module-grouped chunk.
-		test.skip("a real composite-curve layout: throws at the disclosed IfcLengthMeasure gap, before any IfcReferent is created", () => {
+		// Reference-parity chunk 4 of 5: STILL blocked, but no longer by the gate this
+		// file used to pin -- see this file's own header comment for the full writeup.
+		// Fixing the `IfcLengthMeasure` gate lets `IfcPointByDistanceExpression`
+		// construction succeed, but `updateFallbackPosition`'s own `getAxis2placement`
+		// call then hits the SEPARATE, already-tracked `ifcopenshell.geom` gap. Left
+		// skipped (not flipped to a fudged "succeeds" assertion) until
+		// `ifcopenshell.geom` lands.
+		test.skip("a real composite-curve layout: throws at the disclosed ifcopenshell.geom gap (not the now-fixed IfcLengthMeasure gap), before any IfcReferent is created", () => {
 			const file = createTestFile("IFC4X3");
 			const alignment = alignmentAt(file, "A1", [0, 0, 0]);
 			const horizontal = buildHorizontalLayout(file, alignment, [100.0, 50.0]);
@@ -234,18 +253,15 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.updateKeyP
 				file.createEntity("IfcProductDefinitionShape", null, null, [shapeRepresentation]),
 			);
 
-			expect(() => updateKeyPointReferents(file, horizontal)).toThrow(BLOCKED_ERROR);
+			expect(() => updateKeyPointReferents(file, horizontal)).toThrow(GEOM_GAP_ERROR);
 			expect(file.byType("IfcReferent")).toHaveLength(0);
 		});
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp`
-		// gate this test pinned (TODOS.md's "EntityInstance.setByIndex/
-		// IfcFile.createEntity ..." entry, now RESOLVED for the shared gate) --
-		// no longer throws here. Real expected result: the same ancestor-named
-		// "P.O.B." `IfcReferent` this test already asserts, now with
-		// `Pset_Stationing.Station` actually written too -- left to a follow-up
-		// module-grouped chunk to verify and flip.
-		test.skip("a rel_nests from an ancestor alignment names the (one, pre-throw) referent after the ancestor, not the direct parent", () => {
+		// Real Python: `test_rel_nests_from_ancestor_used_for_naming_and_nesting`.
+		// Reference-parity chunk 4 of 5: now succeeds completely -- both key-point
+		// referents are named after the ancestor ("A1 "), not the child ("Child of
+		// A1").
+		test("a rel_nests from an ancestor alignment names every referent after the ancestor, not the direct parent", () => {
 			const file = createTestFile("IFC4X3");
 			const parent = alignmentAt(file, "A1", [0, 0, 0]);
 			const child = file.createEntity("IfcAlignment", guid.new(), null, "Child of A1");
@@ -254,12 +270,14 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.updateKeyP
 
 			const parentNest = file.createEntity("IfcRelNests", guid.new(), null, null, null, parent, []);
 
-			expect(() => updateKeyPointReferents(file, childHorizontal, parentNest)).toThrow(BLOCKED_ERROR);
+			const result = updateKeyPointReferents(file, childHorizontal, parentNest);
 
+			expect(result.equals(parentNest)).toBe(true);
+			expect((result.get("RelatingObject") as EntityInstance).equals(parent)).toBe(true);
 			const referents = file.byType("IfcReferent");
-			expect(referents).toHaveLength(1);
-			expect(referents[0].get("Name")).toBe("A1 0+000.000 (P.O.B.)");
-			expect((referents[0].get("Name") as string).includes("Child of")).toBe(false);
+			expect(referents).toHaveLength(2);
+			expect(referents.map((r) => r.get("Name"))).toEqual(["A1 0+000.000 (P.O.B.)", "A1 0+100.000 (P.O.E.)"]);
+			expect(referents.every((r) => !(r.get("Name") as string).includes("Child of"))).toBe(true);
 		});
 	});
 });

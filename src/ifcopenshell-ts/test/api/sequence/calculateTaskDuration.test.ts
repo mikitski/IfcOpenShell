@@ -60,32 +60,28 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.sequence.cal
 		expect((task.get("TaskTime") as EntityInstance).get("ScheduleDuration")).toBe("P2D");
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test's own fixture setup pinned (TODOS.md's "EntityInstance.setByIndex/
-	// IfcFile.createEntity ..." entry, "fourth consequence" -- now RESOLVED for the
-	// shared gate) -- the `editPset` call below no longer throws, so a real fixture
-	// (a `Pset_WorkControlCommon.WorkDayDuration` property with a real value) can
-	// now be built. Real expected result: `calculateTaskDuration`'s own
-	// `calculateSecondsPerWorkday` logic should read the custom workday duration
-	// back and compute `TaskTime.ScheduleDuration` accordingly -- this test should
-	// be rewritten as a real end-to-end assertion, not just a fixture-setup pin --
-	// left to a follow-up module-grouped chunk.
-	test.skip("calculating a task duration with a custom workday duration (blocked at fixture setup by the already-tracked editPset new-scalar-property gap)", () => {
-		// Building this fixture needs `editPset` to create a BRAND-NEW `WorkDayDuration`
-		// property on a just-created, still-empty `Pset_WorkControlCommon` pset -- the
-		// same already-tracked `TODOS.md` primitive-layer gap `api.alignment`'s own
-		// `addStationingReferent`/`addPositioningReferent`/`updateKeyPointReferents` chunks
-		// already disclosed (constructing a standalone, valued simple/defined-type
-		// instance). Not a bug in `calculateTaskDuration.ts` itself -- its own real
-		// `Pset_WorkControlCommon.WorkDayDuration`-reading logic (`calculateSecondsPerWorkday`)
-		// is ported completely and faithfully; there's simply no way to build a real fixture
-		// exercising that branch today. Pinned as a disclosed-throw regression instead of a
-		// real end-to-end assertion.
+	// Reference-parity chunk 4 of 5: `TODOS.md`'s "EntityInstance.setByIndex/
+	// IfcFile.createEntity ..." gate ("fourth consequence", `api.pset` chunk) was
+	// already flipped in chunk 2 of 5 -- the `editPset` call below no longer throws,
+	// so this fixture (a real `Pset_WorkControlCommon.WorkDayDuration` property) now
+	// builds successfully, and `calculateTaskDuration`'s own `calculateSecondsPerWorkday`
+	// logic correctly reads it back. Real Python:
+	// `test_calculating_a_task_duration_with_a_custom_workday_duration` -- verified
+	// against this chunk's own freshly-built native addon (`ScheduleDuration ===
+	// "P24D"`, matching real Python's own assertion exactly).
+	test("calculating a task duration with a custom workday duration", () => {
 		const file = createTestFile(schema);
 		createEntity(file, { ifcClass: "IfcProject" });
 		const schedule = addWorkSchedule(file, {});
 		const pset = addPset(file, { product: schedule, name: "Pset_WorkControlCommon" });
-		expect(() => editPset(file, { pset, properties: { WorkDayDuration: "PT2H" } })).toThrow();
+		editPset(file, { pset, properties: { WorkDayDuration: "PT2H" } });
+		const task = addTask(file, { workSchedule: schedule });
+		const resource = addResource(file, { ifcClass: "IfcLaborResource" });
+		const resourceTime = addResourceTime(file, { resource });
+		resourceTime.set("ScheduleWork", "PT48H");
+		assignProcess(file, { relatingProcess: task, relatedObject: resource });
+		calculateTaskDuration(file, { task });
+		expect((task.get("TaskTime") as EntityInstance).get("ScheduleDuration")).toBe("P24D");
 	});
 
 	test("failing to calculate if no schedule work usage", () => {

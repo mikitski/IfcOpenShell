@@ -2,14 +2,14 @@
 //
 // No real Python test exists for `edit_lag_time.py` (confirmed by listing
 // `test/api/sequence/` in src/ifcopenshell-python). Written directly from the real
-// source/docstring, pinning the CURRENT, disclosed, blocked `LagValue`-editing behavior
-// (see `../../../src/api/sequence/editLagTime.ts`'s own header comment: BLOCKED on every
-// schema whenever a non-null `LagValue` is actually supplied, by the already-tracked
-// `TODOS.md` primitive-layer gap) -- matching `assignLagTime.test.ts`'s own established
-// precedent for this exact gap. Editing any OTHER attribute is fully portable and tested
-// for real below (built against a bare, unpopulated `IfcLagTime` -- the only kind this
-// port can currently construct, see `../../../src/api/sequence/assignLagTime.ts`'s own
-// header comment for why).
+// source/docstring.
+//
+// **Reference-parity chunk 4 of 5 update (2026-09-25):** `TODOS.md`'s "EntityInstance
+// .setByIndex/IfcFile.createEntity ..." gate (PR #179, "sixteenth consequence") is now
+// fixed -- constructing the standalone `IfcRatioMeasure`/`IfcDuration` no longer
+// throws. Both `LagValue` branches are flipped to real, verified end-to-end assertions
+// -- confirmed against this chunk's own freshly-built native addon on both IFC4 and
+// IFC4X3.
 //
 // `IfcLagTime` doesn't exist on IFC2X3 at all (confirmed against `ifc2x3.d.ts`, matching
 // this module's own chunk 1 finding for `assignLagTime`), so IFC2X3 is excluded from the
@@ -17,6 +17,7 @@
 
 import { describe, expect, test } from "vitest";
 import { editLagTime } from "../../../src/api/sequence/editLagTime";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.sequence.editLagTime (%s)", (schema) => {
@@ -35,30 +36,22 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.sequence.edi
 		expect(lagTime.get("LagValue")).toBe(null);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- constructing the standalone
-	// `IfcRatioMeasure` no longer throws. Real expected result: `lagTime.LagValue`
-	// wraps a real `IfcRatioMeasure(1.5)` -- left to a follow-up chunk to verify.
-	test.skip("setting a numeric LagValue (IfcRatioMeasure branch) currently throws (pinned, disclosed primitive-layer gap)", () => {
+	test("setting a numeric LagValue wraps it in a real IfcRatioMeasure", () => {
 		const file = createTestFile(schema);
 		const lagTime = file.createEntity("IfcLagTime");
-		expect(() => editLagTime(file, { lagTime, attributes: { LagValue: 1.5 } })).toThrow(
-			"Attribute access is only supported on entity instances",
-		);
+		editLagTime(file, { lagTime, attributes: { LagValue: 1.5 } });
+		const lagValue = lagTime.get("LagValue") as EntityInstance;
+		expect(lagValue.isA("IfcRatioMeasure")).toBe(true);
+		expect(lagValue.getByIndex(0)).toBe(1.5);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- constructing the standalone
-	// `IfcDuration` no longer throws. Real expected result: `lagTime.LagValue` wraps
-	// a real `IfcDuration("P1D")` -- left to a follow-up chunk to verify and flip.
-	test.skip("setting a duration-string LagValue (IfcDuration branch) currently throws (pinned, disclosed primitive-layer gap)", () => {
+	test("setting a duration-string LagValue wraps it in a real IfcDuration", () => {
 		const file = createTestFile(schema);
 		const lagTime = file.createEntity("IfcLagTime");
-		expect(() => editLagTime(file, { lagTime, attributes: { LagValue: "P1D" } })).toThrow(
-			"Attribute access is only supported on entity instances",
-		);
+		editLagTime(file, { lagTime, attributes: { LagValue: "P1D" } });
+		const lagValue = lagTime.get("LagValue") as EntityInstance;
+		expect(lagValue.isA("IfcDuration")).toBe(true);
+		expect(lagValue.getByIndex(0)).toBe("P1D");
 	});
 });
 

@@ -132,36 +132,26 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createLayo
 		expect((related[0].get("DesignParameters") as EntityInstance).identity()).toBe(designParameters.identity());
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `create()`'s own `addStationingReferent` call transitively threw through
-	// (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..." entry, now
-	// RESOLVED for the shared gate) -- `create()` no longer throws, so this test's own
-	// "catch-and-recover a partially-constructed fixture from create()'s throw"
-	// strategy no longer applies (`thrown` is `undefined`, failing `expect(thrown)
-	// .toBeDefined()`). Real expected result: `create()` should complete fully and
-	// return a real `ali`/`curve` pair directly (no try/catch needed) -- the
+	// Reference-parity chunk 4 of 5: `TODOS.md`'s "EntityInstance.setByIndex/
+	// IfcFile.createEntity ..." gate (PR #179) is now fixed, and the `editPset`-
+	// new-property gate (`api.pset` chunk) was already flipped in chunk 2 of 5 -- see
+	// `create.test.ts`'s own detailed writeup of why `create()` is now UNCONDITIONALLY
+	// unaffected by either gate (its `IfcCompositeCurve` is always still empty at the
+	// point `addStationingReferent` runs, so it always takes the fallback-placement
+	// branch, never the composite-curve branch that would otherwise hit the SEPARATE,
+	// still-open `ifcopenshell.geom` gap). `create()` now succeeds completely and
+	// directly returns `ali` -- no try/catch needed. The
 	// `createLayoutSegment(...).toThrow(/_getSegmentEndpoint/)` assertion further down
-	// in this test is UNRELATED to this gate (a separate, still-real geometry-kernel
-	// blocker) and should be preserved when this test is rewritten -- left to a
-	// follow-up module-grouped chunk.
-	test.skip("test_create_no_geometry.py's own real fixture, recovered via catch-and-recover: create() throws (unconditionally, at addStationingReferent) but leaves a real, correctly-shaped IfcAlignment with nested horizontal+vertical layouts and a null curve -- createLayoutSegment with the real test's own literal LINE design parameters still throws at the SAME unconditional _getSegmentEndpoint gap, confirmed unreachable even for the simplest segment", () => {
+	// is UNRELATED to any of this (a separate, permanent, still-real geometry-kernel
+	// blocker -- see this file's own header comment) and is unchanged.
+	test("test_create_no_geometry.py's own real fixture: create() now succeeds, leaving a real IfcAlignment with nested horizontal+vertical layouts and a null curve -- createLayoutSegment with the real test's own literal LINE design parameters still throws at the SAME unconditional _getSegmentEndpoint gap, confirmed unreachable even for the simplest segment", () => {
 		const file = createTestFile("IFC4X3");
 
-		let thrown: unknown;
-		try {
-			create(file, "A1", true, false, false, 0.0);
-		} catch (e) {
-			thrown = e;
-		}
-		expect(thrown).toBeDefined();
+		const ali = create(file, "A1", true, false, false, 0.0);
 
-		// create()'s own real, portable prefix (entity creation, layout creation,
-		// nesting) ran before its own unconditional addStationingReferent throw --
-		// recover the partially-constructed alignment exactly as the real test's own
-		// `ali` return value would have been, had create() not been blocked.
 		const alignments = file.byType("IfcAlignment");
 		expect(alignments.length).toBe(1);
-		const ali = alignments[0];
+		expect(alignments[0].identity()).toBe(ali.identity());
 
 		const horizontalAlignment = getHorizontalLayout(ali);
 		const verticalAlignment = getVerticalLayout(ali);
@@ -200,9 +190,12 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createLayo
 		);
 
 		// The real, portable prefix (segment creation + nesting) still ran before the
-		// throw.
+		// throw. `create()` now succeeds completely, so its own trailing
+		// `_addZeroLengthSegment` loop already nested ONE zero-length segment into
+		// `horizontalAlignment` before this test's own manual `createLayoutSegment`
+		// call added a second -- 2 related objects total, not 1.
 		const segmentNests = (horizontalAlignment as EntityInstance).get("IsNestedBy") as EntityInstance[];
 		expect(segmentNests.length).toBe(1);
-		expect((segmentNests[0].get("RelatedObjects") as EntityInstance[]).length).toBe(1);
+		expect((segmentNests[0].get("RelatedObjects") as EntityInstance[]).length).toBe(2);
 	});
 });

@@ -868,18 +868,46 @@ now-fixed gate, already diagnosed in this entry's own UPDATE history below unles
   `editGeoreferencing` runs, and `editPset`'s own "update an EXISTING property" tier retains that
   type regardless of what the dead code would have computed.
 - `test/api/geometry/clipSolid.test.ts` (6), `test/api/geometry/clipSolidBounded.test.ts` (3) --
-  eleventh/twelfth consequence (`element`-provided branch's final `edit_pset` call).
+  eleventh/twelfth consequence (`element`-provided branch's final `edit_pset` call). **DONE (chunk 4
+  of 5)**: both files un-skipped and flipped to their real, verified assertions (the `element`-
+  provided branch now genuinely registers/appends the clipping result's STEP id in the target
+  element's `BBIM_Boolean` pset, on all 3 schemas, whether the pset is brand-new or pre-existing).
 - `test/api/alignment/addPositioningReferent.test.ts` (2), `test/api/alignment/addStationingReferent
   .test.ts` (4), `test/api/alignment/updateKeyPointReferents.test.ts` (3) -- fourteenth consequence
   (composite-curve placement branch plus `Pset_Stationing.Station` property creation); `test/api
   /alignment/create.test.ts` (3) and `test/api/alignment/createLayoutSegment.test.ts` (1) are the
   same underlying alignment-module standalone-value construction gate, not previously itemized by
-  file name in this entry's own alignment UPDATEs.
+  file name in this entry's own alignment UPDATEs. **DONE (chunk 4 of 5), with one real caveat found
+  along the way**: the non-composite-curve (fallback-placement) branch of all 3 first-listed files
+  is fully un-skipped and flipped to real, verified assertions (`Pset_Stationing.Station` now
+  genuinely gets written, and `updateKeyPointReferents` creates one real `IfcReferent` per key
+  point, not just the first one). `create.test.ts`/`createLayoutSegment.test.ts` are FULLY un-skipped
+  too, for a real, verified, structural reason specific to `create()`: its own `IfcCompositeCurve` is
+  always still EMPTY (`Segments === []`) at the exact point `addStationingReferent` runs (populated
+  only afterward, by `create()`'s own trailing `_addZeroLengthSegment` loop), so `create()`
+  unconditionally takes the fallback-placement branch itself, never the composite-curve one, on every
+  schema/option combination -- confirmed empirically, not assumed. HOWEVER, the dedicated
+  composite-curve-branch regression test in each of `addPositioningReferent.test.ts`/
+  `addStationingReferent.test.ts`/`updateKeyPointReferents.test.ts` (1 test each, 3 total) remains
+  genuinely skipped: fixing this entry's own gate un-blocks `IfcPointByDistanceExpression`
+  construction, but the very next real statement, `updateFallbackPosition`'s own
+  `getAxis2placement` call, then hits a SEPARATE, independent, already-tracked, still-open gap --
+  this file's own dedicated "`getAxis2placement`'s `IfcAxis2PlacementLinear` fallback needs
+  `ifcopenshell.geom`" entry (`util.placement` chunk, 2026-09-11) -- confirmed empirically against
+  this chunk's own freshly-built native addon (`getAxis2placement: cannot resolve a non-Cartesian
+  Location (IfcPointByDistanceExpression, no Coordinates attribute) without ifcopenshell.geom...`).
+  Each of the 3 tests was left `test.skip`'d (not force-passed) with an updated comment recording
+  this exact finding, rather than being flipped to a fudged "succeeds" assertion.
 - `test/api/sequence/assignLagTime.test.ts` (2) -- fifteenth consequence (`IfcDuration` construction,
-  every schema).
+  every schema). **DONE (chunk 4 of 5)**: un-skipped and flipped to the real, verified assertion (a
+  real `IfcLagTime` wrapping the constructed `IfcDuration`, assigned to `relSequence.TimeLag`).
 - `test/api/sequence/editLagTime.test.ts` (4), `test/api/sequence/calculateTaskDuration.test.ts` (2)
   -- same `IfcLagTime`/`IfcDuration`/`editPset`-property gate family, not previously itemized by file
-  name in this entry's own UPDATEs.
+  name in this entry's own UPDATEs. **DONE (chunk 4 of 5)**: both files un-skipped and flipped to
+  their real, verified assertions (`editLagTime`'s `IfcRatioMeasure`/`IfcDuration` `LagValue`
+  branches both now build correctly; `calculateTaskDuration`'s custom-workday-duration fixture now
+  builds and computes `ScheduleDuration === "P24D"`, matching real Python's own
+  `test_calculating_a_task_duration_with_a_custom_workday_duration` assertion exactly).
 - `test/api/geometry/addDoorRepresentation.test.ts` (31), `test/api/geometry/addWindowRepresentation
   .test.ts` (32), `test/api/geometry/regenerateWallRepresentation.test.ts` (18), `test/api/geometry
   /validateType.test.ts` (4) -- named in this entry's own EXPRESS-DERIVE-gap UPDATE (2026-09-22) as
