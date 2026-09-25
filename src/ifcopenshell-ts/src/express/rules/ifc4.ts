@@ -335,20 +335,46 @@ export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | 
  * Python: `IfcDotProduct` (`IFC4.py`) -- byte-identical to IFC2X3's own. Exported since
  * Phase EX-4, IFC4 chunk 3 (`whereRules/ifc4.ts`) -- reused there by
  * `IfcExtrudedAreaSolid_ValidExtrusionDirection`, same rationale as `ifcDirection` above.
+ *
+ * **Bug found and fixed (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md)**:
+ * the summation loop below used raw `+=`/`*` on values read via `expressGetItem`, which
+ * can be the `INDETERMINATE` sentinel (e.g. when `arg2`'s own `DirectionRatios` chain
+ * bottoms out on a schema-invalid all-zero direction: `ifcNormalise` correctly returns
+ * `null` per real Python's own `IfcNormalise`, and `expressGetAttr(null, ...)` correctly
+ * yields `INDETERMINATE`). Real Python's own `indeterminate_type` overloads every
+ * arithmetic dunder to return `self`, so `float * INDETERMINATE` and `float +
+ * INDETERMINATE` both silently poison the result to `INDETERMINATE` without ever
+ * raising. A bare JS `number * Symbol`/`number + Symbol` instead THROWS (`TypeError:
+ * Cannot convert a Symbol value to a number`) -- confirmed a real, reachable divergence
+ * via this phase's own empirical 138-fixture `test/fixtures/rules/` run (see
+ * `test/rules.orchestrator.test.ts`), which found 2 real vendored fixtures
+ * (`fail-extrusion-dir-0.0-0.0-ifc4.ifc`, `pass-extrusion-dir-0.0-0.0-ifc2x3.ifc`)
+ * hitting exactly this path through `IfcExtrudedAreaSolid_ValidExtrusionDirection`/
+ * `WR31`'s own call into this function. The caller-side `triNe(ifcDotProduct(...), 0.0)`
+ * wrapping (`whereRules/{ifc2x3,ifc4,ifc4x3}.ts`) was already correctly tri-safe -- this
+ * function itself was the only thing throwing instead of returning `INDETERMINATE`.
+ * Fixed with a narrow, need-driven guard matching `runtimeShim.ts`'s own `triDiv`
+ * precedent (not a general `triAdd`/`triMul` arithmetic library -- see this phase's own
+ * disclosed follow-up finding for the broader, systemic risk this narrow fix does not
+ * attempt to close).
  */
-export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
+export function ifcDotProduct(arg1: unknown, arg2: unknown): number | Indeterminate | null {
 	if (!exists(arg1) || !exists(arg2)) return null;
 	if (expressGetAttr(arg1, "Dim", INDETERMINATE) !== expressGetAttr(arg2, "Dim", INDETERMINATE)) return null;
 	const vec1 = ifcNormalise(arg1);
 	const vec2 = ifcNormalise(arg2);
 	const ndim = expressGetAttr(arg1, "Dim", INDETERMINATE) as number;
-	let scalar = 0.0;
+	let scalar: number | Indeterminate = 0.0;
 	for (const i of expressRange(1, ndim + 1)) {
 		const r1 = expressGetAttr(vec1, "DirectionRatios", INDETERMINATE);
 		const r2 = expressGetAttr(vec2, "DirectionRatios", INDETERMINATE);
-		scalar +=
-			(expressGetItem(r1, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE) as number) *
-			(expressGetItem(r2, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE) as number);
+		const v1 = expressGetItem(r1, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		const v2 = expressGetItem(r2, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		if (isIndeterminate(scalar) || isIndeterminate(v1) || isIndeterminate(v2)) {
+			scalar = INDETERMINATE;
+			continue;
+		}
+		scalar += (v1 as number) * (v2 as number);
 	}
 	return scalar;
 }

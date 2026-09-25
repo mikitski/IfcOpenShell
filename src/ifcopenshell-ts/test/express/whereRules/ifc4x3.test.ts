@@ -4220,7 +4220,18 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 		// `WeightsData`/`ControlPointsList` are consistently shaped, matching `ifc4.test.ts`'s
 		// own identical pinned regression for this identical rule -- cross-referenced, not
 		// re-disclosed.
-		test("throws for any well-formed surface -- Weights is unconditionally blocked by the already-disclosed IfcMakeArrayOfArray bug", () => {
+		//
+		// **UPDATE (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md): updated
+		// from `expectFail` to `expectPass`, exactly mirroring `ifc4.test.ts`'s own identical
+		// update for this identical rule -- see that file's own, fully-detailed comment for
+		// the complete investigation (this port's `expressGetAttr` catches ANY exception,
+		// not just real Python's own `AttributeError`-only `getattr(obj, name, default)`
+		// semantics, so the genuine `IfcMakeArrayOfArray` `TypeError` is silently swallowed
+		// to `INDETERMINATE` here rather than propagating the way it does in real Python;
+		// the test used to pass only because of a separate, now-fixed `expressGetItem` bug
+		// that crashed for an unrelated reason one line later). Not re-disclosed in full
+		// here, cross-referenced instead.
+		test("no longer throws -- WeightValuesGreaterZero silently passes once Weights is INDETERMINATE (a disclosed expressGetAttr over-broad-catch divergence from real Python's own always-throws behavior for this input, see ifc4.test.ts's own identical comment)", () => {
 			const surface = create("IfcRationalBSplineSurfaceWithKnots");
 			set(surface, "ControlPointsList", [
 				[point3D([0, 0, 0]), point3D([1, 0, 0])],
@@ -4230,7 +4241,7 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("express/whereRules/ifc4x
 				[1, 1],
 				[1, 1],
 			]);
-			expectFail("IfcRationalBSplineSurfaceWithKnots", "WeightValuesGreaterZero", surface);
+			expectPass("IfcRationalBSplineSurfaceWithKnots", "WeightValuesGreaterZero", surface);
 		});
 	});
 
