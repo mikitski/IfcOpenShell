@@ -325,20 +325,9 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4"))("util.migrator Migrator.mig
 		target.dispose();
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, the entry's own original finding -- now RESOLVED for the shared
-	// gate) -- `migrator.migrate`'s `id() === 0` branch no longer throws here. Real
-	// expected result (per `util/migrator.ts`'s own header comment): the migrated
-	// `IfcMeasureWithUnit` should be created in the target file with its own
-	// `ValueComponent` (`IfcPlaneAngleMeasure(0.5)`) and `UnitComponent` correctly
-	// migrated too -- left to a follow-up module-grouped chunk to verify and flip.
-	test.skip("disclosed primitive-layer gap (util/migrator.ts's own header comment, finding 1): migrating a SELECT-typed " +
-		"attribute value (e.g. IfcMeasureWithUnit.ValueComponent) throws the pre-existing entityInstance.ts " +
-		"'Attribute access is only supported on entity instances' error, because creating a loose simple-type " +
-		"value WITH an initial value goes through EntityInstance.setByIndex's entity-only-gated attribute_kind_of " +
-		"call. Asserts the CURRENT, disclosed, blocked behavior -- not silently skipped -- so this test starts " +
-		"failing (and needs updating, a good thing) the moment that foundational gap is ever closed.", () => {
+	test("migrating a SELECT-typed attribute value (e.g. IfcMeasureWithUnit.ValueComponent) creates a new " +
+		"standalone IfcPlaneAngleMeasure in the target file with the same wrapped value, and migrates " +
+		"UnitComponent too (TODOS.md's 'EntityInstance.setByIndex/IfcFile.createEntity ...' gate, fixed 2026-09-23)", () => {
 		const source = parseIfc(
 			"ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\n" +
 				"FILE_NAME('','',(''),(''),'','','');\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n" +
@@ -350,9 +339,15 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4"))("util.migrator Migrator.mig
 		const target = createTestFile("IFC4");
 
 		const migrator = new Migrator();
-		expect(() => migrator.migrate(measureWithUnit, target)).toThrow(
-			/Attribute access is only supported on entity instances/,
-		);
+		const newElement = migrator.migrate(measureWithUnit, target);
+
+		expect(newElement.isA()).toBe("IfcMeasureWithUnit");
+		const info = newElement.getInfo() as { ValueComponent: EntityInstance; UnitComponent: EntityInstance };
+		expect(info.ValueComponent.isA()).toBe("IfcPlaneAngleMeasure");
+		expect(info.ValueComponent.getByIndex(0)).toBe(0.5);
+		expect(info.UnitComponent.isA()).toBe("IfcSIUnit");
+		expect(info.UnitComponent.get("UnitType")).toBe("PLANEANGLEUNIT");
+		expect(info.UnitComponent.get("Name")).toBe("RADIAN");
 
 		source.dispose();
 		target.dispose();

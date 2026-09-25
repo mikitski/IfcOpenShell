@@ -67,21 +67,15 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.removeUnit (%s)", (schema) => {
 		expect(remaining[0].equals(unit2)).toBe(true);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test's own fixture setup pinned (TODOS.md's "EntityInstance.setByIndex/
-	// IfcFile.createEntity ..." entry, now RESOLVED for the shared gate) --
-	// `addConversionBasedUnit` no longer throws, so `test_removing_a_unit_deeply`'s
-	// real fixture can now be built directly (rather than the hand-built subgraph
-	// workaround the next test below uses). This test should be rewritten as the
-	// real end-to-end `removeUnit` assertion once `addConversionBasedUnit.test.ts`
-	// itself is flipped -- left to a follow-up module-grouped chunk.
-	test.skip("test_removing_a_unit_deeply is currently blocked (its own setup calls the disclosed-blocked addConversionBasedUnit)", () => {
+	test("test_removing_a_unit_deeply: removing a real addConversionBasedUnit-built unit leaves only the IfcProject", () => {
 		const file = createTestFile(schema);
 		stripProjectBootstrap(file);
 		file.createEntity("IfcProject");
-		expect(() => addConversionBasedUnit(file, { name: "foot" })).toThrow(
-			/Attribute access is only supported on entity instances/,
-		);
+		const unit = addConversionBasedUnit(file, { name: "foot" });
+
+		removeUnit(file, { unit });
+
+		expect([...file].length).toBe(1);
 	});
 
 	test("removing a conversion-based-unit-shaped subgraph deeply removes its Dimensions/ConversionFactor/SI unit (hand-built, avoiding the blocked addConversionBasedUnit)", () => {

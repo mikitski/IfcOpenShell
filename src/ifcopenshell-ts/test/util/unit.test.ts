@@ -893,28 +893,23 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 	},
 );
 
-describe.each(AVAILABLE_SCHEMAS)("util.unit convertFileLengthUnits (%s) -- disclosed, currently blocked", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- `addConversionBasedUnit`'s
-	// transitive standalone-value construction no longer throws here. Real expected
-	// result needs re-derivation against `util/unit.ts`'s own header comment
-	// (finding 5) now that the underlying gate is fixed -- left to a follow-up
-	// module-grouped chunk to verify and flip.
-	test.skip("throws for a non-SI (imperial) target unit -- addConversionBasedUnit's own already-disclosed primitive-layer gap (see unit.ts's header comment, finding 5)", () => {
+describe.each(AVAILABLE_SCHEMAS)("util.unit convertFileLengthUnits (%s)", (schema) => {
+	test("converts to a non-SI (imperial) target unit via addConversionBasedUnit (unit.ts's header comment, finding 5; " +
+		"gate fixed 2026-09-23): the old MILLI-metre unit is replaced by a real 'foot' IfcConversionBasedUnit", () => {
 		const file = blankProjectFile(schema);
 		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
 		assignUnit(file, { units: [unit] });
 
-		expect(() => subject.convertFileLengthUnits(file, "FOOT")).toThrow(
-			/Attribute access is only supported on entity instances/,
-		);
+		const output = subject.convertFileLengthUnits(file, "FOOT");
+		const newLength = subject.getProjectUnit(output, "LENGTHUNIT") as EntityInstance;
+		expect(newLength.isA("IfcConversionBasedUnit")).toBe(true);
+		expect(newLength.get("Name")).toBe("foot");
+		const conversionFactor = newLength.get("ConversionFactor") as EntityInstance;
+		expect((conversionFactor.get("ValueComponent") as EntityInstance).getByIndex(0)).toBe(0.3048);
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result needs re-derivation against `util/unit.ts`'s own header comment
-	// (finding 4) now that the underlying gate is fixed -- left to a follow-up chunk.
-	test.skip("throws when the file contains an entity-wrapped IfcLengthMeasure value (e.g. a typed pset property) -- a genuinely NEW consequence of the same gap (see unit.ts's header comment, finding 4)", () => {
+	test("converts an entity-wrapped IfcLengthMeasure value (e.g. a typed pset property) in place -- a genuinely NEW " +
+		"consequence of the same gate (unit.ts's header comment, finding 4; fixed 2026-09-23): 50mm -> 0.05m", () => {
 		const file = blankProjectFile(schema);
 		const unit = addSiUnit(file, { unitType: "LENGTHUNIT", prefix: "MILLI" });
 		const product = createEntity(file, { ifcClass: "IfcWall" });
@@ -923,8 +918,12 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit convertFileLengthUnits (%s) -- discl
 		editPset(file, { pset, properties: { Length: lengthMeasure } });
 		assignUnit(file, { units: [unit] });
 
-		expect(() => subject.convertFileLengthUnits(file, "METER")).toThrow(
-			/Attribute access is only supported on entity instances/,
-		);
+		const output = subject.convertFileLengthUnits(file, "METER");
+		const outputProperty = output
+			.byType("IfcPropertySingleValue")
+			.find((p) => p.get("Name") === "Length") as EntityInstance;
+		const nominalValue = outputProperty.get("NominalValue") as EntityInstance;
+		expect(nominalValue.isA()).toBe("IfcLengthMeasure");
+		expect(nominalValue.getByIndex(0)).toBeCloseTo(0.05, 12);
 	});
 });
