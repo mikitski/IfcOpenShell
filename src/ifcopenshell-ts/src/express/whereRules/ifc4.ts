@@ -196,6 +196,7 @@ import {
 	EXPRESS_ONE_BASED_INDEXING,
 	ExpressSet,
 	INDETERMINATE,
+	type Indeterminate,
 	type Tri,
 	assertWhereRule,
 	bLength,
@@ -3337,9 +3338,31 @@ function ifcCorrectFillAreaStyle(styles: unknown): boolean {
  * Each `segments` member is itself a small point-index aggregate (`IfcLineIndex`/
  * `IfcArcIndex`) -- checks that consecutive segments share their common point index (the
  * last index of segment `i` equals the first index of segment `i + 1`).
+ *
+ * **Bug found and fixed (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md)**:
+ * when `segments` is `INDETERMINATE` (a genuinely-unset optional `Segments` attribute,
+ * `expressGetAttr` at this rule's own call site below), `hiIndex(segments)` -- itself
+ * `expressLen`, already correctly returning `INDETERMINATE` for that input -- used to
+ * flow straight into raw `n - 1 + 1` arithmetic on a JS `Symbol`, throwing `TypeError:
+ * Cannot convert a Symbol value to a number`. Real Python's own `hiindex(segments) - 1 +
+ * 1` instead collapses to the same `INDETERMINATE` singleton (every arithmetic dunder on
+ * `indeterminate_type` returns `self`), which the *generated rules module's own*
+ * `range()` override (`rule_compiler.py`, shadowing the builtin, `if INDETERMINATE in
+ * args: return` an empty generator) then turns into zero loop iterations -- `result`
+ * stays `True`, no exception. Confirmed empirically (real Python's own installed
+ * `rule_executor.run`, byte-identical `IfcConsecutiveSegments`/`indeterminate_type`
+ * source, traced line-by-line) and via this phase's own real vendored fixture
+ * (`pass-poly-curve-no-segments-ifc4.ifc`, `test/rules.orchestrator.test.ts`). Fixed with
+ * an explicit guard reproducing that exact "collapses to an empty range" outcome,
+ * matching `expressRange`'s own already-established "any `Indeterminate` bound -> `[]`"
+ * behavior, rather than teaching this one call site raw-arithmetic-safe indeterminate
+ * propagation the way `ifcDotProduct`'s own fix does (no further arithmetic on `n`
+ * happens in this function once the loop is skipped, so a single early guard fully
+ * reproduces real Python's outcome here).
  */
 function ifcConsecutiveSegments(segments: unknown): boolean {
-	const n = hiIndex(segments) as number;
+	const n = hiIndex(segments) as number | Indeterminate;
+	if (isIndeterminate(n)) return true;
 	for (const i of expressRange(1, n - 1 + 1)) {
 		const segI = expressGetItem(segments, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
 		const segI1 = expressGetItem(segments, i + 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);

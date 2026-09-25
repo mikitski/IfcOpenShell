@@ -506,8 +506,25 @@ export class ExpressSet<T = unknown> {
  * type-`entity_instance` unwrap this function also performs works correctly on this
  * port (verified empirically, not assumed) despite `EntityInstance`'s *named*-attribute
  * path having a real, disclosed non-entity restriction elsewhere.
+ *
+ * **Bug found and fixed (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md):
+ * `aggr === INDETERMINATE` was not handled here**, unlike `expressGetAttr`'s own
+ * identical, already-correct `if (aggr === INDETERMINATE) return INDETERMINATE;` guard
+ * a few functions below. Real Python's `aggr[idx]` on an `indeterminate_type` dispatches
+ * to its own `__getitem__ = bop`, which returns `self` (poison-propagates) without ever
+ * raising -- this port's own `toIndexableSequence(resolved)` fallback instead threw
+ * `TypeError: value is not a sequence/aggregate: Symbol(EXPRESS_INDETERMINATE)` for the
+ * exact same input, a real, confirmed divergence (not merely a hypothetical one): found
+ * via this phase's own empirical 138-fixture `test/fixtures/rules/` run (see
+ * `test/rules.orchestrator.test.ts`), which surfaced 2 real vendored fixtures
+ * (`fail-extrusion-dir-0.0-0.0-ifc4.ifc`, `pass-extrusion-dir-0.0-0.0-ifc2x3.ifc`) that
+ * hit exactly this path through `rules/{ifc2x3,ifc4,ifc4x3}.ts`'s own `ifcDotProduct`
+ * (also fixed this phase, see that function's own doc comment) reading a genuinely-unset
+ * `ExtrudedDirection`-derived `DirectionRatios` aggregate. Fixed by adding the same
+ * early-return `expressGetAttr` already has, immediately below.
  */
 export function expressGetItem<D>(aggr: unknown, idx: number, defaultValue: D): unknown {
+	if (aggr === INDETERMINATE) return INDETERMINATE;
 	if (aggr === null || aggr === undefined) return defaultValue;
 	let resolved: unknown = aggr;
 	if (resolved instanceof EntityInstance && !isEntity(resolved)) {

@@ -395,19 +395,30 @@ export function ifcCrossProduct(arg1: unknown, arg2: unknown): EntityInstance | 
  * `IfcExtrudedAreaSolid_WR31` needs this exact function, same "export narrowly once a
  * second real consumer exists" precedent as `ifcCrossProduct`/`ifcDirection` above.
  */
-export function ifcDotProduct(arg1: unknown, arg2: unknown): number | null {
+/**
+ * **Bug found and fixed (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md)**:
+ * see `rules/ifc4.ts`'s own identical `ifcDotProduct` for the full writeup -- this
+ * IFC2X3 copy had the exact same raw-arithmetic-on-`INDETERMINATE` bug (confirmed via
+ * this phase's own `pass-extrusion-dir-0.0-0.0-ifc2x3.ifc` fixture, the IFC2X3-schema
+ * twin of that finding's own IFC4 fixture) and is fixed identically here.
+ */
+export function ifcDotProduct(arg1: unknown, arg2: unknown): number | Indeterminate | null {
 	if (!exists(arg1) || !exists(arg2)) return null;
 	if (expressGetAttr(arg1, "Dim", INDETERMINATE) !== expressGetAttr(arg2, "Dim", INDETERMINATE)) return null;
 	const vec1 = ifcNormalise(arg1);
 	const vec2 = ifcNormalise(arg2);
 	const ndim = expressGetAttr(arg1, "Dim", INDETERMINATE) as number;
-	let scalar = 0.0;
+	let scalar: number | Indeterminate = 0.0;
 	for (const i of expressRange(1, ndim + 1)) {
 		const r1 = expressGetAttr(vec1, "DirectionRatios", INDETERMINATE);
 		const r2 = expressGetAttr(vec2, "DirectionRatios", INDETERMINATE);
-		scalar +=
-			(expressGetItem(r1, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE) as number) *
-			(expressGetItem(r2, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE) as number);
+		const v1 = expressGetItem(r1, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		const v2 = expressGetItem(r2, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
+		if (isIndeterminate(scalar) || isIndeterminate(v1) || isIndeterminate(v2)) {
+			scalar = INDETERMINATE;
+			continue;
+		}
+		scalar += (v1 as number) * (v2 as number);
 	}
 	return scalar;
 }

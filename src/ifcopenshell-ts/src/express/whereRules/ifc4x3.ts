@@ -186,6 +186,7 @@ import {
 	EXPRESS_ONE_BASED_INDEXING,
 	ExpressSet,
 	INDETERMINATE,
+	type Indeterminate,
 	type Tri,
 	assertWhereRule,
 	bLength,
@@ -5043,9 +5044,16 @@ registerSchemaRules("IFC4X3_ADD2", [
  * equals the first index of segment `i + 1`). Byte-identical to `whereRules/ifc4.ts`'s own
  * already-ported version (confirmed via direct `diff`, see this chunk's own header
  * comment).
+ *
+ * **Bug found and fixed (Phase EX-5, planning/ifcopenshell-ts/70-express-rules-plan.md)**:
+ * see `whereRules/ifc4.ts`'s own identical `ifcConsecutiveSegments` for the full
+ * writeup -- this IFC4X3 copy had the exact same `INDETERMINATE`-arithmetic bug and is
+ * fixed identically here (not itself hit by any of the 8 vendored IFC4X3_ADD2 rule
+ * fixtures, but fixed for consistency with the byte-identical IFC4 copy).
  */
 function ifcConsecutiveSegments(segments: unknown): boolean {
-	const n = hiIndex(segments) as number;
+	const n = hiIndex(segments) as number | Indeterminate;
+	if (isIndeterminate(n)) return true;
 	for (const i of expressRange(1, n - 1 + 1)) {
 		const segI = expressGetItem(segments, i - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);
 		const segI1 = expressGetItem(segments, i + 1 - EXPRESS_ONE_BASED_INDEXING, INDETERMINATE);

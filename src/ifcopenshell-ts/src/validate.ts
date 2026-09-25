@@ -425,8 +425,96 @@
 //    `test/validate.test.ts`'s own "a disclosed permissive gap accepts other scalars
 //    too" test (chunk 2). Both fixtures are marked as accepted, disclosed known-
 //    divergences in `test/validate.orchestrator.test.ts`, citing this finding.
+//
+// *** Phase EX-5 (planning/ifcopenshell-ts/70-express-rules-plan.md, "final integration +
+// test-fidelity backfill"): unifies this file's own `validate(f)` (Phase EX-3) and
+// `express/ruleExecutor.ts`'s `executeRules(f)` (Phase EX-4) behind one entry point,
+// mirroring real Python's own integration point exactly -- `validate(f, logger,
+// express_rules=False)` (real source lines 419-629) ends with (lines 625-629):
+//
+//     if express_rules:
+//         ...
+//         ifcopenshell.express.rule_executor.run(f, logger)
+//
+// i.e. when the flag is set, `rule_executor.run`'s own violations are folded into the
+// SAME `logger`/error stream `validate()` already populated -- not a separate return
+// value. `validate()`'s signature here gains an `options?: { rules?: boolean }`
+// parameter (the shape `70-express-rules-plan.md`'s own Phase EX-3 section already
+// locked in advance, specifically anticipating this exact moment -- "the `rules` option
+// is added when Phase EX-4 lands"); when `options.rules` is true, `executeRules(f)`'s
+// own `ValidationError[]` is concatenated onto the same array this function already
+// builds, reproducing real Python's "one combined stream" behavior with this port's own
+// already-locked structured-array shape instead of a duck-typed `logger`. Both functions
+// already return `ValidationError[]` (`ruleExecutor.ts` imports and reuses this file's
+// own `ValidationError` class unchanged, per that file's own header comment) -- confirmed
+// directly by reading both files' full return-type signatures before writing this, no
+// reconciliation needed.
+//
+// **Import-strategy decision (static top-level import, not lazy/dynamic)**: real
+// Python's own `validate.py` does an unconditional, top-of-file `import
+// ifcopenshell.express.rule_executor` (real source line 65) regardless of whether
+// `express_rules` is ever passed as `True` -- i.e. real Python already always pays the
+// cost of loading the compiled rule modules just by importing `validate.py` at all, the
+// exact same shape a static TS import reproduces. This was weighed against the
+// alternative (a dynamic `import()` inside `validate()`, gated on `options?.rules`) and
+// rejected for three independent reasons, not just fidelity-to-Python: (1) a dynamic
+// `import()` would make `validate()` return a `Promise`, breaking its own already-locked
+// synchronous `ValidationError[]` return shape (a real, disclosed API-shape cost, not a
+// style preference) -- real Python's `rule_executor.run` is itself synchronous, so a
+// synchronous TS call is the actually-faithful shape, not an artifact of convenience;
+// (2) this package's `src/index.ts` (its own public npm entry point) ALREADY does an
+// unconditional `export * as express from "./express"` (Phase EX-1), which already
+// side-effect-imports `./express/whereRules` (all ~27,000 lines across the 3 per-schema
+// files, confirmed via `wc -l`, larger than this plan's own earlier ~15,000-line
+// estimate) for EVERY consumer of the package's main entry, whether or not they ever
+// call `validate()` or `executeRules()` at all -- so a static import here does not
+// newly impose a cost on the package's primary, documented import path; it only closes
+// a gap for the narrower case of a consumer deep-importing `validate.ts` directly
+// (exactly what this project's own test suite already does, see below); (3) a
+// synchronous top-level `import` is trivially statically analyzable (by bundlers, by a
+// future browser/WASM port per `00-overview.md` SS6's own non-goal note, and by a human
+// reader), where a conditional dynamic `import()` gated on a boolean option is a real,
+// disclosed increase in code complexity for a codebase-wide cost this specific file does
+// not meaningfully change. **A genuine correctness consequence of this choice, addressed
+// directly rather than left implicit**: unlike `express/dispatch.ts`'s calc_* DERIVE
+// registrations (which `entityInstance.ts` already force-loads unconditionally for
+// EVERY attribute read, `.get()` needing them regardless of `validate`/`executeRules`),
+// the WHERE-rule registry is otherwise lazily populated only by whichever module
+// happens to import `express/whereRules` first -- `executeRules(f)` run against an
+// empty, ever registered, registry would silently report zero rule violations (not an
+// error) for every fixture, a wrong-but-quiet failure mode this integration must not
+// introduce. This file's own new imports below therefore include a side-effect import
+// of `./express/whereRules` directly (mirroring `entityInstance.ts`'s own established
+// "import the specific engine export, then side-effect-import the specific
+// registration submodule" pattern for `./express/rules`, rather than routing through
+// the broader `./express` barrel) -- guaranteeing `validate(f, { rules: true })`
+// produces real, registered-rule results regardless of whatever else the calling
+// process happened to import first, including this port's own test suite's existing
+// convention of importing `validate` directly from `./validate` rather than through
+// `src/index.ts`.
+//
+// **Circular-import risk, investigated and confirmed benign**: `express/ruleExecutor.ts`
+// already imports `ValidationError`/`classifyAny`/`declarationName`/`getEntityAttributes`
+// from THIS file (`../validate`, Phase EX-4's own established reuse, per that file's own
+// header comment) -- so this file's new `import { executeRules } from
+// "./express/ruleExecutor"` closes a genuine 2-module cycle (`validate.ts` <->
+// `ruleExecutor.ts`) that did not exist before this chunk. Confirmed safe, not just
+// assumed: this package compiles to CommonJS (`package.json`'s `"type": "commonjs"`),
+// and neither side of the cycle touches the other's imported bindings at module-
+// top-level evaluation time -- every one of `ruleExecutor.ts`'s own uses of this file's
+// exports is inside a function body (`typeName`/`unwrapForCheck`/`toViolation`/
+// `executeRules` itself), and this file's own new use of `executeRules` is likewise
+// only inside the `validate()` function body below, never at top-level. TypeScript's
+// CJS output resolves a named import as a property access on the required module
+// object at the POINT OF USE, not a value destructured at require-time, so by the time
+// either side's function bodies actually run, both modules have finished their
+// synchronous top-level evaluation and every export is fully populated -- empirically
+// re-confirmed by this chunk's own full build (`tsc --noEmit`) and test run (no
+// `undefined is not a function`/TDZ-style failures from either direction). ***
 
 import { AttributeCategory, EntityInstance } from "./entityInstance";
+import { executeRules } from "./express/ruleExecutor";
+import "./express/whereRules";
 import type { IfcFile } from "./file";
 import { expand as guidExpand } from "./guid";
 import {
@@ -1131,31 +1219,41 @@ export function validateIfcApplications(f: IfcFile): ValidationError[] {
 	return violations;
 }
 
-// --- `validate` orchestrator (real source lines 419-629; closes Phase EX-3) ---
+// --- `validate` orchestrator (real source lines 419-629; base checks close Phase EX-3,
+// the `options.rules` unification below closes Phase EX-5) ---
 
 /**
  * Python: `validate(f, logger, express_rules=False) -> None` (real source lines
  * 419-629). Deliberately omits the `use_attribute_value_derived` feature-flag toggle
- * (lines 452-453, 622-623), the raw-path/`log_internal_cpp_errors` file-opening branch
- * (lines 455-483), and the `express_rules` parameter (line 419, 625-629) -- all three
- * locked out-of-scope decisions from `70-express-rules-plan.md`'s Phase EX-3 section,
- * not overlooked. Calls chunk 3's `validateIfcHeader`/`validateIfcApplications` (lines
- * 485-486) and merges their results, then walks every instance in the file (`for inst
- * in f:`, line 491) checking, in order: file-wide `GlobalId` uniqueness/validity (lines
- * 495-521), the entity-not-abstract check (lines 525-531), every forward attribute by
- * index (lines 533-551), the per-forward-attribute derived/not-optional/`assertValid`
- * checks (lines 553-593), and every inverse attribute via `assertValidInverse` (lines
- * 595-612). Returns every violation found across the whole file, matching real
- * Python's own "keep going, log everything" behavior (`try/except ValidationError`
- * around each `assert_valid`/`assert_valid_inverse` call, never re-raised) -- see this
- * file's header comment, chunk 3 preface, for why this whole file returns a structured
+ * (lines 452-453, 622-623) and the raw-path/`log_internal_cpp_errors` file-opening
+ * branch (lines 455-483) -- both locked out-of-scope decisions from
+ * `70-express-rules-plan.md`'s Phase EX-3 section, not overlooked. Calls chunk 3's
+ * `validateIfcHeader`/`validateIfcApplications` (lines 485-486) and merges their
+ * results, then walks every instance in the file (`for inst in f:`, line 491) checking,
+ * in order: file-wide `GlobalId` uniqueness/validity (lines 495-521), the
+ * entity-not-abstract check (lines 525-531), every forward attribute by index (lines
+ * 533-551), the per-forward-attribute derived/not-optional/`assertValid` checks (lines
+ * 553-593), and every inverse attribute via `assertValidInverse` (lines 595-612).
+ * Returns every violation found across the whole file, matching real Python's own
+ * "keep going, log everything" behavior (`try/except ValidationError` around each
+ * `assert_valid`/`assert_valid_inverse` call, never re-raised) -- see this file's
+ * header comment, chunk 3 preface, for why this whole file returns a structured
  * violation list instead of accepting a Python-style duck-typed `logger`.
  *
  * See this file's header comment, findings 15-17, for real, disclosed test-fidelity
  * gaps found and confirmed empirically (via throwaway probes against the real built
  * addon, not assumed) while wiring up the fixture-based test suite below.
+ *
+ * Phase EX-5: `options.rules` corresponds to real Python's own `express_rules`
+ * parameter (lines 419, 625-629) -- when true, `express/ruleExecutor.ts`'s
+ * `executeRules(f)` (Phase EX-4's own WHERE-rule execution engine) runs too, and its
+ * violations are folded into this same returned array, matching real Python's own
+ * "same logger, one combined stream" behavior. See this file's header comment's own
+ * Phase EX-5 section for the full unification writeup (both functions' matching
+ * `ValidationError[]` shape, the import-strategy decision, and the circular-import
+ * investigation).
  */
-export function validate(f: IfcFile): ValidationError[] {
+export function validate(f: IfcFile, options?: { rules?: boolean }): ValidationError[] {
 	const violations: ValidationError[] = [];
 
 	violations.push(...validateIfcHeader(f));
@@ -1311,6 +1409,13 @@ export function validate(f: IfcFile): ValidationError[] {
 				violations.push(new ValidationError(`For instance:\n    ${inst.toString()}\n${e.message}`, e.attribute));
 			}
 		}
+	}
+
+	// Python: `if express_rules: ... ifcopenshell.express.rule_executor.run(f, logger)`
+	// (real source lines 625-629) -- see this file's header comment's own Phase EX-5
+	// section for the full unification writeup.
+	if (options?.rules) {
+		violations.push(...executeRules(f));
 	}
 
 	return violations;
