@@ -14,12 +14,12 @@
 // -- see `clipSolid.test.ts`'s own header comment for why a fully-populated real
 // extrusion isn't needed here either.
 //
-// **`test_element_registers_result_in_bbim_boolean` is ported as a "throws the
-// disclosed blocked error" regression test, NOT its real passing assertion** -- see
-// `clipSolidBounded.ts`'s own header comment (and `TODOS.md`'s updated entry) for the
-// full writeup, matching `clipSolid.test.ts`'s own identical treatment.
-// `test_no_element_does_not_create_pset` is fully functional and ported with its real
-// assertion.
+// **Reference-parity chunk 4 of 5 update (2026-09-25):** `TODOS.md`'s "EntityInstance
+// .setByIndex/IfcFile.createEntity ..." gate (PR #179) is now fixed, and the
+// `editPset`-new-property gate (`api.pset` chunk) was already flipped in chunk 2 of 5.
+// `test_element_registers_result_in_bbim_boolean` is now flipped to its real, verified
+// assertion -- confirmed against this chunk's own freshly-built native addon on all 3
+// schemas, matching `clipSolid.test.ts`'s own identical treatment.
 
 import { describe, expect, test } from "vitest";
 import { clipSolidBounded } from "../../../src/api/geometry/clipSolidBounded";
@@ -27,8 +27,6 @@ import type { EntityInstance } from "../../../src/entityInstance";
 import type { IfcFile } from "../../../src/file";
 import * as elementUtil from "../../../src/util/element";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
-
-const BLOCKED_ERROR = /Attribute access is only supported on entity instances/;
 
 function makeExtrusion(file: IfcFile): EntityInstance {
 	return file.createEntity("IfcExtrudedAreaSolid");
@@ -208,28 +206,24 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.clipSolidBounded (%s)", (schema) 
 		file.dispose();
 	});
 
-	// Real Python: `test_element_registers_result_in_bbim_boolean` -- real assertion to
-	// restore once the disclosed blocker closes (see `clipSolid.test.ts`'s identical
-	// comment for the exact shape).
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- real expected result is the
-	// "Real Python: test_element_registers_result_in_bbim_boolean" comment directly
-	// above -- left to a follow-up chunk to verify and flip.
-	test.skip("element registration is currently blocked (disclosed primitive-layer gap)", () => {
+	// Real Python: `test_element_registers_result_in_bbim_boolean` (see
+	// `clipSolid.test.ts`'s identical treatment for the exact shape).
+	test("element registers the clipping result in the BBIM_Boolean pset", () => {
 		const file = createTestFile(schema);
 		const extrusion = makeExtrusion(file);
 		const wall = file.createEntity("IfcWall");
 
-		expect(() =>
-			clipSolidBounded(file, {
-				item: extrusion,
-				location: [2.5, 0.0, 2.0],
-				normal: [0.6, 0.0, 0.8],
-				boundaryPoints,
-				element: wall,
-			}),
-		).toThrow(BLOCKED_ERROR);
+		const result = clipSolidBounded(file, {
+			item: extrusion,
+			location: [2.5, 0.0, 2.0],
+			normal: [0.6, 0.0, 0.8],
+			boundaryPoints,
+			element: wall,
+		});
+
+		const pset = elementUtil.getPset(wall, "BBIM_Boolean") as Record<string, unknown>;
+		expect(pset).not.toBeNull();
+		expect(JSON.parse(pset.Data as string)).toContain(result.id());
 
 		file.dispose();
 	});

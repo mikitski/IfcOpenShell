@@ -1,41 +1,38 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // No real Python test exists for `assign_lag_time.py` (confirmed by listing
-// `test/api/sequence/` in src/ifcopenshell-python). This pins the CURRENT, disclosed,
-// blocked behavior (see `../../../src/api/sequence/assignLagTime.ts`'s own header
-// comment: FULLY BLOCKED on every schema by the already-tracked `TODOS.md` primitive-
-// layer gap -- constructing a valued, standalone `IfcDuration`) -- matching
-// `addApplication.test.ts`'s/`util/cost.test.ts`'s own established precedent for this
-// exact gap. Not silently skipped: this test starts failing (a good thing) the moment
-// that gap is ever closed, at which point it should be replaced with real end-to-end
-// assertions (an `IfcLagTime` with the right `LagValue`/`DurationType`, correctly
-// assigned to `rel_sequence.TimeLag`).
+// `test/api/sequence/` in src/ifcopenshell-python).
+//
+// **Reference-parity chunk 4 of 5 update (2026-09-25):** `TODOS.md`'s "EntityInstance
+// .setByIndex/IfcFile.createEntity ..." gate (PR #179, "fifteenth consequence") is now
+// fixed -- constructing the standalone `IfcDuration`/`IfcLagTime` no longer throws.
+// Flipped to real, verified end-to-end assertions (a real `IfcLagTime` with the right
+// `LagValue`/`DurationType`, assigned to `relSequence.TimeLag`) -- confirmed against
+// this chunk's own freshly-built native addon on both IFC4 and IFC4X3.
 
 import { describe, expect, test } from "vitest";
 import { assignLagTime } from "../../../src/api/sequence/assignLagTime";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.sequence.assignLagTime (%s)", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "fifteenth consequence" -- now RESOLVED for the shared gate) --
-	// constructing the standalone `IfcDuration` no longer throws. Real expected
-	// result (per this file's own header comment): a real `IfcLagTime` with the
-	// right `LagValue`/`DurationType`, assigned to `relSequence.TimeLag` -- left to
-	// a follow-up module-grouped chunk to verify and flip.
-	test.skip("currently throws (pinned, disclosed primitive-layer gap)", () => {
+	test("creates a real IfcLagTime and assigns it to relSequence.TimeLag", () => {
 		const file = createTestFile(schema);
-		// A bare `IfcRelSequence` stand-in -- sufficient to reach assignLagTime's own
-		// first statement, which throws before `relSequence` is ever touched.
+		// A bare `IfcRelSequence` stand-in -- sufficient, since `assignLagTime` never
+		// reads any other attribute of `relSequence` besides `TimeLag`.
 		const relSequence = file.createEntity("IfcRelSequence");
-		expect(() => assignLagTime(file, { relSequence, lagValue: "P1D" })).toThrow(
-			"Attribute access is only supported on entity instances",
-		);
+
+		const lagTime = assignLagTime(file, { relSequence, lagValue: "P1D" });
+
+		expect(lagTime.isA("IfcLagTime")).toBe(true);
+		expect((lagTime.get("LagValue") as EntityInstance).getByIndex(0)).toBe("P1D");
+		expect(lagTime.get("DurationType")).toBe("WORKTIME");
+		expect((relSequence.get("TimeLag") as EntityInstance).equals(lagTime)).toBe(true);
 	});
 });
 
 // --- IFC2X3: `IfcDuration` doesn't exist at all (added in IFC4) -- an INDEPENDENT
-//     confirmed throw, reached before the primitive-layer gap above would even matter ---
+//     confirmed throw, unaffected by (and unrelated to) the gate above ---
 describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC2X3"))("api.sequence.assignLagTime (IFC2X3)", () => {
 	test("throws -- IfcDuration doesn't exist on IFC2X3 (confirmed empirically, distinct from the primitive-layer gap)", () => {
 		const file = createTestFile("IFC2X3");

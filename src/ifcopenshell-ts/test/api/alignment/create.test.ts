@@ -1,44 +1,44 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// No real Python test file exists for `create.py`'s own real caller-facing behavior in
-// THIS chunk's scope in a way that's reusable here (real Python's own
-// `test_create.py` presumes a fully functional `create()`). Original test coverage
-// written here, pinning the real, portable prefix (entity creation, layout creation,
-// nesting, conditional geometric-representation creation) that runs before this
-// function's own CONFIRMED unconditional `addStationingReferent` throw -- see
-// `../../../src/api/alignment/create.ts`'s own header comment for the precise
-// indentation-level verification that this throw is NOT gated behind
-// `includeGeometry`.
-
+// No real Python test file existed for `create.py`'s own real caller-facing behavior
+// in a way that was reusable when this file was first written -- real Python's own
+// `test_create.py`/`test_create_stationing_referent_name_includes_alignment_name`
+// presumed a fully functional `create()`, which was blocked at the time. Original test
+// coverage was written here instead, pinning the real, portable prefix that ran before
+// `addStationingReferent`'s own CONFIRMED unconditional throw.
+//
+// **Reference-parity chunk 4 of 5 update (2026-09-25):** `TODOS.md`'s "EntityInstance
+// .setByIndex/IfcFile.createEntity ..." gate (PR #179) is now fixed, and the
+// `editPset`-new-property gate (`api.pset` chunk) was already flipped in chunk 2 of 5.
+// `create()` turns out to be UNCONDITIONALLY unaffected by the remaining, still-open
+// `ifcopenshell.geom`/`getAxis2placement` gap (see `addPositioningReferent.test.ts`'s
+// own detailed writeup of that gap) for a real, structural reason specific to this
+// function: `_createGeometricRepresentation` creates its `IfcCompositeCurve` EMPTY
+// (`Segments === []`) -- "this creates the geometric representation entity ... but does
+// not populate the geometry" (`_createGeometricRepresentation.ts`'s own doc comment) --
+// and `addStationingReferent`'s own composite-curve branch requires
+// `curve.Segments.length > 0` to be taken at all. Since `addStationingReferent` is
+// always called BEFORE `create()`'s own trailing `_addZeroLengthSegment` loop (which is
+// what actually populates `Segments`), `addStationingReferent` ALWAYS takes the
+// fallback-placement branch inside `create()`, for every combination of
+// `includeVertical`/`includeCant`/`includeGeometry` -- confirmed EMPIRICALLY against
+// this chunk's own freshly-built native addon for all 4 combinations, not assumed.
+// `create()` therefore now succeeds completely, end to end, in every scenario -- all 3
+// tests below are flipped to their real, verified assertions.
 import { describe, expect, test } from "vitest";
 import { create } from "../../../src/api/alignment/create";
+import { getCurve } from "../../../src/api/alignment/getCurve";
 import type { EntityInstance } from "../../../src/entityInstance";
+import * as elementUtil from "../../../src/util/element";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.create (IFC4X3)", () => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `addStationingReferent` (transitively) threw through (TODOS.md's "EntityInstance
-	// .setByIndex/IfcFile.createEntity ..." entry, now RESOLVED for the shared gate) --
-	// `create()` no longer throws here. Real expected result: `create()` should
-	// complete fully (this file's own header comment), and this test's own already-
-	// asserted prefix (alignment/horizontal layout/nesting/representation) should
-	// still hold, now without the `try`/`catch` -- left to a follow-up chunk to verify.
-	test.skip("CONFIRMED unconditionally blocked: includeGeometry=true reaches the addStationingReferent throw, after real, portable entity/layout/geometry construction", () => {
+	test("includeGeometry=true: real entity/layout/geometry construction, plus a real stationing referent", () => {
 		const file = createTestFile("IFC4X3");
 
-		let thrown: unknown;
-		try {
-			create(file, "MyAlignment", false, false, true, 0.0);
-		} catch (e) {
-			thrown = e;
-		}
-		expect(thrown).toBeDefined();
+		const alignment = create(file, "MyAlignment", false, false, true, 0.0);
 
-		// The real IfcAlignment and its horizontal layout were created and nested, and a
-		// real geometric representation was created, before the throw.
-		const alignments = file.byType("IfcAlignment");
-		expect(alignments.length).toBe(1);
-		const alignment = alignments[0];
+		expect(alignment.isA("IfcAlignment")).toBe(true);
 		expect(alignment.get("Name")).toBe("MyAlignment");
 
 		const horizontalLayouts = file.byType("IfcAlignmentHorizontal");
@@ -51,58 +51,49 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.create (IF
 		).toBe(true);
 
 		expect(alignment.get("Representation")).not.toBeNull();
+
+		// The composite curve is created empty by `_createGeometricRepresentation`, then
+		// populated with exactly one zero-length segment by `create()`'s own trailing
+		// `_addZeroLengthSegment` loop (real Python: `test_create`'s own
+		// `assert len(curve.Segments) == 1`).
+		const curve = getCurve(alignment);
+		expect(curve?.isA("IfcCompositeCurve")).toBe(true);
+		expect((curve?.get("Segments") as EntityInstance[]).length).toBe(1);
+
+		// `addStationingReferent` is called unconditionally with `startStation`, and now
+		// succeeds (real Python: `test_create_stationing_referent_name_includes
+		// _alignment_name`'s own "<alignment name> <station>" naming convention).
+		const referents = file.byType("IfcReferent");
+		expect(referents).toHaveLength(1);
+		expect(referents[0].get("Name")).toBe("MyAlignment 0+000.000");
+		expect(elementUtil.getPset(referents[0], "Pset_Stationing", "Station")).toBe(0.0);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate this
-	// test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..."
-	// entry, now RESOLVED for the shared gate) -- `create()` no longer throws either
-	// way, so this test's own "same error either way" comparison no longer applies.
-	// Real expected result: `create()` completes fully both with and without
-	// `includeGeometry` (this file's own header comment) -- left to a follow-up chunk.
-	test.skip("CONFIRMED unconditionally blocked REGARDLESS of includeGeometry: includeGeometry=false reaches the IDENTICAL addStationingReferent throw, with no representation created", () => {
+	test("includeGeometry=false: no representation is created, but the same stationing referent still succeeds", () => {
 		const file = createTestFile("IFC4X3");
 
-		let thrownWithGeometry: unknown;
-		try {
-			create(file, "A", false, false, true, 0.0);
-		} catch (e) {
-			thrownWithGeometry = e;
-		}
+		const alignment = create(file, "A", false, false, false, 0.0);
 
-		const file2 = createTestFile("IFC4X3");
-		let thrownWithoutGeometry: unknown;
-		try {
-			create(file2, "A", false, false, false, 0.0);
-		} catch (e) {
-			thrownWithoutGeometry = e;
-		}
+		expect(alignment.get("Representation")).toBeNull();
 
-		expect(thrownWithGeometry).toBeDefined();
-		expect(thrownWithoutGeometry).toBeDefined();
-		// Same disclosed gap reached either way (see this file's own header comment).
-		expect((thrownWithoutGeometry as Error).constructor).toBe((thrownWithGeometry as Error).constructor);
-		expect((thrownWithoutGeometry as Error).message).toBe((thrownWithGeometry as Error).message);
-
-		const alignments = file2.byType("IfcAlignment");
-		expect(alignments.length).toBe(1);
-		expect(alignments[0].get("Representation")).toBeNull();
+		const referents = file.byType("IfcReferent");
+		expect(referents).toHaveLength(1);
+		expect(referents[0].get("Name")).toBe("A 0+000.000");
+		expect((referents[0].get("ObjectPlacement") as EntityInstance).isA("IfcLocalPlacement")).toBe(true);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate this
-	// test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity ..."
-	// entry, now RESOLVED for the shared gate) -- `create()` no longer throws. Real
-	// expected result: `create()` completes fully, with the horizontal/vertical/cant
-	// layouts this test already asserts plus a real final representation -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skip("includeVertical/includeCant: real, portable layout creation before the same throw", () => {
+	test("includeVertical/includeCant: real, portable layout creation, plus a real stationing referent", () => {
 		const file = createTestFile("IFC4X3");
 
-		expect(() => create(file, "A", true, true, false, 0.0)).toThrow();
+		const alignment = create(file, "A", true, true, false, 0.0);
 
+		expect(alignment.isA("IfcAlignment")).toBe(true);
 		expect(file.byType("IfcAlignmentHorizontal").length).toBe(1);
 		expect(file.byType("IfcAlignmentVertical").length).toBe(1);
 		const cants = file.byType("IfcAlignmentCant");
 		expect(cants.length).toBe(1);
 		expect(cants[0].get("RailHeadDistance")).toBe(1.0);
+
+		expect(file.byType("IfcReferent")).toHaveLength(1);
 	});
 });
