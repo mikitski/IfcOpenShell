@@ -799,11 +799,17 @@ IFC2X3 assertion running. Full file list, with a one-line reason each (all conse
 now-fixed gate, already diagnosed in this entry's own UPDATE history below unless noted):
 
 - `test/util/migrator.test.ts` (1) -- this entry's own original finding: `Migrator.migrate`'s
-  `id() === 0` SELECT-typed-value branch.
+  `id() === 0` SELECT-typed-value branch. **DONE (chunk 1 of 5)**: un-skipped and flipped to the
+  real, verified assertion (migrating a SELECT-typed `IfcMeasureWithUnit.ValueComponent` now
+  correctly recreates the wrapped `IfcPlaneAngleMeasure`/`IfcSIUnit` in the target file).
 - `test/util/unit.test.ts` (6), `test/api/unit/addConversionBasedUnit.test.ts` (16),
   `test/api/unit/assignUnit.test.ts` (3), `test/api/unit/removeUnit.test.ts` (3) -- `util.unit`'s own
   standalone-unit-value construction (`addConversionBasedUnit`'s imperial/offset units, transitively
-  `assignUnit`/`removeUnit`).
+  `assignUnit`/`removeUnit`). **DONE (chunk 1 of 5)**: all 4 files un-skipped and flipped to their
+  real, verified assertions (`addConversionBasedUnit` now genuinely builds every imperial/mass/time/
+  offset/userdefined unit; `assignUnit`'s imperial-synthesis branch and `removeUnit`'s deep-removal
+  of a real conversion-based unit both work end-to-end; `convertFileLengthUnits`' imperial-target and
+  entity-wrapped-`IfcLengthMeasure` in-place conversion paths both verified numerically).
 - `test/api/owner/addApplication.test.ts` (1) -- third consequence (IFC4X3 default-organisation
   `IfcLabel` pset property).
 - `test/api/pset/editPset.test.ts` (18) -- fourth consequence (`cast_value_to_primary_measure_type`,

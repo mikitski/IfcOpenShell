@@ -107,19 +107,27 @@ describe.each(AVAILABLE_SCHEMAS)("api.unit.assignUnit (%s)", (schema) => {
 		expect(volumeUnit?.get("Name")).toBe("CUBIC_METRE");
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- `assignUnit`'s transitive
-	// `addConversionBasedUnit` call no longer throws. Real expected result: a real
-	// imperial-synthesized length unit assignment (see `assignUnit.ts`'s own header
-	// comment) -- left to a follow-up module-grouped chunk to verify and flip.
-	test.skip("imperial-synthesis branch is currently blocked (see assignUnit.ts's own header comment)", () => {
+	test("imperial-synthesis branch (length: INCHES, area/volume default to metric) creates a real IfcConversionBasedUnit " +
+		"length unit alongside metric area/volume units (TODOS.md's 'EntityInstance.setByIndex/IfcFile.createEntity ...' " +
+		"gate, fixed 2026-09-23; no Python counterpart -- this synthesis path has no dedicated real Python test)", () => {
 		const file = createTestFile(schema);
 		stripProjectBootstrap(file);
 		file.createEntity("IfcProject");
-		expect(() => assignUnit(file, { length: { isMetric: false, raw: "INCHES" } })).toThrow(
-			/Attribute access is only supported on entity instances/,
-		);
+
+		const assignment = assignUnit(file, { length: { isMetric: false, raw: "INCHES" } });
+
+		const units = unitsOf(assignment);
+		expect(units).toHaveLength(3);
+		const lengthUnit = units.find((u) => u.isA("IfcConversionBasedUnit")) as EntityInstance;
+		expect(lengthUnit.get("UnitType")).toBe("LENGTHUNIT");
+		expect(lengthUnit.get("Name")).toBe("inch");
+		const conversionFactor = lengthUnit.get("ConversionFactor") as EntityInstance;
+		expect((conversionFactor.get("ValueComponent") as EntityInstance).getByIndex(0)).toBe(0.0254);
+		expect((conversionFactor.get("UnitComponent") as EntityInstance).get("Name")).toBe("METRE");
+		const areaUnit = units.find((u) => u.get("UnitType") === "AREAUNIT");
+		expect(areaUnit?.get("Name")).toBe("SQUARE_METRE");
+		const volumeUnit = units.find((u) => u.get("UnitType") === "VOLUMEUNIT");
+		expect(volumeUnit?.get("Name")).toBe("CUBIC_METRE");
 	});
 });
 

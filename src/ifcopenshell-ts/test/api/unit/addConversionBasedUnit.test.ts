@@ -1,75 +1,134 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/unit/test_add_conversion_based_unit.py`
-// (src/ifcopenshell-python) -- but every real Python test case in that file
-// (`test_run`, `test_adding_mass_units_creates_proper_massunit`,
-// `test_adding_time_units_creates_proper_timeunit`, `test_adding_a_unit_with_offset`,
-// `test_unknown_units_fall_back_to_userdefined`) exercises this function's core
-// purpose, which is currently ALWAYS blocked by a real, disclosed, pre-existing
-// primitive-layer gap -- see `addConversionBasedUnit.ts`'s own header comment for the
-// full empirical writeup (independently reproduced against this exact worktree's own
-// built native addon). This file therefore asserts the CURRENT, disclosed, blocked
-// behavior for each of those 5 real Python cases -- not silently skipped -- matching
-// `test/util/migrator.test.ts`'s own established precedent for this exact gap. Every
-// one of these tests starts failing (a good thing) the moment this foundational gap
-// is ever closed, at which point they should be rewritten to their real Python
-// counterparts' actual assertions (reproduced in comments below each blocked test, so
-// the follow-up work is a straight swap-in, not a re-investigation).
+// (src/ifcopenshell-python) -- `test_run`, `test_adding_mass_units_creates_proper_massunit`,
+// `test_adding_time_units_creates_proper_timeunit`, `test_adding_a_unit_with_offset`, and
+// `test_unknown_units_fall_back_to_userdefined` ported directly below. These were
+// previously blocked by a native primitive-layer gate (`EntityInstance.setByIndex`
+// couldn't write an initial value into a freshly created simple/defined-type instance,
+// e.g. the `IfcReal` `ConversionFactor.ValueComponent`), fixed 2026-09-23 (TODOS.md's
+// "EntityInstance.setByIndex/IfcFile.createEntity ..." entry) -- verified against the
+// real Python source's own `util/unit.py` tables (byte-identical to this port's
+// `util/unit.ts` tables) and this exact worktree's own rebuilt native addon.
 
 import { describe, expect, test } from "vitest";
 import { addConversionBasedUnit } from "../../../src/api/unit/addConversionBasedUnit";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
-const BLOCKED_ERROR = /Attribute access is only supported on entity instances/;
+function conversionValue(unit: EntityInstance): number {
+	const valueComponent = (unit.get("ConversionFactor") as EntityInstance).get("ValueComponent") as EntityInstance;
+	return valueComponent.getByIndex(0) as number;
+}
 
-describe.each(AVAILABLE_SCHEMAS)("api.unit.addConversionBasedUnit (%s) -- disclosed, currently blocked", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `BLOCKED_ERROR` pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) --
-	// `addConversionBasedUnit` no longer throws. Real expected result is already
-	// recorded in this test's own title above -- left to a follow-up chunk.
-	test.skip("test_run (real Python: unit.Name === 'foot', a LENGTHUNIT, ConversionFactor.ValueComponent.wrappedValue === 0.3048)", () => {
+function conversionSiUnit(unit: EntityInstance): EntityInstance {
+	return (unit.get("ConversionFactor") as EntityInstance).get("UnitComponent") as EntityInstance;
+}
+
+describe.each(AVAILABLE_SCHEMAS)("api.unit.addConversionBasedUnit (%s)", (schema) => {
+	test("test_run: foot is a LENGTHUNIT converting to an unprefixed METRE SI unit at 0.3048", () => {
 		const file = createTestFile(schema);
-		expect(() => addConversionBasedUnit(file, { name: "foot" })).toThrow(BLOCKED_ERROR);
+		const unit = addConversionBasedUnit(file, { name: "foot" });
+		expect(unit.isA("IfcConversionBasedUnit")).toBe(true);
+		const dimensions = unit.get("Dimensions") as EntityInstance;
+		expect(dimensions.get("LengthExponent")).toBe(1);
+		expect(dimensions.get("MassExponent")).toBe(0);
+		expect(dimensions.get("TimeExponent")).toBe(0);
+		expect(dimensions.get("ElectricCurrentExponent")).toBe(0);
+		expect(dimensions.get("ThermodynamicTemperatureExponent")).toBe(0);
+		expect(dimensions.get("AmountOfSubstanceExponent")).toBe(0);
+		expect(dimensions.get("LuminousIntensityExponent")).toBe(0);
+		expect(unit.get("UnitType")).toBe("LENGTHUNIT");
+		expect(unit.get("Name")).toBe("foot");
+		expect(conversionValue(unit)).toBe(0.3048);
+		const siUnit = conversionSiUnit(unit);
+		expect(siUnit.isA("IfcSIUnit")).toBe(true);
+		expect(siUnit.get("UnitType")).toBe("LENGTHUNIT");
+		expect(siUnit.get("Prefix")).toBeNull();
+		expect(siUnit.get("Name")).toBe("METRE");
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result is already recorded in this test's own title above.
-	test.skip("test_adding_mass_units_creates_proper_massunit (real Python: tonne/pound/ounce/ton UK/ton US all resolve to a MASSUNIT with a KILO-prefixed GRAM SI unit)", () => {
+	test("test_adding_mass_units_creates_proper_massunit: tonne/pound/ounce/ton UK/ton US all resolve to a MASSUNIT with a KILO-prefixed GRAM SI unit", () => {
 		const file = createTestFile(schema);
-		for (const name of ["tonne", "pound", "ounce", "ton UK", "ton US"]) {
-			expect(() => addConversionBasedUnit(file, { name })).toThrow(BLOCKED_ERROR);
+		const massUnits: readonly [string, number][] = [
+			["tonne", 1000.0],
+			["pound", 0.454],
+			["ounce", 0.02835],
+			["ton UK", 1016.0469088],
+			["ton US", 907.18474],
+		];
+		for (const [name, expectedConversion] of massUnits) {
+			const unit = addConversionBasedUnit(file, { name });
+			expect(unit.isA("IfcConversionBasedUnit")).toBe(true);
+			expect(unit.get("UnitType")).toBe("MASSUNIT");
+			expect(unit.get("Name")).toBe(name);
+			expect(conversionValue(unit)).toBe(expectedConversion);
+			const siUnit = conversionSiUnit(unit);
+			expect(siUnit.isA("IfcSIUnit")).toBe(true);
+			expect(siUnit.get("UnitType")).toBe("MASSUNIT");
+			expect(siUnit.get("Name")).toBe("GRAM");
+			expect(siUnit.get("Prefix")).toBe("KILO");
 		}
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result is already recorded in this test's own title above.
-	test.skip("test_adding_time_units_creates_proper_timeunit (real Python: minute/hour/day all resolve to a TIMEUNIT with an unprefixed SECOND SI unit)", () => {
+	test("test_adding_time_units_creates_proper_timeunit: minute/hour/day all resolve to a TIMEUNIT with an unprefixed SECOND SI unit", () => {
 		const file = createTestFile(schema);
-		for (const name of ["minute", "hour", "day"]) {
-			expect(() => addConversionBasedUnit(file, { name })).toThrow(BLOCKED_ERROR);
+		const timeUnits: readonly [string, number][] = [
+			["minute", 60],
+			["hour", 3600],
+			["day", 86400],
+		];
+		for (const [name, expectedConversion] of timeUnits) {
+			const unit = addConversionBasedUnit(file, { name });
+			expect(unit.isA("IfcConversionBasedUnit")).toBe(true);
+			expect(unit.get("UnitType")).toBe("TIMEUNIT");
+			expect(unit.get("Name")).toBe(name);
+			expect(conversionValue(unit)).toBe(expectedConversion);
+			const siUnit = conversionSiUnit(unit);
+			expect(siUnit.isA("IfcSIUnit")).toBe(true);
+			expect(siUnit.get("UnitType")).toBe("TIMEUNIT");
+			expect(siUnit.get("Name")).toBe("SECOND");
+			expect(siUnit.get("Prefix")).toBeNull();
 		}
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result is already recorded in this test's own title above.
-	test.skip("test_unknown_units_fall_back_to_userdefined (real Python: unit.UnitType === 'USERDEFINED', unit.Name === 'unknown_unit')", () => {
+	test("test_unknown_units_fall_back_to_userdefined: unit.UnitType === 'USERDEFINED', unit.Name === 'unknown_unit'", () => {
 		const file = createTestFile(schema);
-		expect(() => addConversionBasedUnit(file, { name: "unknown_unit" })).toThrow(BLOCKED_ERROR);
+		const unknownUnit = addConversionBasedUnit(file, { name: "unknown_unit" });
+		expect(unknownUnit.get("UnitType")).toBe("USERDEFINED");
+		expect(unknownUnit.get("Name")).toBe("unknown_unit");
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above.
-	test.skip("no-argument default (Python default name='foot') also blocked", () => {
+	test("no-argument default (Python default name='foot') also creates a proper foot LENGTHUNIT", () => {
 		const file = createTestFile(schema);
-		expect(() => addConversionBasedUnit(file, {})).toThrow(BLOCKED_ERROR);
+		const unit = addConversionBasedUnit(file, {});
+		expect(unit.get("UnitType")).toBe("LENGTHUNIT");
+		expect(unit.get("Name")).toBe("foot");
+		expect(conversionValue(unit)).toBe(0.3048);
 	});
 });
 
-describe("api.unit.addConversionBasedUnit (IFC4-only) -- disclosed, currently blocked", () => {
-	// SKIPPED (PR #179): same gate/reasoning as above -- real expected result is
-	// already recorded in this test's own title above.
-	test.skip("test_adding_a_unit_with_offset (real Python: fahrenheit produces an IfcConversionBasedUnitWithOffset, ConversionOffset === -459.67)", () => {
+describe("api.unit.addConversionBasedUnit (IFC4-only)", () => {
+	test("test_adding_a_unit_with_offset: fahrenheit produces an IfcConversionBasedUnitWithOffset, ConversionOffset === -459.67", () => {
 		const file = createTestFile("IFC4");
-		expect(() => addConversionBasedUnit(file, { name: "fahrenheit" })).toThrow(BLOCKED_ERROR);
+		const unit = addConversionBasedUnit(file, { name: "fahrenheit" });
+		expect(unit.isA("IfcConversionBasedUnitWithOffset")).toBe(true);
+		const dimensions = unit.get("Dimensions") as EntityInstance;
+		expect(dimensions.get("LengthExponent")).toBe(0);
+		expect(dimensions.get("MassExponent")).toBe(0);
+		expect(dimensions.get("TimeExponent")).toBe(0);
+		expect(dimensions.get("ElectricCurrentExponent")).toBe(0);
+		expect(dimensions.get("ThermodynamicTemperatureExponent")).toBe(1);
+		expect(dimensions.get("AmountOfSubstanceExponent")).toBe(0);
+		expect(dimensions.get("LuminousIntensityExponent")).toBe(0);
+		expect(unit.get("UnitType")).toBe("THERMODYNAMICTEMPERATUREUNIT");
+		expect(unit.get("Name")).toBe("fahrenheit");
+		expect(conversionValue(unit)).toBe(1.8);
+		const siUnit = conversionSiUnit(unit);
+		expect(siUnit.isA("IfcSIUnit")).toBe(true);
+		expect(siUnit.get("UnitType")).toBe("THERMODYNAMICTEMPERATUREUNIT");
+		expect(siUnit.get("Prefix")).toBeNull();
+		expect(siUnit.get("Name")).toBe("KELVIN");
+		expect(unit.get("ConversionOffset")).toBe(-459.67);
 	});
 });
