@@ -523,6 +523,25 @@ binding could be built, since it decided generated-vs-hand-written.
 
 - Phase G1 — Geometry kernel binding
 - Phase B1 — Browser/WASM target
+- Reference-model parity testing — see dedicated table below
+
+## Reference-Model Parity Testing (post-v1, scoped 2026-09-25)
+
+See `80-reference-parity-testing-plan.md` for the full writeup. At the user's explicit request,
+after `validate.py`'s port closed out Phase 10: read/write/mutation parity against buildingSMART
+International's own real, published `Certification-datasets` reference models (CC BY 4.0, 30 real
+files across all 3 supported schemas), diffed against real `ifcopenshell-python`. Two-tier design —
+golden dumps generated once by the orchestrating session (needs live Python + network, neither
+available to an isolated dispatch worktree), verified thereafter with plain JSON diffing (no
+Python needed, cheap enough for normal PR CI) — deliberately avoids adding any load to routine CI,
+per the user's explicit direction not to regrow PR CI after just bringing it down to something
+reasonable.
+
+| Chunk | Status | PR | Notes |
+|---|---|---|---|
+| Chunk 1 — read-parity harness (dump/diff engine + Python golden-generation script) + goldens for all 30 `Simple-Scene` fixtures + verification suite | 🔲 | — | Not yet dispatched. See `80-reference-parity-testing-plan.md` §5. |
+| Chunk 2 — round-trip write-back parity | 🔲 | — | Not yet dispatched. Reuses chunk 1's dump/diff engine — see `80-reference-parity-testing-plan.md` §5. |
+| Chunk 3 — mutation differential battery | 🔲 | — | Not yet dispatched. Deliberately best-effort/growable, not exhaustive (no "reference model" analog forces mutation coverage the way read/round-trip gets it for free) — see `80-reference-parity-testing-plan.md` §5. |
 
 ## Blockers / escalations
 
