@@ -8,9 +8,8 @@
 // attribute entirely), and -- only when `ScheduleUsage` is written under a hard
 // `Usage.ScheduleWork` constraint -- triggers a task-duration recalculation.
 //
-// --- BLOCKED (disclosed, narrow): `ifcopenshell.api.sequence.calculate_task_duration`
-//     is NOT ported -- `api.sequence` (40 files, ~4257 lines) has no TS port of any
-//     kind and is out of scope for this chunk ---
+// --- `ifcopenshell.api.sequence.calculate_task_duration` -- now wired up (was a
+//     disclosed blocker until `api.sequence` landed in full, see `TODOS.md`) ---
 //
 // Real Python's own final `if` block: when `name == "ScheduleUsage"` AND
 // `get_metric_constraints(resource, "Usage.ScheduleWork")` is non-empty (i.e.
@@ -18,14 +17,11 @@
 // NOT `is_hard_constraint`-gated the way the earlier per-attribute skip is), it looks
 // up the resource's assigned task (`util.resource.getTaskAssignments`, already landed)
 // and, if one exists, calls `ifcopenshell.api.sequence.calculate_task_duration(file,
-// task=task)`. This port throws a clear, descriptive `Error` ONLY at that exact call
-// site (`task` resolved to a real entity, matching real Python's own `if task:` guard)
-// -- never proactively, and never before every other attribute in `attributes` has
-// already been fully applied up to and including this one (`resourceTime.set(name,
-// value)` for `ScheduleUsage` itself has ALREADY happened by this point, matching what
-// real Python's own call ordering -- `setattr` before the `calculate_task_duration`
-// call -- would also have already committed before reaching the real function).
-// Tracked in `TODOS.md`.
+// task=task)`. Ported directly, matching real Python's own call ordering: everything up
+// to and including this exact point (all attributes processed so far, `ScheduleUsage`
+// itself already written via `resourceTime.set(name, value)` above) has already been
+// applied before this call, matching what real Python's own `setattr`-before-the-call
+// ordering also commits first.
 //
 // --- Real, disclosed Python quirk: `"RemainingTime"` should almost certainly read
 //     `"RemainingWork"` -- ported verbatim, NOT "corrected" ---
@@ -78,6 +74,7 @@ import { getMetricConstraints, isHardConstraint } from "../../util/constraint";
 import { type Datetime2IfcInput, datetime2ifc } from "../../util/date";
 import { getTaskAssignments } from "../../util/resource";
 import { wrapUsecase } from "../hooks";
+import { calculateTaskDuration } from "../sequence/calculateTaskDuration";
 
 /** Python: `next(e for e in self.file.get_inverse(resource_time) if e.is_a("IfcResource"))`.
  * See this file's header comment for the disclosed StopIteration-vs-Error divergence. */
@@ -138,17 +135,7 @@ function editResourceTimeUsecase(file: IfcFile, settings: EditResourceTimeSettin
 		if (name === "ScheduleUsage" && getMetricConstraints(resource, "Usage.ScheduleWork")) {
 			const task = getTaskAssignments(resource);
 			if (task) {
-				// BLOCKED (disclosed, see this file's header comment and `TODOS.md`):
-				// `ifcopenshell.api.sequence.calculate_task_duration` is not ported.
-				// Everything up to and including this exact point (all attributes
-				// processed so far, `ScheduleUsage` itself already written) has been
-				// applied, matching what real Python's own call ordering would also
-				// have already committed before reaching this call.
-				throw new Error(
-					"editResourceTime: api.sequence.calculateTaskDuration is not ported yet -- see TODOS.md. " +
-						"This is only reached when editing ScheduleUsage on a resource whose Usage.ScheduleWork " +
-						"has a metric constraint AND the resource is assigned to a task.",
-				);
+				calculateTaskDuration(file, { task });
 			}
 		}
 	}
@@ -160,11 +147,9 @@ function editResourceTimeUsecase(file: IfcFile, settings: EditResourceTimeSettin
  * For more information about the attributes and data types of an `IfcResourceTime`,
  * consult the IFC documentation.
  *
- * See this file's header comment for a disclosed, narrow blocker
- * (`api.sequence.calculateTaskDuration` is not ported) and two disclosed, verbatim-
- * preserved Python quirks (a literal `"RemainingTime"` typo that should read
- * `"RemainingWork"`, and the resolved-owning-resource lookup's StopIteration-vs-Error
- * divergence).
+ * See this file's header comment for two disclosed, verbatim-preserved Python quirks (a
+ * literal `"RemainingTime"` typo that should read `"RemainingWork"`, and the
+ * resolved-owning-resource lookup's StopIteration-vs-Error divergence).
  *
  * @example
  * ```ts

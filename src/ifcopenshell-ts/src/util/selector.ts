@@ -63,7 +63,7 @@
 //
 // 1. **Originally a genuine, disclosed hard blocker for all nine positional/geolocated
 //    keys (`x`/`y`/`z`/`easting`/`northing`/`elevation`/`rotation_x`/`rotation_y`/
-//    `rotation_z`), now PARTIALLY resolved.** Python's `_get_element_value` calls
+//    `rotation_z`), now FULLY resolved.** Python's `_get_element_value` calls
 //    `ifcopenshell.util.placement.get_local_placement` (all nine keys) plus
 //    `ifcopenshell.util.geolocation.auto_xyz2enh` (the `easting`/`northing`/`elevation`
 //    trio) plus `ifcopenshell.util.shape_builder.np_matrix_to_euler` (the `rotation_*`
@@ -81,23 +81,20 @@
 //
 //    **UPDATE (Phase 4's `util.geolocation` chunk, 2026-09-11):** `util.geolocation` has
 //    now also landed (`util/geolocation.ts`) -- `easting`/`northing`/`elevation` are now
-//    ALSO fully wired, to the real `autoXyz2enh` (`positionalEnhValue` below). Only
-//    `rotation_x`/`rotation_y`/`rotation_z` remain genuinely blocked now:
-//    `ifcopenshell.util.shape_builder.np_matrix_to_euler` is a separate, not-yet-ported
-//    module (`util.shape_builder`, Tier B, `planning/ifcopenshell-ts/20-roadmap.md`, not
-//    yet scheduled) -- landing `util.geolocation` does not touch that dependency at all.
-//    `throwPositionalKeyBlocked` below throws a clear, descriptive error naming the real
-//    missing Python module for exactly those three remaining keys now, but only when
-//    Python itself would actually need them: exactly mirroring Python's own
-//    `hasattr(value, "ObjectPlacement")` guard, these keys fall through to ordinary
-//    attribute/pset lookup (returning `null`, same as Python) when `value` isn't a class
-//    that declares `ObjectPlacement` at all, and return `null` without throwing (same as
-//    Python, which short-circuits to `value = None` before ever calling
-//    `get_local_placement`) when `ObjectPlacement` is declared but unset -- the blocker
-//    only fires for the one case that would genuinely need the unported math: a real,
-//    *set* `ObjectPlacement`. See `TODOS.md`'s updated entry for this; matches the
-//    established "genuinely-blocked-not-just-deferred" disclosure pattern (that file's
-//    `util.unit.convert_file_length_units` entry).
+//    ALSO fully wired, to the real `autoXyz2enh` (`positionalEnhValue` below).
+//
+//    **UPDATE (TODOS.md sweep, 2026-09-25): `util.shape_builder` has since landed too
+//    (`util/shapeBuilder.ts`) -- `rotation_x`/`rotation_y`/`rotation_z` are now ALSO
+//    fully resolved.** `positionalRotationValue` below calls the real `npMatrixToEuler`
+//    on the same `matrix` the `x`/`y`/`z` branch already computes, then converts radians
+//    to degrees (`* (180 / Math.PI)`, matching Python's own `np.degrees`) -- exactly
+//    mirroring real Python's own `float(np.degrees(euler[(...).index(key)]))`
+//    (selector.py:497-499). All nine positional/geolocated keys are now fully
+//    computable; the former `throwPositionalKeyBlocked` disclosed-blocker function has
+//    been removed (no longer reachable). The short-circuit behavior is unchanged for
+//    all nine keys: `null` (not a throw) when `value` isn't a class that declares
+//    `ObjectPlacement` at all, or when `ObjectPlacement` is declared but left unset --
+//    exactly mirroring Python's own `hasattr`/`getattr(..., None)` guards.
 //
 //    A real subtlety found while wiring `easting`/`northing`/`elevation`, confirmed
 //    against the exact Python source line (selector.py:491): `auto_xyz2enh(element.file,
@@ -189,6 +186,7 @@ import {
 } from "./element";
 import { autoXyz2enh } from "./geolocation";
 import { getLocalPlacement } from "./placement";
+import { npMatrixToEuler } from "./shapeBuilder";
 import { getElementSystems, getElementZones } from "./system";
 import { formatLength, pythonRound } from "./unit";
 
@@ -460,18 +458,16 @@ function positionalEnhValue(rootElement: EntityInstance, xyz: readonly [number, 
 }
 
 /**
- * Throws the disclosed blocker for the still-unported `rotation_*` keys -- see this
- * file's header comment, finding #1 (updated), for the full rationale.
- * `rotation_x`/`rotation_y`/`rotation_z` need `ifcopenshell.util.shape_builder
- * .np_matrix_to_euler` (not ported, a separate module from `util.geolocation`).
- * `x`/`y`/`z`/`easting`/`northing`/`elevation` are NOT blocked any more -- see
- * `positionalXyzValue`/`positionalEnhValue` above. Only called once Python itself would
- * actually need the unported math (a real, *set* `ObjectPlacement`).
+ * `rotation_x`/`rotation_y`/`rotation_z`: real Python's `float(np.degrees(euler[(...)
+ * .index(key)]))` (selector.py:497-499) -- `np_matrix_to_euler`'s TS port
+ * (`npMatrixToEuler`) returns the same 3 Euler angles in radians; `* (180 / Math.PI)`
+ * matches `np.degrees` exactly. Shares the same `matrix` the `x`/`y`/`z` branch already
+ * computed off the same `ObjectPlacement` (Python's own single `matrix =
+ * get_local_placement(value.ObjectPlacement)` call feeds both branches).
  */
-function throwPositionalKeyBlocked(key: string): never {
-	throw new Error(
-		`getElementValue: the "${key}" key-path key requires \`ifcopenshell.util.shape_builder.np_matrix_to_euler\` -- \`util.shape_builder\` is not ported yet in this TS port (Tier B, a later phase; see TODOS.md). Not stubbed or partially implemented: this element has a real, set \`ObjectPlacement\`, so Python would compute an actual value here that this port cannot yet reproduce. (\`x\`/\`y\`/\`z\`/\`easting\`/\`northing\`/\`elevation\` are unaffected -- those are fully computable now that \`util.placement.getLocalPlacement\`/\`util.geolocation.autoXyz2enh\` have landed.)`,
-	);
+function positionalRotationValue(matrix: ReturnType<typeof getLocalPlacement>, key: string): number {
+	const euler = npMatrixToEuler(matrix);
+	return euler[ROTATION_KEYS.indexOf(key)] * (180 / Math.PI);
 }
 
 // --- `_get_element_value` (selector.py ~line 427) ---
@@ -562,7 +558,7 @@ function getElementValueForKeys(initialValue: unknown, keys: readonly (string | 
 				} else if (POSITIONAL_ENH_KEYS.includes(key)) {
 					value = positionalEnhValue(rootElement as EntityInstance, matrixTranslation(matrix), key);
 				} else {
-					throwPositionalKeyBlocked(key);
+					value = positionalRotationValue(matrix, key);
 				}
 			} else {
 				value = null;

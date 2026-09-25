@@ -28,12 +28,11 @@
 // directly), the disclosed positional/geolocated-key blocker (`src/util/selector.ts`'s
 // finding #1 -- UPDATED by Phase 4's `util.placement` chunk: `x`/`y`/`z` are now real;
 // UPDATED AGAIN by Phase 4's `util.geolocation` chunk, same day: `easting`/`northing`/
-// `elevation` are now ALSO real, covered by new tests below (both the no-georeferencing
-// passthrough case and a real `IfcMapConversion`-backed conversion) rather than just the
-// blocker firing. Only `rotation_x`/`rotation_y`/`rotation_z` remain blocked. Python's own
-// suite has a `test_selecting_an_elements_rotation_using_a_query` test that exercises the
-// *still-unblocked* `rotation_*` computation, which this port cannot yet reproduce; the
-// blocker itself has no Python counterpart by definition), the narrow
+// `elevation` are now ALSO real; UPDATED AGAIN by the 2026-09-25 `TODOS.md` sweep once
+// `util.shape_builder` landed: `rotation_x`/`rotation_y`/`rotation_z` are now ALSO real,
+// covered below by a full port of Python's own `test_selecting_an_elements_rotation_
+// using_a_query` -- all nine positional/geolocated keys are now fully computable, no
+// disclosed blocker remains for this finding), the narrow
 // `profiles`/`classification`/`system`/`zone`/spatial-parent key re-implementations
 // (`selector.ts`'s finding #2), and the `int`-vs-`float`/`Decimal` numeric-comparison
 // findings (the `filter_elements` chunk's header comment, findings 1-2) -- none of which
@@ -543,16 +542,39 @@ describe("selector.getElementValue", () => {
 		expect(subject.getElementValue(element, "Qto_WallBaseQuantities.Count")).toBe(3);
 	});
 
-	describe("positional/geolocated keys -- x/y/z/easting/northing/elevation now real, rotation_* still a disclosed blocker (see src/util/selector.ts's header comment, finding #1)", () => {
-		// `x`/`y`/`z` are now fully computed via the real, landed `util.placement
-		// .getLocalPlacement` -- needs a real, fully-formed `RelativePlacement` (unlike
-		// the still-blocked `rotation_*` keys below, which throw only after computing
-		// this same matrix, matching Python's own `get_local_placement` call before its
-		// blocked `np_matrix_to_euler` step).
+	describe("positional/geolocated keys -- all nine (x/y/z/easting/northing/elevation/rotation_x/rotation_y/rotation_z) now real (see src/util/selector.ts's header comment, finding #1)", () => {
+		// `x`/`y`/`z`/`rotation_*` are all fully computed via the real, landed
+		// `util.placement.getLocalPlacement` -- needs a real, fully-formed
+		// `RelativePlacement`.
 		function wallWithPlacement(file: IfcFile, xyz: [number, number, number]): EntityInstance {
 			const element = file.createEntity("IfcWall");
 			const point = file.createEntity("IfcCartesianPoint", xyz);
 			const axis2Placement = file.createEntity("IfcAxis2Placement3D", point);
+			const localPlacement = file.createEntity("IfcLocalPlacement");
+			localPlacement.set("RelativePlacement", axis2Placement);
+			element.set("ObjectPlacement", localPlacement);
+			return element;
+		}
+
+		// Python: `test_selecting_an_elements_rotation_using_a_query` builds its rotated
+		// fixture via `api.geometry.edit_object_placement` with a raw numpy matrix; this
+		// file's own established convention (see the header comment) builds the
+		// underlying entity graph directly instead. A `RefDirection` of
+		// `[cos(theta), sin(theta), 0]` with `Axis` left unset (defaults to global Z)
+		// rotates the local frame by `theta` about Z relative to the global axes --
+		// verified empirically to produce the exact same Euler decomposition
+		// (`rotation_x`/`rotation_y` ≈ 0, `rotation_z` ≈ the input degrees) as Python's
+		// own matrix-based fixture.
+		function wallWithZRotatedPlacement(
+			file: IfcFile,
+			xyz: [number, number, number],
+			zRotationDegrees: number,
+		): EntityInstance {
+			const element = file.createEntity("IfcWall");
+			const point = file.createEntity("IfcCartesianPoint", xyz);
+			const theta = (zRotationDegrees * Math.PI) / 180;
+			const refDirection = file.createEntity("IfcDirection", [Math.cos(theta), Math.sin(theta), 0]);
+			const axis2Placement = file.createEntity("IfcAxis2Placement3D", point, null, refDirection);
 			const localPlacement = file.createEntity("IfcLocalPlacement");
 			localPlacement.set("RelativePlacement", axis2Placement);
 			element.set("ObjectPlacement", localPlacement);
@@ -612,20 +634,21 @@ describe("selector.getElementValue", () => {
 			expect(subject.getElementValue(element, "elevation")).toBe(8);
 		});
 
-		test("rotation_x/y/z still throw a clear, descriptive error naming the missing Python module when ObjectPlacement is actually set", () => {
+		// Python: `test_selecting_an_elements_rotation_using_a_query` (selector.py's own
+		// feature test for #6262) -- full port, no longer a partial/blocker-only
+		// reproduction now that `util.shape_builder` has landed.
+		test("rotation_x/y/z decompose the element's world-space placement matrix into Euler angles, in degrees", () => {
 			const file = newFile();
-			const element = wallWithPlacement(file, [1, 2, 3]);
+			const element = wallWithZRotatedPlacement(file, [1, 2, 3], 30);
 
-			for (const key of ["rotation_x", "rotation_y", "rotation_z"]) {
-				expect(() => subject.getElementValue(element, key)).toThrow(/util\.shape_builder/);
-			}
+			expect(subject.getElementValue(element, "rotation_x")).toBeCloseTo(0, 9);
+			expect(subject.getElementValue(element, "rotation_y")).toBeCloseTo(0, 9);
+			expect(subject.getElementValue(element, "rotation_z")).toBeCloseTo(30, 9);
 		});
 
 		// Python: `test_selecting_an_elements_rotation_using_a_query`'s
 		// `element_without_placement` assertion (`get_element_value(..., "rotation_z") is
-		// None`) -- the only part of that Python test this port can still reproduce; the
-		// rest of that test exercises the real rotation-decomposition computation this
-		// port cannot yet perform (see the blocker above).
+		// None`).
 		test("returns null, not a throw, when ObjectPlacement is declared but left unset", () => {
 			const file = newFile();
 			const element = file.createEntity("IfcWall");

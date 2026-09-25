@@ -3,8 +3,9 @@
 // No real Python test exists for `edit_resource_time.py` (see `test/api/resource/` --
 // no `test_edit_resource_time.py`), only the docstring's own worked example. This
 // suite is written directly from the real source's own behavior, and pins the
-// disclosed `"RemainingTime"` typo quirk and the `api.sequence.calculateTaskDuration`
-// blocker (see `../../../src/api/resource/editResourceTime.ts`'s own header comment).
+// disclosed `"RemainingTime"` typo quirk (see
+// `../../../src/api/resource/editResourceTime.ts`'s own header comment) and exercises
+// the `api.sequence.calculateTaskDuration` wiring end to end.
 //
 // Local fixture helpers (`createObjective`/`createMetric`/`associateConstraint`/
 // `createReference`) build the underlying `IfcRelAssociatesConstraint`/`IfcObjective`/
@@ -127,14 +128,21 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.resource.edi
 		expect(time.get("RemainingWork")).toBe("P2D");
 	});
 
-	// See this file's header comment and `../../../src/api/resource/editResourceTime
-	// .ts`'s own header comment / `TODOS.md`: `api.sequence.calculateTaskDuration` is
-	// not ported.
-	test("editing ScheduleUsage under a hard ScheduleWork constraint, with an assigned task, throws the disclosed blocker", () => {
+	// `api.sequence.calculateTaskDuration` is now wired up (was a disclosed blocker
+	// until `api.sequence` landed in full -- see `TODOS.md`). `ScheduleWork` is set
+	// BEFORE locking it (the lock only prevents further writes, not reads) so the
+	// later `ScheduleUsage` edit's duration recalculation has a real value to read:
+	// 4 days of work at 2x usage -> a 2-day task duration (matches
+	// `calculateTaskDuration.ts`'s own `Math.ceil(scheduleSeconds / secondsPerWorkday
+	// / scheduleUsage)`, with the default 8-hour workday since no `IfcWorkSchedule` is
+	// set up here).
+	test("editing ScheduleUsage under a hard ScheduleWork constraint, with an assigned task, calculates the task's duration", () => {
 		const file = createTestFile(schema);
 		file.createEntity("IfcProject");
 		const labour = addResource(file, { ifcClass: "IfcLaborResource" });
 		const time = addResourceTime(file, { resource: labour });
+
+		editResourceTime(file, { resourceTime: time, attributes: { ScheduleWork: "P4D" } });
 		lockUsageAttribute(file, labour, "ScheduleWork");
 
 		const task = file.createEntity("IfcTask");
@@ -142,10 +150,12 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.resource.edi
 		assignsToProcess.set("RelatedObjects", [labour]);
 		assignsToProcess.set("RelatingProcess", task);
 
-		expect(() => editResourceTime(file, { resourceTime: time, attributes: { ScheduleUsage: 2.0 } })).toThrow();
-		// The attribute itself was already written before the blocked call, matching
-		// what real Python's own call ordering would also have already committed.
+		editResourceTime(file, { resourceTime: time, attributes: { ScheduleUsage: 2.0 } });
+
 		expect(time.get("ScheduleUsage")).toBe(2.0);
+		const taskTime = task.get("TaskTime") as EntityInstance | null;
+		expect(taskTime).not.toBeNull();
+		expect((taskTime as EntityInstance).get("ScheduleDuration")).toBe("P2D");
 	});
 
 	test("editing ScheduleUsage with no assigned task does not throw", () => {
