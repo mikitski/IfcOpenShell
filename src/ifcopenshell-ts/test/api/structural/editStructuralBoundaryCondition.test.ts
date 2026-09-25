@@ -2,18 +2,18 @@
 //
 // No real Python test exists for `edit_structural_boundary_condition.py` (confirmed:
 // no `test_edit_structural_boundary_condition.py` under `test/api/structural/`). This
-// suite is written directly from the real source's own behavior/docstring, including
-// a dedicated pin for the disclosed, pre-existing `attribute_kind_of` primitive-layer
-// gap that blocks the `"IfcBoolean"`/generic-measure-class branches -- see
-// `../../../src/api/structural/editStructuralBoundaryCondition.ts`'s own header
-// comment (and `TODOS.md`'s "UPDATE" for this chunk) for the full disclosure. The
-// comment on each blocked assertion records the real, unblocked behavior to restore
-// once that gap closes (matching `editPset.test.ts`'s/`editSurfaceStyle.test.ts`'s
-// own established precedent).
+// suite is written directly from the real source's own behavior/docstring. The
+// `"IfcBoolean"`/generic-measure-class branches now build their wrapped instance
+// successfully on IFC4/IFC4X3 (the `attribute_kind_of` primitive-layer gate this file
+// used to pin, `TODOS.md`'s "EntityInstance.setByIndex/IfcFile.createEntity ..." entry,
+// was resolved 2026-09-23). IFC2X3 still throws for those same 2 tests, but for a
+// genuinely unrelated reason: `IfcBoundaryNodeCondition.TranslationalStiffnessX` isn't
+// declared on IFC2X3 at all.
 
 import { describe, expect, test } from "vitest";
 import { addStructuralBoundaryCondition } from "../../../src/api/structural/addStructuralBoundaryCondition";
 import { editStructuralBoundaryCondition } from "../../../src/api/structural/editStructuralBoundaryCondition";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS)("api.structural.editStructuralBoundaryCondition (%s)", (schema) => {
@@ -38,48 +38,54 @@ describe.each(AVAILABLE_SCHEMAS)("api.structural.editStructuralBoundaryCondition
 		expect(condition.get("Name")).toBeNull();
 	});
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): PR #179 fixed the native
-	// `attribute_value_shim.cpp` gate this test pinned (TODOS.md's "EntityInstance
-	// .setByIndex/IfcFile.createEntity ..." entry, "seventh consequence" -- now
-	// RESOLVED for the shared gate) -- IFC4/IFC4X3 no longer throw here. IFC2X3 is
-	// UNAFFECTED and kept running: confirmed empirically that `IfcBoundaryNodeCondition
-	// .TranslationalStiffnessX` doesn't exist on IFC2X3 at all ("has no attribute
-	// 'TranslationalStiffnessX'") -- a genuinely separate, still-real block this
-	// generic `.toThrow()` (no message argument) still correctly catches. Real
-	// expected result for IFC4/IFC4X3 is the comment directly below -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skipIf(schema !== "IFC2X3")(
-		"an 'IfcBoolean'-typed attribute is BLOCKED by the disclosed primitive-layer gap",
-		() => {
-			const file = createTestFile(schema);
-			const condition = addStructuralBoundaryCondition(file, {});
+	// IFC2X3 has no `TranslationalStiffnessX` attribute on `IfcBoundaryNodeCondition` at
+	// all -- a genuine, unrelated, still-real schema-capability gap (confirmed
+	// empirically: throws "has no attribute 'TranslationalStiffnessX'"), independent of
+	// the now-resolved `attribute_kind_of` gate this file used to pin. IFC4/IFC4X3 now
+	// correctly build the wrapped `IfcBoolean`/measure-class instance.
+	test("an 'IfcBoolean'-typed attribute is boxed into a fresh IfcBoolean instance", () => {
+		const file = createTestFile(schema);
+		const condition = addStructuralBoundaryCondition(file, {});
 
-			// Real, unblocked Python behavior once the gap closes:
-			// `condition.get("TranslationalStiffnessX")` would be a fresh `IfcBoolean(true)`
-			// wrapping instance.
+		if (schema === "IFC2X3") {
 			expect(() =>
 				editStructuralBoundaryCondition(file, {
 					condition,
 					attributes: { TranslationalStiffnessX: { type: "IfcBoolean", value: true } },
 				}),
 			).toThrow();
-		},
-	);
+			return;
+		}
 
-	// SKIPPED on IFC4/IFC4X3 only (PR #179): same gate/reasoning as the test above
-	// -- see that comment (IFC2X3 kept running, unaffected).
-	test.skipIf(schema !== "IFC2X3")("a generic measure-class attribute is BLOCKED by the same gap", () => {
+		editStructuralBoundaryCondition(file, {
+			condition,
+			attributes: { TranslationalStiffnessX: { type: "IfcBoolean", value: true } },
+		});
+		const value = condition.get("TranslationalStiffnessX") as EntityInstance;
+		expect(value.isA("IfcBoolean")).toBe(true);
+		expect(value.getByIndex(0)).toBe(true);
+	});
+
+	test("a generic measure-class attribute is boxed into a fresh instance of that class", () => {
 		const file = createTestFile(schema);
 		const condition = addStructuralBoundaryCondition(file, {});
 
-		// Real, unblocked Python behavior once the gap closes:
-		// `condition.get("TranslationalStiffnessX")` would be a fresh
-		// `IfcLinearStiffnessMeasure(1000.0)` wrapping instance.
-		expect(() =>
-			editStructuralBoundaryCondition(file, {
-				condition,
-				attributes: { TranslationalStiffnessX: { type: "IfcLinearStiffnessMeasure", value: 1000.0 } },
-			}),
-		).toThrow();
+		if (schema === "IFC2X3") {
+			expect(() =>
+				editStructuralBoundaryCondition(file, {
+					condition,
+					attributes: { TranslationalStiffnessX: { type: "IfcLinearStiffnessMeasure", value: 1000.0 } },
+				}),
+			).toThrow();
+			return;
+		}
+
+		editStructuralBoundaryCondition(file, {
+			condition,
+			attributes: { TranslationalStiffnessX: { type: "IfcLinearStiffnessMeasure", value: 1000.0 } },
+		});
+		const value = condition.get("TranslationalStiffnessX") as EntityInstance;
+		expect(value.isA("IfcLinearStiffnessMeasure")).toBe(true);
+		expect(value.getByIndex(0)).toBe(1000.0);
 	});
 });

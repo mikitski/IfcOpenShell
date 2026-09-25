@@ -1,17 +1,9 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/owner/test_add_application.py` (src/ifcopenshell-python).
-// The base `TestAddApplication`/`TestAddApplicationIFC2X3` case (IFC2X3/IFC4) is ported
-// as-is below and passes. `TestAddApplicationIFC4X3`'s own override -- which exercises
-// the `IfcActor`+"PEnum_AddressType"-pset path -- currently CANNOT pass against this
-// port: see `../../../src/api/owner/addApplication.ts`'s header comment for the full,
-// disclosed, pre-existing primitive-layer gap responsible (`file.createEntity(
-// "IfcLabel", ...)` throws for any standalone defined-type instance -- the same gap
-// `../unit/addConversionBasedUnit.test.ts` already pins for a different call site).
-// The IFC4X3 case below pins the CURRENT, disclosed, blocked behavior instead (matching
-// that file's own precedent) -- it starts failing (a good thing) the moment this
-// foundational gap is ever closed, at which point it should be replaced with the real
-// `TestAddApplicationIFC4X3` assertions.
+// Both the base `TestAddApplication`/`TestAddApplicationIFC2X3` case (IFC2X3/IFC4) and
+// `TestAddApplicationIFC4X3`'s own override (the `IfcActor`+"PEnum_AddressType"-pset
+// path) are ported below and pass.
 
 import { describe, expect, test } from "vitest";
 import { addApplication } from "../../../src/api/owner/addApplication";
@@ -65,37 +57,60 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC4X3"))("api.owner.addApp
 	});
 });
 
-// --- IFC4X3: disclosed, pre-existing primitive-layer gap -- see this file's header comment ---
+// --- IFC4X3 ---
 
 // `describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))` -- CI's native build only
 // registers IFC4 (`-DSCHEMA_VERSIONS=4`, a long-established, tracked gap -- see
 // `test/util/doc.test.ts`'s own identical, already-established precedent for this exact
 // guard), so this block must be schema-availability-gated like every other IFC4X3-only
 // `describe` in this project; it only happens to run locally when IFC4X3 is registered.
-describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))(
-	"api.owner.addApplication (IFC4X3) -- disclosed blocked default-developer path",
-	() => {
-		test("adding an application with an explicit developer still works", () => {
-			const file = createTestFile("IFC4X3");
-			const developer = file.createEntity("IfcOrganization", null, "Acme");
-			const application = addApplication(file, { applicationDeveloper: developer });
-			expect((application.get("ApplicationDeveloper") as EntityInstance).equals(developer)).toBe(true);
-		});
+describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.owner.addApplication (IFC4X3)", () => {
+	test("adding an application with an explicit developer still works", () => {
+		const file = createTestFile("IFC4X3");
+		const developer = file.createEntity("IfcOrganization", null, "Acme");
+		const application = addApplication(file, { applicationDeveloper: developer });
+		expect((application.get("ApplicationDeveloper") as EntityInstance).equals(developer)).toBe(true);
+	});
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, "third consequence" -- now RESOLVED for the shared
-		// gate) -- `edit_pset`'s standalone `IfcLabel` construction no longer throws.
-		// Real expected result (per that TODOS.md consequence's own writeup): a
-		// default "IfcOpenShell" `IfcOrganization`, wrapped in an `IfcActor`, with a
-		// real "PEnum_AddressType" `IfcPropertySet` attached -- left to a follow-up
-		// module-grouped chunk to verify and flip.
-		test.skip("adding the default IfcOpenShell application currently throws (pinned, disclosed gap)", () => {
-			const file = createTestFile("IFC4X3");
-			expect(() => addApplication(file, {})).toThrow("Attribute access is only supported on entity instances");
-		});
-	},
-);
+	// Matches real Python's `TestAddApplicationIFC4X3.test_adding_the_ifcopenshell
+	// _application` override: `IfcTelecomAddress` is deprecated on IFC4X3, so the
+	// default organisation has no `Addresses` at all -- instead it's wrapped in an
+	// `IfcActor` carrying a "PEnum_AddressType" property set.
+	test("adding the default IfcOpenShell application", () => {
+		const file = createTestFile("IFC4X3");
+		const application = addApplication(file, {});
+		const developer = application.get("ApplicationDeveloper") as EntityInstance;
+		expect(application.get("Version")).toBe(DEFAULT_VERSION);
+		expect(application.get("ApplicationFullName")).toBe("IfcOpenShell");
+		expect(application.get("ApplicationIdentifier")).toBe("IfcOpenShell");
+		expect(developer.isA("IfcOrganization")).toBe(true);
+		expect(developer.getByIndex(0)).toBe("IfcOpenShell");
+		expect(developer.get("Name")).toBe("IfcOpenShell");
+		expect(developer.get("Description")).toBe(
+			"IfcOpenShell is an open source software library that helps users and software developers to work with IFC data.",
+		);
+		const roles = developer.get("Roles") as EntityInstance[];
+		expect(roles[0].get("Role")).toBe("USERDEFINED");
+		expect(roles[0].get("UserDefinedRole")).toBe("CONTRIBUTOR");
+		expect(developer.get("Addresses")).toBeNull();
+
+		const actors = file.byType("IfcActor");
+		expect(actors.length).toBeGreaterThan(0);
+		const actor = actors[0];
+		expect((actor.get("TheActor") as EntityInstance).equals(developer)).toBe(true);
+		const rel = file.byType("IfcRelDefinesByProperties")[0];
+		expect((rel.get("RelatedObjects") as EntityInstance[])[0].equals(actor)).toBe(true);
+		const propertySet = rel.get("RelatingPropertyDefinition") as EntityInstance;
+		expect(propertySet.get("Name")).toBe("PEnum_AddressType");
+		const properties = propertySet.get("HasProperties") as EntityInstance[];
+		const byName = new Map(properties.map((p) => [p.get("Name") as string, p]));
+		expect((byName.get("Purpose")?.get("NominalValue") as EntityInstance).getByIndex(0)).toBe("OTHER");
+		expect((byName.get("UserDefinedPurpose")?.get("NominalValue") as EntityInstance).getByIndex(0)).toBe("WEBPAGE");
+		expect((byName.get("WWWHomePageURL")?.get("NominalValue") as EntityInstance).getByIndex(0)).toBe(
+			"https://ifcopenshell.org",
+		);
+	});
+});
 
 // --- Transaction/undo-redo regression coverage (no Python counterpart) ---
 

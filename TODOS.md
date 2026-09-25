@@ -811,7 +811,9 @@ now-fixed gate, already diagnosed in this entry's own UPDATE history below unles
   of a real conversion-based unit both work end-to-end; `convertFileLengthUnits`' imperial-target and
   entity-wrapped-`IfcLengthMeasure` in-place conversion paths both verified numerically).
 - `test/api/owner/addApplication.test.ts` (1) -- third consequence (IFC4X3 default-organisation
-  `IfcLabel` pset property).
+  `IfcLabel` pset property). **DONE (chunk 3 of 5)**: un-skipped and flipped to the real, verified
+  assertion (`TestAddApplicationIFC4X3.test_adding_the_ifcopenshell_application`'s own default
+  organisation, wrapped in an `IfcActor` carrying a real "PEnum_AddressType" `IfcPropertySet`).
 - `test/api/pset/editPset.test.ts` (18) -- fourth consequence (`cast_value_to_primary_measure_type`,
   the single widest-impact consequence). **DONE (chunk 2 of 5)**: un-skipped and flipped to the
   real, verified assertions (plain-scalar property creation/update, buildingSMART/custom-template
@@ -836,14 +838,35 @@ now-fixed gate, already diagnosed in this entry's own UPDATE history below unles
   (`test_editing_an_enumeration`'s own wrapped `IfcLabel` values, and the existing
   `IfcPropertyEnumeration` being mutated in place rather than replaced).
 - `test/api/structural/editStructuralBoundaryCondition.test.ts` (4) -- seventh consequence
-  (`IfcBoolean`/generic-measure-class SELECT-typed stiffness attributes).
+  (`IfcBoolean`/generic-measure-class SELECT-typed stiffness attributes). **DONE (chunk 3 of 5)**:
+  un-skipped and flipped to the real, verified assertions on IFC4/IFC4X3 (a fresh `IfcBoolean(true)`/
+  `IfcLinearStiffnessMeasure(1000.0)` wrapping instance) -- IFC2X3 is left asserting its own,
+  genuinely unrelated `.toThrow()` (`IfcBoundaryNodeCondition.TranslationalStiffnessX` doesn't exist
+  on that schema at all), not touched by this gate.
 - `test/api/cost/editCostValue.test.ts` (4), `test/api/cost/editCostValueFormula.test.ts` (2),
   `test/api/cost/calculateCostItemResourceValue.test.ts` (2) -- eighth consequence (`AppliedValue`/
   `UnitBasis` standalone measure construction, transitively through formula evaluation and resource
-  cost calculation).
+  cost calculation). **DONE (chunk 3 of 5)**: un-skipped and flipped to the real, verified assertions
+  (`AppliedValue`/`UnitBasis` construction and replacement in `editCostValue.test.ts`, matching real
+  Python's own `test_edit_cost_value.py`; the multi-operand `"5000 * 1.19"` `MULTIPLY` formula in
+  `editCostValueFormula.test.ts`; and `calculateCostItemResourceValue.test.ts`'s own resource-cost
+  formula, confirmed empirically to resolve to a `"0*1"` `MULTIPLY` of a `null` first operand -- a
+  falsy `0` cost stays unwrapped, per `editCostValueFormula.ts`'s own `if (data.AppliedValue)` guard
+  -- and a real `IfcMonetaryMeasure(1)` second operand, not a single scalar root `AppliedValue` as
+  that test's own original pinning comment loosely assumed).
 - `test/api/georeference/addGeoreferencing.test.ts` (2), `test/api/georeference/editGeoreferencing
   .test.ts` (1) -- ninth/tenth consequence (IFC2X3 pset-property/dead-code branches, IFC4X3
-  `IfcRigidOperation` branch).
+  `IfcRigidOperation` branch). **DONE (chunk 3 of 5)**: un-skipped and flipped to the real, verified
+  assertions, matching `test_add_georeferencing.py`'s/`test_edit_georeferencing.py`'s own
+  `TestAddGeoreferencingIFC2X3`/`TestEditGeoreferencingIFC2X3` classes exactly (both pset properties,
+  correctly wrapped as `IfcLabel`/`IfcLengthMeasure`) and `addGeoreferencing.ts`'s own
+  `IfcRigidOperation` branch (`FirstCoordinate`/`SecondCoordinate` both wrapping a fresh
+  `IfcLengthMeasure(0)`). `editGeoreferencing.test.ts`'s own real, independently-confirmed dead-code
+  bug (the loop-local wrapped value is computed and discarded, never written back into the dict) is
+  still real and unrelated to this gate -- but doesn't affect the OBSERVED result here, since
+  `addGeoreferencing` already created both pset properties with their correct wrapped types before
+  `editGeoreferencing` runs, and `editPset`'s own "update an EXISTING property" tier retains that
+  type regardless of what the dead code would have computed.
 - `test/api/geometry/clipSolid.test.ts` (6), `test/api/geometry/clipSolidBounded.test.ts` (3) --
   eleventh/twelfth consequence (`element`-provided branch's final `edit_pset` call).
 - `test/api/alignment/addPositioningReferent.test.ts` (2), `test/api/alignment/addStationingReferent

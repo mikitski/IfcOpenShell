@@ -3,17 +3,10 @@
 // Port of `test/api/cost/test_edit_cost_value.py`'s `TestEditCostValue` (real Python
 // runs this against IFC4 and IFC4X3 only -- never IFC2X3, gated here the same way).
 //
-// BOTH of real Python's own test cases (`AppliedValue`, `UnitBasis`) hit the already
-// 8-times-confirmed `TODOS.md` primitive-layer gap ("EntityInstance.setByIndex/
-// IfcFile.createEntity cannot write an initial value into a freshly created simple/
-// defined-type instance") -- confirmed empirically against this exact worktree's own
-// built native addon while writing this suite. See
+// Both of real Python's own test cases (`AppliedValue`, `UnitBasis`) build a fresh
+// simple/defined-type instance (the `TODOS.md` "EntityInstance.setByIndex/IfcFile
+// .createEntity ..." gate, resolved 2026-09-23) -- see
 // `../../../src/api/cost/editCostValue.ts`'s own header comment for the full writeup.
-// This suite pins the CURRENT, disclosed, blocked behavior with dedicated tests
-// (matching `test/api/pset/editPset.test.ts`'s own established precedent), with a
-// comment recording the real, unblocked assertion to restore once this gap closes, and
-// adds one extra, NOT-blocked test (a plain attribute needing no wrapping) to still
-// exercise the trivial `setattr` half of this function.
 
 import { describe, expect, test } from "vitest";
 import { addCostItem } from "../../../src/api/cost/addCostItem";
@@ -21,6 +14,7 @@ import { addCostSchedule } from "../../../src/api/cost/addCostSchedule";
 import { addCostValue } from "../../../src/api/cost/addCostValue";
 import { editCostValue } from "../../../src/api/cost/editCostValue";
 import { addSiUnit } from "../../../src/api/unit/addSiUnit";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.cost.editCostValue (%s)", (schema) => {
@@ -35,42 +29,45 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.cost.editCos
 		expect(value.get("Category")).toBe("Labour");
 	});
 
-	// Real Python: `test_editing_applied_value` -- asserts `value.AppliedValue
-	// .wrappedValue == 42.0` once this gap closes.
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- constructing the
-	// `IfcMonetaryMeasure` no longer throws; real expected result is the "Real
-	// Python" comment directly above -- left to a follow-up chunk to verify and flip.
-	test.skip("BLOCKED: editing AppliedValue needs a freshly-constructed IfcMonetaryMeasure", () => {
+	// Real Python: `test_editing_applied_value`.
+	test("editing AppliedValue wraps the raw number in a fresh IfcMonetaryMeasure", () => {
 		const file = createTestFile(schema);
 		const schedule = addCostSchedule(file);
 		const item = addCostItem(file, { costSchedule: schedule });
 		const value = addCostValue(file, { parent: item });
 
-		expect(() => editCostValue(file, { costValue: value, attributes: { AppliedValue: 42.0 } })).toThrow();
+		editCostValue(file, { costValue: value, attributes: { AppliedValue: 42.0 } });
+
+		expect((value.get("AppliedValue") as EntityInstance).getByIndex(0)).toBe(42.0);
 	});
 
-	// Real Python: `test_editing_unit_basis_removes_old_deeply` -- asserts the new
-	// UnitBasis differs by id from the old one once this gap closes.
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- constructing the measure
-	// instance no longer throws; real expected result is the "Real Python" comment
-	// directly above -- left to a follow-up chunk to verify and flip.
-	test.skip("BLOCKED: editing UnitBasis needs a freshly-constructed measure instance", () => {
+	// Real Python: `test_editing_unit_basis_removes_old_deeply` (the "removes old
+	// deeply" part isn't independently observable here -- see `editCostValue.ts`'s own
+	// header comment: `removeDeep2`'s no-`alsoConsider` call is a no-op while the old
+	// `UnitBasis` is still forward-referenced, matching real Python's own behavior;
+	// neither real test asserts the old entity was actually purged from the file).
+	test("editing UnitBasis with a new value replaces the old one", () => {
 		const file = createTestFile(schema);
 		const schedule = addCostSchedule(file);
 		const item = addCostItem(file, { costSchedule: schedule });
 		const value = addCostValue(file, { parent: item });
 		const unit = addSiUnit(file, { unitType: "LENGTHUNIT" });
 
-		expect(() =>
-			editCostValue(file, {
-				costValue: value,
-				attributes: { UnitBasis: { ValueComponent: 1.0, UnitComponent: unit } },
-			}),
-		).toThrow();
+		editCostValue(file, {
+			costValue: value,
+			attributes: { UnitBasis: { ValueComponent: 1.0, UnitComponent: unit } },
+		});
+		const oldBasis = value.get("UnitBasis") as EntityInstance;
+		expect(oldBasis).not.toBeNull();
+		const oldBasisId = oldBasis.id();
+
+		editCostValue(file, {
+			costValue: value,
+			attributes: { UnitBasis: { ValueComponent: 2.0, UnitComponent: unit } },
+		});
+		const newBasis = value.get("UnitBasis") as EntityInstance;
+		expect(newBasis).not.toBeNull();
+		expect(newBasis.id()).not.toBe(oldBasisId);
 	});
 
 	// Real Python: `test_clearing_unit_basis` -- this direction (clearing to `null`,
