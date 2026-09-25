@@ -101,10 +101,7 @@ def main() -> None:
         # footprint reasonable for a file this size, while staying line-diffable: a
         # mismatch on one instance shows as a one-line diff, not a multi-line reflow of
         # the whole file.
-        lines = [
-            json.dumps({key: dump[key]}, sort_keys=True)[1:-1]
-            for key in sorted(dump, key=lambda k: int(k[1:]))
-        ]
+        lines = [json.dumps({key: dump[key]}, sort_keys=True)[1:-1] for key in sorted(dump, key=lambda k: int(k[1:]))]
         golden_path.write_text("{\n" + ",\n".join(lines) + "\n}\n")
         print(f"{ifc_path} -> {golden_path} ({len(dump)} instances)")
 
