@@ -2,9 +2,7 @@
 //
 // TS port of `test/api/georeference/test_edit_georeferencing.py`'s
 // `TestEditGeoreferencing` (IFC4-only, run against every non-IFC2X3 `AVAILABLE_SCHEMAS`
-// entry) and `TestEditGeoreferencingIFC2X3` (ported as a dedicated "pins the disclosed
-// blocked behavior" test -- see `../../../src/api/georeference/editGeoreferencing.ts`'s
-// own header comment for why this is currently blocked, not silently skipped).
+// entry) and `TestEditGeoreferencingIFC2X3`.
 //
 // Real Python's fixture is genuinely blank -- see `./addGeoreferencing.test.ts`'s own
 // header comment for why every test below calls `stripProjectBootstrap` first.
@@ -14,6 +12,7 @@ import { addContext } from "../../../src/api/context/addContext";
 import { addGeoreferencing } from "../../../src/api/georeference/addGeoreferencing";
 import { editGeoreferencing } from "../../../src/api/georeference/editGeoreferencing";
 import type { IfcFile } from "../../../src/file";
+import * as elementUtil from "../../../src/util/element";
 import type { Schema } from "../../bootstrap";
 import { AVAILABLE_SCHEMAS, createTestFile, stripProjectBootstrap } from "../../bootstrap";
 
@@ -50,49 +49,38 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.georeference
 });
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC2X3"))("api.georeference.editGeoreferencing (%s)", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gap
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- the dead-code
-	// `file.createEntity(...)` call no longer throws (the dead-code bug itself is
-	// unrelated and still real). The "TODO" comment directly below already records
-	// the exact real assertion to restore -- left to a follow-up chunk to verify.
-	test.skip("IFC2X3 is currently blocked by the disclosed primitive-layer gap (and a real, confirmed dead-code bug)", () => {
-		// See `../../../src/api/georeference/editGeoreferencing.ts`'s own header comment:
-		// real Python computes a wrapped value inside the loop and never writes it back
-		// into the dict -- a confirmed dead-code bug -- and the dead computation itself
-		// (`file.createEntity("IfcLabel"/etc., v)`) hits the already-disclosed
-		// `EntityInstance.setByIndex`/`IfcFile.createEntity` primitive-layer gap, so this
-		// throws on the very first loop iteration.
-		// TODO: once `TODOS.md`'s primitive-layer gap closes, replace this with a real
-		// assertion porting real Python's own `TestEditGeoreferencingIFC2X3
-		// .test_editing_georeferencing` (`crs["Name"]["value"] == "EPSG:7856"` wrapped in
-		// an `IfcLabel` -- NOT `IfcText`, per the dead-code bug -- and
-		// `conversion["Eastings"]["value"] == 123.45` wrapped in an `IfcReal` -- NOT
-		// `IfcLengthMeasure` -- both reflecting `editPset`'s own generic type-inference
-		// fallback, since the dead code never actually takes effect).
-		// Uses `createTestFile` directly (NOT `blankProjectFile`) -- the setup below
-		// needs a real user/application present so `addGeoreferencing`'s own `addPset`
-		// call succeeds up through creating both psets (see `addGeoreferencing.test.ts`'s
-		// own identical reasoning).
+	// Matches real Python's `TestEditGeoreferencingIFC2X3.test_editing_georeferencing`.
+	// The dead-code bug (`editGeoreferencing.ts`'s own header comment: the loop-local
+	// wrapped value is computed and discarded, never written back into the dict) is
+	// still real and unrelated to the now-resolved primitive-layer gate -- but it
+	// doesn't affect the OBSERVED types here: `addGeoreferencing` already created both
+	// pset properties (`Name` as `IfcLabel`, `Eastings`/etc. as `IfcLengthMeasure`), so
+	// `editPset`'s own "update an EXISTING property" tier retains the property's
+	// current wrapped type regardless of what the dead code would have computed.
+	test("edits the pset properties, retaining their existing wrapped types", () => {
 		const file = createTestFile(schema);
-		// `addGeoreferencing` itself already throws on IFC2X3 (see its own test file) --
-		// but only AFTER both `ePSet_MapConversion`/`ePSet_ProjectedCRS` psets are
-		// created (real `addPset` calls, unaffected by the gap), so the setup below
-		// reaches the same "both psets exist, both still empty" state real Python's own
-		// fully-functional `add_georeferencing` would, just via a caught throw instead.
-		try {
-			addGeoreferencing(file, {});
-		} catch {
-			// Expected -- see `addGeoreferencing.test.ts`'s own IFC2X3 test.
-		}
-		expect(file.byType("IfcPropertySet")).toHaveLength(2);
+		const project = file.byType("IfcProject")[0];
+		addGeoreferencing(file, {});
 
-		expect(() =>
-			editGeoreferencing(file, {
-				projectedCrs: { Name: "EPSG:7856" },
-				coordinateOperation: { Eastings: 123.45, Northings: 234.56 },
-			}),
-		).toThrow(/Attribute access is only supported on entity instances/);
+		editGeoreferencing(file, {
+			projectedCrs: { Name: "EPSG:7856" },
+			coordinateOperation: { Eastings: 123.45, Northings: 234.56 },
+		});
+
+		const conversion = elementUtil.getPset(project, "ePSet_MapConversion", null, false, false, true, true) as Record<
+			string,
+			{ id: number; value: unknown }
+		>;
+		const crs = elementUtil.getPset(project, "ePSet_ProjectedCRS", null, false, false, true, true) as Record<
+			string,
+			{ id: number; value: unknown }
+		>;
+		expect(crs.Name.value).toBe("EPSG:7856");
+		expect(file.byId(crs.Name.id).get("NominalValue").isA("IfcLabel")).toBe(true);
+		expect(conversion.Eastings.value).toBe(123.45);
+		expect(file.byId(conversion.Eastings.id).get("NominalValue").isA("IfcLengthMeasure")).toBe(true);
+		expect(conversion.Northings.value).toBe(234.56);
+		expect(conversion.OrthogonalHeight.value).toBe(0);
 	});
 
 	test("is a silent no-op on a projectless IFC2X3 model (real Python's own early-return guard)", () => {

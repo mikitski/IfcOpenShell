@@ -2,12 +2,10 @@
 //
 // No real Python test exists for `calculate_cost_item_resource_value.py`, only the
 // docstring's own worked example. This suite is written directly from the real
-// source's own behavior, including the disclosed, already 8-times-confirmed
-// `TODOS.md` primitive-layer gap this function transitively hits via
-// `./editCostValueFormula.ts` for every resource with a resolvable cost -- confirmed
-// empirically against this exact worktree's own built native addon while writing this
-// suite. See `../../../src/api/cost/calculateCostItemResourceValue.ts`'s own header
-// comment for the full writeup.
+// source's own behavior. See
+// `../../../src/api/cost/calculateCostItemResourceValue.ts`'s own header comment for
+// the full writeup of the (now-resolved) `TODOS.md` primitive-layer gate this
+// function's own transitive `editCostValueFormula` call used to hit.
 
 import { beforeEach, describe, expect, test } from "vitest";
 import { assignControl } from "../../../src/api/control/assignControl";
@@ -27,14 +25,15 @@ beforeEach(() => {
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 	"api.cost.calculateCostItemResourceValue (%s)",
 	(schema) => {
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, now RESOLVED for the shared gate) --
-		// constructing the formula's `IfcMonetaryMeasure` operand no longer throws.
-		// Real expected result: `calculateCostItemResourceValue` should complete and
-		// write a real numeric `AppliedValue` on the cost item's own cost value --
-		// left to a follow-up module-grouped chunk to verify and flip.
-		test.skip("BLOCKED: computing a resource's cost needs a freshly-constructed IfcMonetaryMeasure formula operand", () => {
+		// The resource's own `BaseCosts` value has no `AppliedValue` set, so `getCost`
+		// reads it as `0` (`getPrimitiveAppliedValue`'s own `!appliedValue` fallback);
+		// `getQuantity` falls back to `1` with no quantity added either. The resulting
+		// `"0*1"` formula parses as a `MULTIPLY` of 2 leaves (not a single scalar
+		// `AppliedValue` on the root -- only a true single-operand formula gets that),
+		// the first leaf's `AppliedValue` staying `null` (a falsy `0` operand, per
+		// `editCostValueFormula.ts`'s own `if (data.AppliedValue)` guard), the second
+		// wrapped as a real `IfcMonetaryMeasure(1)`.
+		test("computing a resource's cost writes a real 0*1 MULTIPLY formula", () => {
 			const file = createTestFile(schema);
 			const schedule = addCostSchedule(file);
 			const item = addCostItem(file, { costSchedule: schedule });
@@ -42,14 +41,19 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
 			const concrete = addResource(file, { ifcClass: "IfcConstructionMaterialResource", parentResource: crew });
 			assignControl(file, { relatingControl: item, relatedObjects: [concrete] });
 			const baseCost = addCostValue(file, { parent: concrete });
-			// The resource's own BaseCosts value can't be given a real numeric
-			// AppliedValue either (same blocked gap) -- `getCost` will simply read `0`
-			// for it (`getPrimitiveAppliedValue`'s own `!appliedValue` fallback), which is
-			// enough to exercise `calculateCostItemResourceValue`'s own control flow up to
-			// the point it tries to materialize the computed formula's own value.
 			expect(baseCost).toBeDefined();
 
-			expect(() => calculateCostItemResourceValue(file, { costItem: item })).toThrow();
+			calculateCostItemResourceValue(file, { costItem: item });
+
+			const costValues = item.get("CostValues") as EntityInstance[];
+			expect(costValues).toHaveLength(1);
+			const costValue = costValues[0];
+			expect(costValue.get("Name")).toBe("Unnamed");
+			expect(costValue.get("ArithmeticOperator")).toBe("MULTIPLY");
+			const components = costValue.get("Components") as EntityInstance[];
+			expect(components).toHaveLength(2);
+			expect(components[0].get("AppliedValue")).toBeNull();
+			expect((components[1].get("AppliedValue") as EntityInstance).getByIndex(0)).toBe(1);
 		});
 
 		test("no resources controlled: clears existing values and does nothing else, NOT blocked", () => {

@@ -4,9 +4,7 @@
 // (IFC4-only test class, run against every `AVAILABLE_SCHEMAS` entry except IFC2X3 --
 // no schema divergence exists for the entities involved between IFC4/IFC4X3, matching
 // `test/api/grid/createGridAxis.test.ts`'s own identical precedent) and
-// `TestAddGeoreferencingIFC2X3` (ported as a dedicated "pins the disclosed blocked
-// behavior" test -- see `../../../src/api/georeference/addGeoreferencing.ts`'s own
-// header comment for why this is currently blocked, not silently skipped).
+// `TestAddGeoreferencingIFC2X3`.
 //
 // Real Python's `test.bootstrap.IFC4`/`IFC2X3` fixture is genuinely blank (no
 // pre-existing `IfcProject`/`RepresentationContexts`), unlike this port's own
@@ -20,7 +18,9 @@ import { describe, expect, test } from "vitest";
 import { addContext } from "../../../src/api/context/addContext";
 import { addGeoreferencing } from "../../../src/api/georeference/addGeoreferencing";
 import { removeGeoreferencing } from "../../../src/api/georeference/removeGeoreferencing";
+import type { EntityInstance } from "../../../src/entityInstance";
 import type { IfcFile } from "../../../src/file";
+import * as elementUtil from "../../../src/util/element";
 import type { Schema } from "../../bootstrap";
 import { AVAILABLE_SCHEMAS, createTestFile, stripProjectBootstrap } from "../../bootstrap";
 
@@ -114,55 +114,51 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC4X3"))(
 			expect(conversion.get("FactorZ")).toBe(1);
 		});
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, now RESOLVED for the shared gate) --
-		// `IfcLengthMeasure` construction no longer throws. The "TODO" comment
-		// directly below already records the exact real assertion to restore -- left
-		// to a follow-up module-grouped chunk to verify and flip.
-		test.skip("ifcClass: 'IfcRigidOperation' is currently blocked by the disclosed primitive-layer gap", () => {
-			// See `../../../src/api/georeference/addGeoreferencing.ts`'s own header
-			// comment: `FirstCoordinate`/`SecondCoordinate` need a standalone valued
-			// `IfcLengthMeasure`, which this port cannot currently construct.
-			// TODO: once `TODOS.md`'s primitive-layer gap closes, replace this with a real
-			// assertion that `IfcRigidOperation` is created with FirstCoordinate/
-			// SecondCoordinate both wrapping `0`.
+		test("ifcClass: 'IfcRigidOperation' wraps FirstCoordinate/SecondCoordinate in a fresh IfcLengthMeasure", () => {
 			const file = blankProjectFile(schema);
 			addContext(file, { contextType: "Model" });
 
-			expect(() => addGeoreferencing(file, { ifcClass: "IfcRigidOperation" })).toThrow();
+			addGeoreferencing(file, { ifcClass: "IfcRigidOperation" });
+
+			const op = file.byType("IfcRigidOperation")[0];
+			expect(op).toBeDefined();
+			const firstCoordinate = op.get("FirstCoordinate") as EntityInstance;
+			const secondCoordinate = op.get("SecondCoordinate") as EntityInstance;
+			expect(firstCoordinate.isA("IfcLengthMeasure")).toBe(true);
+			expect(firstCoordinate.getByIndex(0)).toBe(0);
+			expect(secondCoordinate.isA("IfcLengthMeasure")).toBe(true);
+			expect(secondCoordinate.getByIndex(0)).toBe(0);
 		});
 	},
 );
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s === "IFC2X3"))("api.georeference.addGeoreferencing (%s)", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, now RESOLVED for the shared gate) -- both `editPset`/
-	// `IfcLengthMeasure` construction no longer throw. The "TODO" comment directly
-	// below already records the exact real assertion to restore -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skip("IFC2X3 is currently blocked by the disclosed primitive-layer gap", () => {
-		// See `../../../src/api/georeference/addGeoreferencing.ts`'s own header comment:
-		// both `editPset(crs, {Name: name})` (a brand-new plain-string property) and the
-		// `file.createEntity("IfcLengthMeasure", 0)` calls hit the already-disclosed
-		// `EntityInstance.setByIndex`/`IfcFile.createEntity` primitive-layer gap.
-		// TODO: once `TODOS.md`'s primitive-layer gap closes, replace this with a real
-		// assertion porting real Python's own `TestAddGeoreferencingIFC2X3
-		// .test_adding_georeferencing` (two `ePSet_ProjectedCRS`/`ePSet_MapConversion`
-		// psets on the project, `crs["Name"]["value"] == "EPSG:3857"` wrapped in an
-		// `IfcLabel`, `conversion["Eastings"]["value"] == 0` wrapped in an
-		// `IfcLengthMeasure`).
-		//
-		// Uses `createTestFile` directly (NOT `blankProjectFile`) -- this test needs a
-		// real user/application present so `addPset`'s own `createOwnerHistory` call
-		// succeeds and the actually-disclosed primitive-layer gap (not an unrelated
-		// "no owner history available" throw) is what's exercised.
+	// Matches real Python's `TestAddGeoreferencingIFC2X3.test_adding_georeferencing`:
+	// two `ePSet_ProjectedCRS`/`ePSet_MapConversion` psets on the project, `Name`
+	// wrapped in an `IfcLabel`, `Eastings`/`Northings`/`OrthogonalHeight` each wrapped
+	// in an `IfcLengthMeasure`.
+	test("adds georeferencing pset properties", () => {
 		const file = createTestFile(schema);
+		const project = file.byType("IfcProject")[0];
 
-		expect(() => addGeoreferencing(file, {})).toThrow(/Attribute access is only supported on entity instances/);
-		// Both psets are created (real `addPset` calls, unaffected by the gap) before the
-		// throw -- see `addGeoreferencing.ts`'s own header comment.
+		addGeoreferencing(file, {});
+
 		expect(file.byType("IfcPropertySet")).toHaveLength(2);
+		const conversion = elementUtil.getPset(project, "ePSet_MapConversion", null, false, false, true, true) as Record<
+			string,
+			{ id: number; value: unknown }
+		>;
+		const crs = elementUtil.getPset(project, "ePSet_ProjectedCRS", null, false, false, true, true) as Record<
+			string,
+			{ id: number; value: unknown }
+		>;
+		expect(conversion).toBeTruthy();
+		expect(crs).toBeTruthy();
+		expect(crs.Name.value).toBe("EPSG:3857");
+		expect(file.byId(crs.Name.id).get("NominalValue").isA("IfcLabel")).toBe(true);
+		expect(conversion.Eastings.value).toBe(0);
+		expect(file.byId(conversion.Eastings.id).get("NominalValue").isA("IfcLengthMeasure")).toBe(true);
+		expect(conversion.Northings.value).toBe(0);
+		expect(conversion.OrthogonalHeight.value).toBe(0);
 	});
 });
