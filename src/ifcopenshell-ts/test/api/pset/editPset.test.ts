@@ -5,43 +5,29 @@
 // the latter INHERITS every base-class test too (Python multiple inheritance), so every
 // method in `TestEditPsetIFC2X3` runs against BOTH IFC2X3 and IFC4.
 //
-// *** CRITICAL: most of this real Python test file exercises PLAIN scalar values
-// (`"FireRating": "2HR"`-style), which are currently BLOCKED in this port by a real,
-// pre-existing, already-disclosed primitive-layer gap -- see `../../../src/api/pset/
-// editPset.ts`'s own header comment (top section) and `api/unit/
-// addConversionBasedUnit.ts`'s identical, independently-confirmed situation for the
-// full empirical writeup: `file.createEntity`/`EntityInstance.setByIndex` cannot
-// materialize a NEW simple/defined-type value (e.g. `IfcLabel("hi")`) from a raw JS
-// scalar at all right now. This file is restructured accordingly, following
-// `addConversionBasedUnit.test.ts`'s own established precedent: ***
+// Plain-scalar property values (`"FireRating": "2HR"`-style) used to be BLOCKED here by
+// a native `attribute_value_shim.cpp` gate (`TODOS.md`'s "EntityInstance.setByIndex/
+// IfcFile.createEntity ..." entry, "fourth consequence") -- `file.createEntity`/
+// `EntityInstance.setByIndex` couldn't materialize a NEW simple/defined-type value (e.g.
+// `IfcLabel("hi")`) from a raw JS scalar. That gate was fixed 2026-09-23; every test
+// below that used to pin the blocked "throws" behavior now asserts the real, verified
+// result instead (confirmed against `src/ifcopenshell-python`'s own `test_edit_pset.py`
+// and this worktree's own built native addon). `createTypedValue` (below) remains in use
+// wherever a test wants to hand `editPset` an ALREADY-BUILT `entity_instance` value on
+// purpose (e.g. to exercise the "retain existing type" / "explicit type" tiers of
+// `getPrimaryMeasureType`), not because raw scalars are still blocked.
 //
-// - Real Python test cases whose OWN core assertion needs this port to materialize a
-//   new typed value from a plain scalar are ported as `expect(() =>
-//   editPset(...)).toThrow(BLOCKED_ERROR)`, each with a comment recording the real,
-//   unblocked assertion to restore the moment this foundational gap closes.
-// - Real Python test cases (or original coverage) whose CORE LOGIC does not actually
-//   need a NEW typed value to be materialized (renaming; purging/clearing an EXISTING
-//   property; assigning an ALREADY-BUILT `entity_instance` value, built here via a
-//   `createTypedValue` helper identical to `editQto.test.ts`'s/`util/unit.test.ts`'s
-//   own established workaround; the shared-property/`NotImplementedError`/non-property-
-//   entity dispatch checks, all of which throw or skip BEFORE ever needing a new typed
-//   value) are ported as real, passing tests, adapted to use `createTypedValue`-built
-//   values wherever real Python used a bare Python literal that this port can't yet
-//   construct in production code either.
-// - `getPrimaryMeasureType`/`inferPrimaryMeasureType` (exported from `editPset.ts`
-//   specifically because neither ever calls `file.createEntity`, so neither is affected
-//   by the gap at all) are tested directly and thoroughly as pure functions, to still
-//   pin the value-type-inference LOGIC itself even though the full create-a-property
-//   integration path is blocked for a plain scalar.
+// `getPrimaryMeasureType`/`inferPrimaryMeasureType` (exported from `editPset.ts`) are
+// also tested directly and thoroughly as pure functions, independent of the integration
+// tests above.
 //
 // Original coverage beyond the real Python file: the disclosed `NotImplementedError`-
 // equivalent throw for an unsupported existing property class; a non-property entity
 // throwing when assigned as a value; the disclosed unit-wrapped-`null`-bypasses-
-// `shouldPurge` quirk (needs no new typed value, since a `null` `NominalValue` needs no
-// materialization); the disclosed empty-array `IndexError`-equivalent edge case;
+// `shouldPurge` quirk; the disclosed empty-array `IndexError`-equivalent edge case;
 // `getPrimaryMeasureType`/`inferPrimaryMeasureType` unit tests (all 4 tiers, including
 // the JS int/float and `Date` disclosed gaps); and Transaction/undo-redo regression
-// coverage for every currently-unblocked mutation.
+// coverage.
 
 import { describe, expect, test } from "vitest";
 import { addPset } from "../../../src/api/pset/addPset";
@@ -54,13 +40,11 @@ import { native } from "../../../src/native/native_loader";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 import type { Schema } from "../../bootstrap";
 
-const BLOCKED_ERROR = /Attribute access is only supported on entity instances/;
-
 // --- local fixture helper (no Python/api counterpart) -- see this file's header
 // comment; identical technique to `editQto.test.ts`'s/`test/util/unit.test.ts`'s own
 // `createTypedValue`. ---
 
-/** Constructs a standalone, correctly-typed defined-type value (e.g. `IfcLabel("hi")`), bypassing the disclosed gap this file's own header comment documents. */
+/** Constructs a standalone, correctly-typed defined-type value (e.g. `IfcLabel("hi")`) directly, for tests that want to hand `editPset` an already-built `entity_instance` on purpose (see this file's header comment). */
 function createTypedValue(file: IfcFile, className: string, value: number | string | boolean): EntityInstance {
 	const declaration = file.nativeFile.schema().declaration_by_name_with_name(className);
 	const handle = file.nativeFile.create_with_declaration_instance_id(declaration, -1);
@@ -98,18 +82,16 @@ function getMaterialProperties(file: IfcFile, material: EntityInstance, schema: 
 // too -- nothing schema-specific, run across every available schema. ---
 
 describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "fourth consequence" -- now RESOLVED for the shared gate) --
-	// `cast_value_to_primary_measure_type` no longer throws. Real expected result is
-	// the "Real Python" comment directly below -- left to a follow-up chunk.
-	test.skip("editing a templated pset with automatic casting of primitive data types (BLOCKED: raw-string-to-typed-value creation)", () => {
+	test("editing a templated pset with automatic casting of primitive data types", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
 		const pset = addPset(file, { product: element, name: "Pset_WallCommon" });
-		// Real Python: pset.HasProperties[0].NominalValue.is_a("IfcThermalTransmittanceMeasure")
-		// && .wrappedValue == 42 (a raw string "42" cast to a DOUBLE-typed measure).
-		expect(() => editPset(file, { pset, properties: { ThermalTransmittance: "42" } })).toThrow(BLOCKED_ERROR);
+		// A raw string "42" is cast to a DOUBLE-typed measure, per `castValueToPrimaryMeasureType`.
+		editPset(file, { pset, properties: { ThermalTransmittance: "42" } });
+		const props = pset.get("HasProperties") as EntityInstance[];
+		expect(props[0].get("Name")).toBe("ThermalTransmittance");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcThermalTransmittanceMeasure")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(42);
 	});
 
 	test("adding a property if it is none (shouldPurge false) -- unblocked (no value materialization needed)", () => {
@@ -171,21 +153,31 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
 		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(123);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "fourth consequence" -- now RESOLVED for the shared gate). Real
-	// expected result is the "Real Python" comment directly below -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skip("adding properties from plain scalars (BLOCKED: raw-value-to-typed-value creation)", () => {
+	test("adding properties from plain scalars", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
 		const pset = addPset(file, { product: element, name: "Foo_Bar" });
-		// Real Python: MyLabel -> IfcLabel("foobar"), MyBool -> IfcBoolean(true),
-		// MyInteger -> IfcInteger(42), MyFloat -> IfcReal(42.0).
-		expect(() => editPset(file, { pset, properties: { MyLabel: "foobar" } })).toThrow(BLOCKED_ERROR);
-		expect(() => editPset(file, { pset, properties: { MyBool: true } })).toThrow(BLOCKED_ERROR);
-		expect(() => editPset(file, { pset, properties: { MyInteger: 42 } })).toThrow(BLOCKED_ERROR);
-		expect(() => editPset(file, { pset, properties: { MyFloat: 42.5 } })).toThrow(BLOCKED_ERROR);
+		editPset(file, { pset, properties: { MyLabel: "foobar" } });
+		editPset(file, { pset, properties: { MyBool: true } });
+		editPset(file, { pset, properties: { MyInteger: 42 } });
+		editPset(file, { pset, properties: { MyFloat: 42.5 } });
+
+		const props = pset.get("HasProperties") as EntityInstance[];
+		expect(props[0].get("Name")).toBe("MyLabel");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcLabel")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe("foobar");
+
+		expect(props[1].get("Name")).toBe("MyBool");
+		expect((props[1].get("NominalValue") as EntityInstance).isA("IfcBoolean")).toBe(true);
+		expect((props[1].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(true);
+
+		expect(props[2].get("Name")).toBe("MyInteger");
+		expect((props[2].get("NominalValue") as EntityInstance).isA("IfcInteger")).toBe(true);
+		expect((props[2].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(42);
+
+		expect(props[3].get("Name")).toBe("MyFloat");
+		expect((props[3].get("NominalValue") as EntityInstance).isA("IfcReal")).toBe(true);
+		expect((props[3].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(42.5);
 	});
 
 	test("editing an existing property's value with a pre-built entity_instance retains the property's own class -- unblocked", () => {
@@ -202,18 +194,17 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
 		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(34);
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "fourth consequence" -- now RESOLVED for the shared gate). Real
-	// expected result is the "Real Python" comment directly below -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skip("updating an existing property from a plain scalar (BLOCKED: real Python retains the existing type via get_primary_measure_type's old_value tier)", () => {
+	test("updating an existing property from a plain scalar retains the existing type via getPrimaryMeasureType's oldValue tier", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
 		const pset = addPset(file, { product: element, name: "Foo_Bar" });
 		editPset(file, { pset, properties: { MyCustom: createTypedValue(file, "IfcContextDependentMeasure", 12) } });
-		// Real Python: NominalValue.is_a("IfcContextDependentMeasure") still, .wrappedValue == 34.
-		expect(() => editPset(file, { pset, properties: { MyCustom: 34 } })).toThrow(BLOCKED_ERROR);
+		editPset(file, { pset, properties: { MyCustom: 34 } });
+
+		const props = pset.get("HasProperties") as EntityInstance[];
+		expect(props[0].get("Name")).toBe("MyCustom");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcContextDependentMeasure")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(34);
 	});
 
 	test("editing properties with an explicit type -- unblocked (pre-built entity_instance values)", () => {
@@ -257,20 +248,27 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
 		expect(unit.get("Name")).toBe("PASCAL");
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "fourth consequence" -- now RESOLVED for the shared gate). Real
-	// expected result: same shape as "editing properties with custom units" above,
-	// but with the raw scalar `30` cast to `IfcModulusOfElasticityMeasure` instead of
-	// a pre-built value -- left to a follow-up module-grouped chunk to verify.
-	test.skip("a unit-wrapped raw-scalar NominalValue is BLOCKED (real Python: {'NominalValue': 30, 'Unit': custom_unit})", () => {
+	// Unlike "editing properties with custom units" above (which UPDATES a
+	// pre-existing MyCustom, so getPrimaryMeasureType's old_value tier retains
+	// IfcModulusOfElasticityMeasure), this is a brand NEW property with no
+	// pset_template match for "Foo_Bar"/"MyCustom" -- so it falls through to tier 4,
+	// the plain-value heuristic on the unwrapped raw NominalValue (30, a whole
+	// number) -> IfcInteger. Confirmed against real Python (src/ifcopenshell-python).
+	test("a unit-wrapped raw-scalar NominalValue with no existing/templated type falls through to the plain-value heuristic", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcWall");
 		const customUnit = file.createEntity("IfcSIUnit", null, "PRESSUREUNIT", "GIGA", "PASCAL");
 		const pset = addPset(file, { product: element, name: "Foo_Bar" });
-		expect(() => editPset(file, { pset, properties: { MyCustom: { NominalValue: 30, Unit: customUnit } } })).toThrow(
-			BLOCKED_ERROR,
-		);
+		editPset(file, { pset, properties: { MyCustom: { NominalValue: 30, Unit: customUnit } } });
+
+		const props = pset.get("HasProperties") as EntityInstance[];
+		const unit = props[0].get("Unit") as EntityInstance;
+		expect(props[0].get("Name")).toBe("MyCustom");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcInteger")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(30);
+		expect(unit.get("UnitType")).toBe("PRESSUREUNIT");
+		expect(unit.get("Prefix")).toBe("GIGA");
+		expect(unit.get("Name")).toBe("PASCAL");
 	});
 
 	test("editing properties of non-rooted elements -- unblocked (pre-built entity_instance value)", () => {
@@ -321,80 +319,87 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
 	});
 });
 
-// --- IFC4-only tests: real Python's own `TestEditPsetIFC4`-exclusive methods. All are
-// currently BLOCKED (each needs a new typed value from a raw scalar/array). ---
+// --- IFC4-only tests: real Python's own `TestEditPsetIFC4`-exclusive methods. ---
 
-describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
-	"api.pset.editPset IFC4+-only, BLOCKED (%s)",
-	(schema) => {
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, "fourth consequence" -- now RESOLVED for the
-		// shared gate). Real expected result: `Reference`/`Status`/`Combustible`/
-		// `ThermalTransmittance` each cast to their own real `IfcLabel`/
-		// `IfcIdentifier`-enum/`IfcBoolean`/`IfcThermalTransmittanceMeasure` -- left
-		// to a follow-up module-grouped chunk to verify and flip.
-		test.skip("editing a blank buildingSMART-templated pset", () => {
-			const file = createTestFile(schema);
-			const element = file.createEntity("IfcWall");
-			const pset = addPset(file, { product: element, name: "Pset_WallCommon" });
-			expect(() =>
-				editPset(file, {
-					pset,
-					properties: { Reference: "reference", Status: ["NEW"], Combustible: true, ThermalTransmittance: 42 },
-				}),
-			).toThrow(BLOCKED_ERROR);
+describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.pset.editPset IFC4+-only (%s)", (schema) => {
+	test("editing a blank buildingSMART-templated pset", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const pset = addPset(file, { product: element, name: "Pset_WallCommon" });
+		editPset(file, {
+			pset,
+			properties: { Reference: "reference", Status: ["NEW"], Combustible: true, ThermalTransmittance: 42 },
 		});
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, "fourth consequence" -- now RESOLVED for the
-		// shared gate). Real expected result is the "Real Python" comment directly
-		// below -- left to a follow-up module-grouped chunk to verify and flip.
-		test.skip("editing a custom templated pset", () => {
-			const file = createTestFile(schema);
-			const propTemplate = file.createEntity(
-				"IfcSimplePropertyTemplate",
-				guid.new(),
-				null,
-				"foo",
-				null,
-				"P_SINGLEVALUE",
-				"IfcContextDependentMeasure",
-			);
-			const template = file.createEntity(
-				"IfcPropertySetTemplate",
-				guid.new(),
-				null,
-				"Foo_Bar",
-				null,
-				"PSET_TYPEDRIVENOVERRIDE",
-				"IfcWall",
-				[propTemplate],
-			);
-			const element = file.createEntity("IfcWall");
-			const pset = addPset(file, { product: element, name: "Foo_Bar" });
-			// Real Python: NominalValue.is_a("IfcContextDependentMeasure"), wrappedValue == 12.
-			expect(() => editPset(file, { pset, psetTemplate: template, properties: { foo: 12 } })).toThrow(BLOCKED_ERROR);
-		});
+		const props = pset.get("HasProperties") as EntityInstance[];
+		expect(props[0].get("Name")).toBe("Reference");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcIdentifier")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe("reference");
 
-		// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-		// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-		// .createEntity ..." entry, "fourth consequence" -- now RESOLVED for the
-		// shared gate). Real expected result: `Protocols` becomes an
-		// `IfcPropertyEnumeratedValue`-style list of real `IfcIdentifier`-enum values
-		// wrapping "One"/"Two"/"Three" -- left to a follow-up chunk to verify.
-		test.skip("editing list-valued properties", () => {
-			const file = createTestFile(schema);
-			// IfcDistributionPort: GlobalId(0)/OwnerHistory(1)/Name(2)/Description(3)/
-			// ObjectType(4)/ObjectPlacement(5)/Representation(6)/FlowDirection(7)/
-			// PredefinedType(8)/SystemType(9).
-			const cable = file.createEntity("IfcDistributionPort", null, null, null, null, null, null, null, null, "CABLE");
-			const pset = addPset(file, { product: cable, name: "Pset_DistributionPortTypeCable" });
-			expect(() => editPset(file, { pset, properties: { Protocols: ["One", "Two", "Three"] } })).toThrow(BLOCKED_ERROR);
-		});
-	},
-);
+		expect(props[1].get("Name")).toBe("Status");
+		const statusValues = props[1].get("EnumerationValues") as EntityInstance[];
+		expect(statusValues[0].isA("IfcLabel")).toBe(true);
+		expect(statusValues[0].getByIndex(0)).toBe("NEW");
+
+		expect(props[2].get("Name")).toBe("Combustible");
+		expect((props[2].get("NominalValue") as EntityInstance).isA("IfcBoolean")).toBe(true);
+		expect((props[2].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(true);
+
+		expect(props[3].get("Name")).toBe("ThermalTransmittance");
+		expect((props[3].get("NominalValue") as EntityInstance).isA("IfcThermalTransmittanceMeasure")).toBe(true);
+		expect((props[3].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(42);
+	});
+
+	test("editing a custom templated pset", () => {
+		const file = createTestFile(schema);
+		const propTemplate = file.createEntity(
+			"IfcSimplePropertyTemplate",
+			guid.new(),
+			null,
+			"foo",
+			null,
+			"P_SINGLEVALUE",
+			"IfcContextDependentMeasure",
+		);
+		const template = file.createEntity(
+			"IfcPropertySetTemplate",
+			guid.new(),
+			null,
+			"Foo_Bar",
+			null,
+			"PSET_TYPEDRIVENOVERRIDE",
+			"IfcWall",
+			[propTemplate],
+		);
+		const element = file.createEntity("IfcWall");
+		const pset = addPset(file, { product: element, name: "Foo_Bar" });
+		editPset(file, { pset, psetTemplate: template, properties: { foo: 12 } });
+
+		const props = pset.get("HasProperties") as EntityInstance[];
+		expect(props[0].get("Name")).toBe("foo");
+		expect((props[0].get("NominalValue") as EntityInstance).isA("IfcContextDependentMeasure")).toBe(true);
+		expect((props[0].get("NominalValue") as EntityInstance).getByIndex(0)).toBe(12);
+	});
+
+	test("editing list-valued properties", () => {
+		const file = createTestFile(schema);
+		// IfcDistributionPort: GlobalId(0)/OwnerHistory(1)/Name(2)/Description(3)/
+		// ObjectType(4)/ObjectPlacement(5)/Representation(6)/FlowDirection(7)/
+		// PredefinedType(8)/SystemType(9).
+		const cable = file.createEntity("IfcDistributionPort", null, null, null, null, null, null, null, null, "CABLE");
+		const pset = addPset(file, { product: cable, name: "Pset_DistributionPortTypeCable" });
+		editPset(file, { pset, properties: { Protocols: ["One", "Two", "Three"] } });
+
+		const props = pset.get("HasProperties") as EntityInstance[];
+		// Real Python: "Protocols" is a P_LISTVALUE template -> a plain
+		// IfcPropertyListValue, not an enumerated value.
+		expect(props[0].isA("IfcPropertyListValue")).toBe(true);
+		const listValues = props[0].get("ListValues") as EntityInstance[];
+		expect(listValues).toHaveLength(3);
+		expect(listValues.every((v) => v.isA("IfcIdentifier"))).toBe(true);
+		expect(listValues.map((v) => v.getByIndex(0))).toEqual(["One", "Two", "Three"]);
+	});
+});
 
 // --- Original coverage: an existing enumerated property purged via an empty array
 // needs no new value materialization -- unblocked, real coverage of `test_removing_a_
