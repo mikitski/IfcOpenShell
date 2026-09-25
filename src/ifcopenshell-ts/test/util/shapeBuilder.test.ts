@@ -5,12 +5,12 @@
 // `TestArcToPolylinePoints` (all 6 cases), `TestPolygonalFaceSetToFacetedBrep` (all 4
 // cases), `TestRectangle.test_get_rectangle_coords`, `TestVertex`/`TestEdge`/`TestFace`,
 // `TestFaceset.test_polygonal_face_set_invalid_face_types` (one value adjusted, see its
-// own comment for why), `TestCreatePolyline`'s 3 cases and `TestMirror.test_mirror` (both
-// re-purposed into disclosed-blocked regression tests, see below). NOT ported (at the
-// time Part 1 landed): `TestCalculateTransitions` (tests `mep_transition_calculate`, a
-// Part-2/MEP method) -- **now ported below, verbatim, all 6 cases**, as part of Part 2
-// (`mepTransitionShape`/`mepTransitionLength`/`mepTransitionCalculate`/`mepBendShape`, see
-// `shapeBuilder.ts`'s own header comment for the per-method findings). Also NOT ported:
+// own comment for why), `TestCreatePolyline`'s 3 cases, and `TestMirror.test_mirror`. NOT
+// ported (at the time Part 1 landed): `TestCalculateTransitions` (tests
+// `mep_transition_calculate`, a Part-2/MEP method) -- **now ported below, verbatim, all 6
+// cases**, as part of Part 2 (`mepTransitionShape`/`mepTransitionLength`/
+// `mepTransitionCalculate`/`mepBendShape`, see `shapeBuilder.ts`'s own header comment for
+// the per-method findings). Also NOT ported:
 // `TestFaceset.test_polygonal_face_set_simple_and_with_voids`'s
 // `ifcopenshell.geom.create_shape`/`ifcopenshell.util.shape.get_area` assertions (both
 // unported kernel-dependent modules) -- its structural assertions (isA/Faces
@@ -25,32 +25,25 @@
 // `util/representation.ts`/`util/constraint.ts`'s established precedent for a module with
 // (partially) no exact 1:1 Python test to port.
 //
-// *** Real, disclosed, pre-existing, BLOCKING primitive-layer gaps this file pins with
-// regression tests (see `shapeBuilder.ts`'s own header comment for the full story) ***
-//
-// `TestCreatePolyline`'s Python cases all use `closed=true` or `arc_points` (needing
-// `IfcLineIndex`/`IfcArcIndex` creation, which `entityInstance.ts`'s pre-existing
-// `setByIndex`/`attribute_kind_of` gap -- `TODOS.md`'s existing entry, found by
-// `util/migrator.ts` -- blocks completely). `TestMirror.test_mirror` calls
-// `builder.rectangle()`, which always calls `polyline(..., closed=true)`, so it is
-// blocked transitively for the same reason. Both are re-purposed below into regression
-// tests asserting the CURRENT, disclosed, blocked behavior (matching
-// `test/util/migrator.test.ts`'s own established precedent for this exact gap) -- they
-// will need updating (a good thing) the moment that foundational gap is ever closed.
-// Additional original regression tests cover the same gap's other reachable call sites in
-// this module (`curveBetweenTwoPoints`, `getSimple2dcurveData(..., createIfcCurve=true)`,
-// `createZProfileLipsCurve`, `createTransitionArcIfc(..., createIfcCurve=true)`) and the
-// separate `.get("Dim")` DERIVED-attribute gap (`profile`, `createSweptDiskSolid`).
-// Conversely, dedicated tests also confirm the module's substantial FULLY FUNCTIONAL
-// surface despite both gaps: `polyline()`'s straight-line path, `rectangle()`/
-// `polyline(closed=true)` under IFC2X3 (which needs no `IfcLineIndex`/`IfcArcIndex` at
-// all), every face-set/mesh method, `vertex`/`edge`/`face`/`sphere`/`block`/
-// `halfSpaceSolid`/`plane`/both `createAxis2Placement*` methods/`circle`/
-// `createEllipseCurve` (including its TRIMMED path -- `IfcTrimmedCurve` is a real entity,
-// not a defined type, so this doesn't hit the gap at all), and `translate`/`rotate`/
-// `mirror` on a manually-constructed `IfcExtrudedAreaSolid` (its profile built directly
-// via `file.createEntity(...)`, bypassing the blocked `profile()` method, to isolate
-// these methods' own logic from the separate `Dim` gap).
+// *** A real, disclosed, primitive-layer gap this file used to pin with "blocked"
+// regression tests (see `shapeBuilder.ts`'s own header comment for the full story) has
+// since been fixed (2026-09-23) -- `entityInstance.ts`'s `setByIndex`/`attribute_kind_of`
+// gate that used to block constructing a fresh `IfcLineIndex`/`IfcArcIndex` (needed by
+// `TestCreatePolyline`'s `closed=true`/`arc_points` cases, `TestMirror.test_mirror`'s
+// `rectangle()` call, `curveBetweenTwoPoints`, `getSimple2dcurveData(...,
+// createIfcCurve=true)`, `createZProfileLipsCurve`, `createTransitionArcIfc(...,
+// createIfcCurve=true)`, and `mepBendShape` on IFC4/IFC4X3) is gone; every one of those
+// now asserts the real, verified result (confirmed against `src/ifcopenshell-python` and
+// this worktree's own built native addon) instead of the old "throws" pin. A SEPARATE,
+// still-open `.get("Dim")` DERIVED-attribute gap remains (`profile()`/
+// `createSweptDiskSolid()` still throw immediately for any real curve/surface -- see
+// `shapeBuilder.ts`'s own header comment, finding 1) -- unaffected by, and unrelated to,
+// the fix above; the local `rectangleProfile()` fixture helper below still bypasses it by
+// constructing an `IfcArbitraryClosedProfileDef` directly, and `translate`/`rotate`/
+// `mirror` on a manually-constructed `IfcExtrudedAreaSolid` are still isolated from it the
+// same way. IFC2X3 needs no `IfcLineIndex`/`IfcArcIndex` at all for `polyline(closed=true)`/
+// `rectangle()` (a genuinely different code path, always fully functional, dedicated test
+// below) and never hits either gap for those methods.
 //
 // One additional disclosed, minor JS/Python numeric-type divergence found while porting
 // `test_polygonal_face_set_invalid_face_types`: Python's `[[1.0, 2.0, 3.0]]` case relies
@@ -73,10 +66,12 @@
 // module with partial Python test coverage. `mepTransitionShape` is exercised across all 3
 // profile-pairing branches (rect-rect, circle-circle, and both directions of the mixed
 // circle/rect branch) plus its two `[null, null]` early-exit paths (unsupported profile
-// type, no material at all). `mepBendShape` is pinned as a regression test asserting its
-// current, disclosed, unconditional blockage on every schema (see `shapeBuilder.ts`'s own
-// header comment) -- both the IFC2X3 "arcs not supported" throw and the IFC4/IFC4X3
-// defined-type-instance-creation gap throw are covered.
+// type, no material at all). `mepBendShape` used to be pinned as a regression test
+// asserting its unconditional blockage on every schema; now that the defined-type-
+// instance-creation gap is fixed, it's exercised end-to-end (circular and rectangular
+// profiles, both IFC4/IFC4X3) -- IFC2X3 remains genuinely blocked for a separate,
+// unrelated schema-capability reason (see `shapeBuilder.ts`'s own header comment and the
+// dedicated `mepBendShape` describe block below).
 
 import { mat4, vec3 } from "gl-matrix";
 import { describe, expect, test } from "vitest";
@@ -85,7 +80,6 @@ import type { IfcFile } from "../../src/file";
 import * as subject from "../../src/util/shapeBuilder";
 import { ShapeBuilder } from "../../src/util/shapeBuilder";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../bootstrap";
-const DEFINED_TYPE_ERROR = /Attribute access is only supported on entity instances/;
 
 // --- local fixture helpers (bypass `ShapeBuilder.profile()`'s disclosed `Dim` gap to
 // build a working `IfcArbitraryClosedProfileDef` + `IfcExtrudedAreaSolid` directly,
@@ -119,6 +113,37 @@ function allClose(
 	const fa = flat(a);
 	const fb = flat(b);
 	return fa.length === fb.length && fa.every((v, i) => Math.abs(v - fb[i]) <= tol);
+}
+
+/**
+ * Asserts that a `createIfcCurve=true`-built `IfcIndexedPolyCurve` (`ifcCurve`) faithfully
+ * wraps the same `points`/`segments` arrays `getSimple2dcurveData`/`createTransitionArcIfc`
+ * always compute regardless of `createIfcCurve` -- `Points.CoordList` should match `points`
+ * exactly, and each `Segments` entry should be an `IfcLineIndex` (2-point segment) or
+ * `IfcArcIndex` (3-point segment) wrapping that segment's own indices, 1-based (Python:
+ * `[i + 1 for i in segment]`).
+ */
+function expectIfcCurveMatchesPointsAndSegments(
+	ifcCurve: EntityInstance | null,
+	points: readonly (readonly number[])[],
+	segments: readonly (readonly number[])[],
+): void {
+	expect(ifcCurve).not.toBeNull();
+	const curve = ifcCurve as EntityInstance;
+	expect(curve.isA("IfcIndexedPolyCurve")).toBe(true);
+	const coordList = (curve.get("Points") as EntityInstance).get("CoordList") as number[][];
+	expect(allClose(coordList, points)).toBe(true);
+	const ifcSegments = curve.get("Segments") as EntityInstance[];
+	expect(ifcSegments).toHaveLength(segments.length);
+	segments.forEach((segment, i) => {
+		const oneBased = segment.map((idx) => idx + 1);
+		if (segment.length === 2) {
+			expect(ifcSegments[i].isA("IfcLineIndex")).toBe(true);
+		} else {
+			expect(ifcSegments[i].isA("IfcArcIndex")).toBe(true);
+		}
+		expect(ifcSegments[i].getByIndex(0)).toEqual(oneBased);
+	});
 }
 
 // --- `arcToPolylinePoints` (ported verbatim from `TestArcToPolylinePoints`) ---
@@ -668,17 +693,7 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `DEFINED_TYPE_ERROR` pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) -- constructing
-	// the `IfcLineIndex` no longer throws. Real expected result: one `IfcLineIndex`
-	// wrapping `(1,2,3,4,1)` (real Python's `TestCreatePolyline.test_simple_polyline`)
-	// -- left to a follow-up module-grouped chunk to verify and flip.
-	test.skip("polyline: DISCLOSED BLOCKED (closed=true, ported from TestCreatePolyline.test_simple_polyline) -- " +
-		"Python builds one IfcLineIndex with wrappedValue (1,2,3,4,1); this throws today because " +
-		"IfcLineIndex creation needs an initial value on a freshly-created defined-type instance " +
-		"(entityInstance.ts's disclosed setByIndex/attribute_kind_of gap, TODOS.md). Asserts the " +
-		"CURRENT, disclosed, blocked behavior, not silently skipped.", () => {
+	test("polyline: closed=true (ported from TestCreatePolyline.test_simple_polyline)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
 		const points = [
@@ -687,14 +702,25 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 			[1.0, 1.0],
 			[0.0, 1.0],
 		];
-		expect(() => builder.polyline(points, true, [2.0, 0.0])).toThrow(DEFINED_TYPE_ERROR);
+		const polyline = builder.polyline(points, true, [2.0, 0.0]);
+		const coordList = (polyline.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordList, [
+				[2.0, 0.0],
+				[3.0, 0.0],
+				[3.0, 1.0],
+				[2.0, 1.0],
+			]),
+		).toBe(true);
+		// Uses 1 line index when there are no arcs.
+		const segments = polyline.get("Segments") as EntityInstance[];
+		expect(segments).toHaveLength(1);
+		expect(segments[0].isA("IfcLineIndex")).toBe(true);
+		expect(segments[0].getByIndex(0)).toEqual([1, 2, 3, 4, 1]);
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result: real Python's `TestCreatePolyline.test_polyline_with_arc` (a real
-	// `IfcArcIndex`-mixed `IfcLineIndex` list).
-	test.skip("polyline: DISCLOSED BLOCKED (arc_points, ported from TestCreatePolyline.test_polyline_with_arc)", () => {
+	test("polyline: arc_points (ported from TestCreatePolyline.test_polyline_with_arc)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
 		const points = [
@@ -704,14 +730,27 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 			[0, 1],
 			[0, 2],
 		];
-		expect(() => builder.polyline(points, false, [2, 0], [1])).toThrow(DEFINED_TYPE_ERROR);
+		const polyline = builder.polyline(points, false, [2, 0], [1]);
+		const coordList = (polyline.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordList, [
+				[3, 0],
+				// biome-ignore lint/suspicious/noApproximativeNumericConstant: literal approximate value matches the real Python test verbatim, not meant to be Math.SQRT1_2-exact.
+				[2.707, 0.707],
+				[2, 1],
+				[2, 2],
+			]),
+		).toBe(true);
+		const segments = polyline.get("Segments") as EntityInstance[];
+		expect(segments).toHaveLength(2);
+		expect(segments[0].isA("IfcArcIndex")).toBe(true);
+		expect(segments[0].getByIndex(0)).toEqual([1, 2, 3]);
+		expect(segments[1].isA("IfcLineIndex")).toBe(true);
+		expect(segments[1].getByIndex(0)).toEqual([3, 4]);
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result: real Python's
-	// `TestCreatePolyline.test_closed_polyline_ending_with_arc`.
-	test.skip("polyline: DISCLOSED BLOCKED (closed ending with arc, ported from TestCreatePolyline.test_closed_polyline_ending_with_arc)", () => {
+	test("polyline: closed ending with arc (ported from TestCreatePolyline.test_closed_polyline_ending_with_arc)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
 		const points = [
@@ -719,31 +758,70 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 			[1, 0],
 			[0.5, 0.5],
 		];
-		expect(() => builder.polyline(points, true, [2, 0], [2])).toThrow(DEFINED_TYPE_ERROR);
+		const polyline = builder.polyline(points, true, [2, 0], [2]);
+		const coordList = (polyline.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordList, [
+				[2, 0],
+				[3, 0],
+				[2.5, 0.5],
+			]),
+		).toBe(true);
+		const segments = polyline.get("Segments") as EntityInstance[];
+		expect(segments).toHaveLength(2);
+		expect(segments[0].isA("IfcLineIndex")).toBe(true);
+		expect(segments[0].getByIndex(0)).toEqual([1, 2]);
+		expect(segments[1].isA("IfcArcIndex")).toBe(true);
+		expect(segments[1].getByIndex(0)).toEqual([2, 3, 1]);
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the polyline tests above -- real
-	// expected result: a real, closed `IfcPolyline`/`IfcLineIndex` rectangle (also
-	// unblocks `TestMirror.test_mirror` transitively, per this test's own title).
-	test.skip("rectangle: DISCLOSED BLOCKED (always closed=true) -- also blocks TestMirror.test_mirror transitively", () => {
+	test("rectangle: a real, closed IfcIndexedPolyCurve/IfcLineIndex rectangle (also unblocks TestMirror.test_mirror transitively)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
-		expect(() => builder.rectangle([100, 100])).toThrow(DEFINED_TYPE_ERROR);
+		const rectangle = builder.rectangle([100, 100]);
+		const coordList = (rectangle.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordList, [
+				[0.0, 0.0],
+				[100.0, 0.0],
+				[100.0, 100.0],
+				[0.0, 100.0],
+			]),
+		).toBe(true);
+		builder.mirror(rectangle, [1, 0]);
+		const coordListAfterMirror = (rectangle.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordListAfterMirror, [
+				[0.0, 0.0],
+				[-100.0, 0.0],
+				[-100.0, 100.0],
+				[0.0, 100.0],
+			]),
+		).toBe(true);
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the polyline tests above -- real
-	// expected result: a real `IfcArcIndex`-wrapped composite curve segment.
-	test.skip("curveBetweenTwoPoints: DISCLOSED BLOCKED (always creates one IfcArcIndex)", () => {
+	test("curveBetweenTwoPoints: a real IfcArcIndex-wrapped composite curve segment", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
-		expect(() =>
-			builder.curveBetweenTwoPoints([
+		const curve = builder.curveBetweenTwoPoints([
+			[1, 0],
+			[0, 1],
+		]);
+		expect(curve.isA("IfcIndexedPolyCurve")).toBe(true);
+		const coordList = (curve.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(
+			allClose(coordList, [
 				[1, 0],
+				[0.99, 0],
 				[0, 1],
 			]),
-		).toThrow(DEFINED_TYPE_ERROR);
+		).toBe(true);
+		const segments = curve.get("Segments") as EntityInstance[];
+		expect(segments).toHaveLength(1);
+		expect(segments[0].isA("IfcArcIndex")).toBe(true);
+		expect(segments[0].getByIndex(0)).toEqual([1, 2, 3]);
 		file.dispose();
 	});
 
@@ -1104,39 +1182,37 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `DEFINED_TYPE_ERROR` pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) -- constructing
-	// the `IfcCurve`'s own `IfcLineIndex`/`IfcArcIndex` elements no longer throws.
-	// Real expected result: a real `IfcIndexedPolyCurve` matching the `points`/
-	// `segments` this same fixture's `createIfcCurve=false` sibling test already
-	// asserts -- left to a follow-up module-grouped chunk to verify and flip.
-	test.skip("getSimple2dcurveData: DISCLOSED BLOCKED when createIfcCurve=true", () => {
+	test("getSimple2dcurveData: createIfcCurve=true builds a real IfcIndexedPolyCurve matching the points/segments computed above", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
-		expect(() =>
-			builder.getSimple2dcurveData(
-				[
-					[0, 0],
-					[10, 0],
-					[10, 10],
-					[0, 10],
-				],
-				[1],
-				2,
-				true,
-				true,
-			),
-		).toThrow(DEFINED_TYPE_ERROR);
+		const [points, segments, ifcCurve] = builder.getSimple2dcurveData(
+			[
+				[0, 0],
+				[10, 0],
+				[10, 10],
+				[0, 10],
+			],
+			[1],
+			2,
+			true,
+			true,
+		);
+		expectIfcCurveMatchesPointsAndSegments(ifcCurve, points, segments);
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- real expected
-	// result: a real `IfcIndexedPolyCurve` for the Z-profile lips curve.
-	test.skip("createZProfileLipsCurve: DISCLOSED BLOCKED (always createIfcCurve=true)", () => {
+	test("createZProfileLipsCurve: builds a real IfcIndexedPolyCurve (always createIfcCurve=true)", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
-		expect(() => builder.createZProfileLipsCurve(50, 40, 200, 20, 2, 5)).toThrow(DEFINED_TYPE_ERROR);
+		const ifcCurve = builder.createZProfileLipsCurve(50, 40, 200, 20, 2, 5);
+		expect(ifcCurve.isA("IfcIndexedPolyCurve")).toBe(true);
+		const coordList = (ifcCurve.get("Points") as EntityInstance).get("CoordList") as number[][];
+		expect(coordList.length).toBeGreaterThan(0);
+		const segments = ifcCurve.get("Segments") as EntityInstance[];
+		expect(segments.length).toBeGreaterThan(0);
+		for (const segment of segments) {
+			expect(["IfcLineIndex", "IfcArcIndex"]).toContain(segment.isA());
+		}
 		file.dispose();
 	});
 
@@ -1155,13 +1231,11 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("ShapeBuilder (%s
 		file.dispose();
 	});
 
-	// SKIPPED (PR #179): same gate/reasoning as the tests above -- real expected
-	// result: a real `IfcIndexedPolyCurve` matching the `points`/`segments` the
-	// `createIfcCurve=false` sibling test above already asserts.
-	test.skip("createTransitionArcIfc: DISCLOSED BLOCKED when createIfcCurve=true", () => {
+	test("createTransitionArcIfc: createIfcCurve=true builds a real IfcIndexedPolyCurve matching the points/segments computed above", () => {
 		const file = createTestFile(schema);
 		const builder = new ShapeBuilder(file);
-		expect(() => builder.createTransitionArcIfc(100, 50, true)).toThrow(DEFINED_TYPE_ERROR);
+		const [points, segments, ifcCurve] = builder.createTransitionArcIfc(100, 50, true);
+		expectIfcCurveMatchesPointsAndSegments(ifcCurve, points, segments);
 		file.dispose();
 	});
 
@@ -1703,11 +1777,18 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("mepTransitionSha
 	});
 });
 
-// --- `mepBendShape` (no Python test coverage -- original; pinned as a regression test
-// against the CURRENT, disclosed, unconditional blockage on every schema -- see
-// `shapeBuilder.ts`'s own header comment for the full story) ---
+// --- `mepBendShape` (no Python test coverage -- original) ---
+//
+// Used to be unconditionally blocked on IFC4/IFC4X3 by the native `attribute_value_shim
+// .cpp` gate (`TODOS.md`'s "EntityInstance.setByIndex/IfcFile.createEntity ..." entry) --
+// `getBendRepresentationItem`'s own `polyline(..., arcPoints=...)` call needed a fresh
+// `IfcLineIndex`/`IfcArcIndex` populated with an initial value. Fixed 2026-09-23;
+// confirmed empirically against this worktree's own built native addon (not assumed) that
+// `mepBendShape` now runs end-to-end for both a circular and a rectangular profile, on
+// both IFC4 and IFC4X3, producing a real `IfcShapeRepresentation`. IFC2X3 remains blocked
+// for a completely separate, still-real reason (see the first test below).
 
-describe("mepBendShape (currently unconditionally blocked -- see shapeBuilder.ts's header comment)", () => {
+describe("mepBendShape", () => {
 	// `describe.skipIf`/`test.skipIf`-guarded on `AVAILABLE_SCHEMAS.includes("IFC2X3")` --
 	// CI's core build is `SCHEMA_VERSIONS=4` (IFC4 only, see `bootstrap.ts`'s own header
 	// comment), so an unconditional `createTestFile("IFC2X3")` throws "No schema loaded"
@@ -1722,7 +1803,8 @@ describe("mepBendShape (currently unconditionally blocked -- see shapeBuilder.ts
 			// `mepGetProfile`/`get_profile` either. `mepBendShape` throws via its own
 			// `assert profile` check (never even reaching `polyline()`'s separate, real
 			// "arcs not supported for IFC2X3" restriction) -- a distinct, schema-capability
-			// reason, not the same IFC4/IFC4X3 primitive-layer gap tested below.
+			// reason, unrelated to (and not affected by) the now-fixed defined-type gate
+			// exercised on IFC4/IFC4X3 below.
 			const file = createTestFile("IFC2X3");
 			const builder = new ShapeBuilder(file);
 			const segment = file.createEntity("IfcFlowSegment"); // No material at all.
@@ -1735,39 +1817,52 @@ describe("mepBendShape (currently unconditionally blocked -- see shapeBuilder.ts
 		},
 	);
 
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// `DEFINED_TYPE_ERROR` pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile
-	// .createEntity ..." entry, now RESOLVED for the shared gate) -- `mepBendShape`
-	// no longer throws here on IFC4/IFC4X3 for this reason (it may still be blocked
-	// by `shapeBuilder.ts`'s own OTHER, separately-disclosed unconditional blocker --
-	// see that file's header comment -- which is unrelated to this gate and not
-	// touched by PR #179). Real expected result needs re-investigation against
-	// `shapeBuilder.ts`'s own current header comment -- left to a follow-up chunk.
-	test.skip.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))(
-		"throws under %s (pre-existing defined-type-instance-creation primitive gap)",
-		(schema) => {
+	describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("on %s", (schema) => {
+		test("a circular profile builds a real IfcSweptDiskSolid bend plus start/end extrusions", () => {
 			const file = createTestFile(schema);
 			const builder = new ShapeBuilder(file);
+			bodyContext(file);
 			const segment = segmentWithProfile(file, circleProfile(file, 50));
 
-			expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
-				DEFINED_TYPE_ERROR,
-			);
+			const [representation, data] = builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false);
+
+			expect(representation.isA("IfcShapeRepresentation")).toBe(true);
+			// guessType() infers "SolidModel" from the IfcSweptDiskSolid bend item.
+			expect(representation.get("RepresentationType")).toBe("SolidModel");
+			const items = representation.get("Items") as EntityInstance[];
+			expect(items.map((i) => i.isA())).toEqual(["IfcSweptDiskSolid", "IfcExtrudedAreaSolid", "IfcExtrudedAreaSolid"]);
+
+			expect(data.startLength).toBe(100);
+			expect(data.endLength).toBe(100);
+			expect(data.radius).toBe(200);
+			expect(data.angle).toBeCloseTo(45, 9);
+			// bendVector = [0, 1, 0] -> the Y axis (index 1) is the lateral axis.
+			expect(data.lateralAxis).toBe(1);
+			expect(data.lateralSign).toBe(1);
+			expect(data.zAxisSign).toBe(1);
+			expect(data.mainProfileDimension).toBeCloseTo(50, 9);
 
 			file.dispose();
-		},
-	);
+		});
 
-	// SKIPPED (PR #179): same gate/reasoning as the test above -- see that comment.
-	test.skip("throws for a rectangular profile too (same transitive blockage)", () => {
-		const file = createTestFile("IFC4");
-		const builder = new ShapeBuilder(file);
-		const segment = segmentWithProfile(file, rectProfile(file, 100, 100));
+		test("a rectangular profile builds 3 IfcExtrudedAreaSolid items (bend + start + end)", () => {
+			const file = createTestFile(schema);
+			const builder = new ShapeBuilder(file);
+			bodyContext(file);
+			const segment = segmentWithProfile(file, rectProfile(file, 100, 100));
 
-		expect(() => builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false)).toThrow(
-			DEFINED_TYPE_ERROR,
-		);
+			const [representation, data] = builder.mepBendShape(segment, 100, 100, Math.PI / 4, 200, [0, 1, 0], false);
 
-		file.dispose();
+			expect(representation.isA("IfcShapeRepresentation")).toBe(true);
+			// guessType() infers "SweptSolid" -- every item is an IfcExtrudedAreaSolid here.
+			expect(representation.get("RepresentationType")).toBe("SweptSolid");
+			const items = representation.get("Items") as EntityInstance[];
+			expect(items.every((i) => i.isA("IfcExtrudedAreaSolid"))).toBe(true);
+			expect(items).toHaveLength(3);
+
+			expect(data.mainProfileDimension).toBeCloseTo(50, 9);
+
+			file.dispose();
+		});
 	});
 });

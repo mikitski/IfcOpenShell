@@ -1,17 +1,13 @@
 // This file was generated with the assistance of an AI coding tool.
 //
 // TS counterpart to `test/api/pset_template/test_edit_prop_template.py` (src/
-// ifcopenshell-python). `TestEditPropTemplate.test_editing_a_simple_template` is
-// ported verbatim and passes. `test_editing_an_enumeration` cannot pass yet -- see
-// `../../../src/api/pset_template/editPropTemplate.ts`'s own header comment and
-// `TODOS.md`'s matching entry (6th independent confirmation) for the real,
-// pre-existing, already-tracked primitive-layer gap
-// (`EntityInstance.setByIndex`/`IfcFile.createEntity` cannot write an initial value
-// into a freshly created simple/defined-type instance, e.g. `IfcLabel`) that this
-// function's `Enumerators` special case hits. Pinned below as the CURRENT, disclosed,
-// blocked behavior (matching `editPset.test.ts`'s/`editSurfaceStyle.test.ts`'s own
-// established precedent), with the real Python assertions preserved in a comment to
-// restore once this gap closes.
+// ifcopenshell-python). Both `test_editing_a_simple_template` and
+// `test_editing_an_enumeration` are ported verbatim and pass -- the latter used to be
+// blocked by a native `attribute_value_shim.cpp` gate (`TODOS.md`'s
+// "EntityInstance.setByIndex/IfcFile.createEntity ..." entry, "sixth consequence"),
+// fixed 2026-09-23; `editPropTemplate.ts`'s own `Enumerators` special case
+// (`file.createEntity(primaryMeasureType, v)`) now materializes the wrapped values
+// correctly.
 //
 // Only IFC4/IFC4X3 are exercised -- `IfcPropertySetTemplate`/`IfcSimplePropertyTemplate`
 // don't exist on IFC2X3 at all (see `../../../src/api/pset_template/index.ts`'s own
@@ -22,6 +18,7 @@ import { describe, expect, test } from "vitest";
 import { addPropTemplate } from "../../../src/api/pset_template/addPropTemplate";
 import { addPsetTemplate } from "../../../src/api/pset_template/addPsetTemplate";
 import { editPropTemplate } from "../../../src/api/pset_template/editPropTemplate";
+import type { EntityInstance } from "../../../src/entityInstance";
 import { AVAILABLE_SCHEMAS, createTestFile } from "../../bootstrap";
 
 describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.psetTemplate.editPropTemplate (%s)", (schema) => {
@@ -36,28 +33,25 @@ describe.each(AVAILABLE_SCHEMAS.filter((s) => s !== "IFC2X3"))("api.psetTemplate
 		expect(prop.get("Name")).toBe("DemoB");
 	});
 
-	// BLOCKED -- see this file's own header comment. Real Python's own assertions this
-	// pins the CURRENT behavior in place of:
-	//
-	// ```python
-	// assert prop.Enumerators.EnumerationValues == tuple(self.file.createIfcLabel(v) for v in ("FOO", "BAR"))
-	// ...
-	// assert prop.Enumerators.Name == "DemoC"
-	// assert prop.Enumerators.EnumerationValues == tuple(self.file.createIfcLabel(v) for v in ("BAZ", "BAR"))
-	// assert len(self.file.by_type("IfcPropertyEnumeration")) == 1
-	// ```
-	// SKIPPED (PR #179): PR #179 fixed the native `attribute_value_shim.cpp` gate
-	// this test pinned (TODOS.md's "EntityInstance.setByIndex/IfcFile.createEntity
-	// ..." entry, "sixth consequence" -- now RESOLVED for the shared gate) --
-	// `file.create_entity(primary_measure_type, v)` no longer throws. Real expected
-	// result is the real-Python assertion in the comment directly above -- left to a
-	// follow-up module-grouped chunk to verify and flip.
-	test.skip("editing an enumeration (BLOCKED: standalone simple-type value creation)", () => {
+	test("editing an enumeration", () => {
 		const file = createTestFile(schema);
 		const template = addPsetTemplate(file, { name: "ABC_RiskFactors" });
 		const prop = addPropTemplate(file, { psetTemplate: template });
 		editPropTemplate(file, { propTemplate: prop, attributes: { Name: "DemoA", PrimaryMeasureType: "IfcLabel" } });
 
-		expect(() => editPropTemplate(file, { propTemplate: prop, attributes: { Enumerators: ["FOO", "BAR"] } })).toThrow();
+		editPropTemplate(file, { propTemplate: prop, attributes: { Enumerators: ["FOO", "BAR"] } });
+		let enumerators = prop.get("Enumerators") as EntityInstance;
+		let enumValues = enumerators.get("EnumerationValues") as EntityInstance[];
+		expect(enumValues.map((v) => v.isA())).toEqual(["IfcLabel", "IfcLabel"]);
+		expect(enumValues.map((v) => v.getByIndex(0))).toEqual(["FOO", "BAR"]);
+
+		editPropTemplate(file, { propTemplate: prop, attributes: { Name: "DemoC", Enumerators: ["BAZ", "BAR"] } });
+		enumerators = prop.get("Enumerators") as EntityInstance;
+		expect(enumerators.get("Name")).toBe("DemoC");
+		enumValues = enumerators.get("EnumerationValues") as EntityInstance[];
+		expect(enumValues.map((v) => v.getByIndex(0))).toEqual(["BAZ", "BAR"]);
+		// The existing IfcPropertyEnumeration is mutated in place, not replaced -- see
+		// editPropTemplate.ts's own header comment.
+		expect(file.byType("IfcPropertyEnumeration")).toHaveLength(1);
 	});
 });

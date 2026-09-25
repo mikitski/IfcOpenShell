@@ -813,11 +813,28 @@ now-fixed gate, already diagnosed in this entry's own UPDATE history below unles
 - `test/api/owner/addApplication.test.ts` (1) -- third consequence (IFC4X3 default-organisation
   `IfcLabel` pset property).
 - `test/api/pset/editPset.test.ts` (18) -- fourth consequence (`cast_value_to_primary_measure_type`,
-  the single widest-impact consequence).
+  the single widest-impact consequence). **DONE (chunk 2 of 5)**: un-skipped and flipped to the
+  real, verified assertions (plain-scalar property creation/update, buildingSMART/custom-template
+  casting, and list/enumerated-value creation all work end-to-end). One test's own pinning comment
+  was wrong, not just blocked: a unit-wrapped raw-scalar `NominalValue` for a brand-NEW (not
+  pre-existing) property has no `old_value`/template match to retain a measure type from, so it
+  falls through to the plain-value heuristic (`IfcInteger`), not the `IfcModulusOfElasticityMeasure`
+  the stale comment assumed (that shape only applies when UPDATING an already-typed property) --
+  fixed to the real, confirmed-against-`src/ifcopenshell-python`, value.
 - `test/util/shapeBuilder.test.ts` (19) -- transitively via the same `editPset`/pset-property gate
-  (profile/swept-solid helpers that round-trip a property through `editPset`).
+  (profile/swept-solid helpers that round-trip a property through `editPset`). **DONE (chunk 2 of
+  5)**: un-skipped and flipped to real, verified assertions -- `polyline`'s `closed=true`/
+  `arcPoints` paths, `rectangle`, `curveBetweenTwoPoints`, `getSimple2dcurveData`/
+  `createZProfileLipsCurve`/`createTransitionArcIfc` with `createIfcCurve=true`, and `mepBendShape`
+  on IFC4/IFC4X3 (both circular and rectangular profiles) all build real `IfcLineIndex`/
+  `IfcArcIndex`/`IfcIndexedPolyCurve` values now. The separate, still-open `.get("Dim")`
+  DERIVED-attribute gap (`profile()`/`createSweptDiskSolid()`) is untouched by this chunk and
+  remains genuinely blocked -- no tests in this file exercised that path, so none needed to change
+  for it.
 - `test/api/pset_template/editPropTemplate.test.ts` (2) -- sixth consequence (`Enumerators` raw-value
-  wrapping).
+  wrapping). **DONE (chunk 2 of 5)**: un-skipped and flipped to the real, verified assertion
+  (`test_editing_an_enumeration`'s own wrapped `IfcLabel` values, and the existing
+  `IfcPropertyEnumeration` being mutated in place rather than replaced).
 - `test/api/structural/editStructuralBoundaryCondition.test.ts` (4) -- seventh consequence
   (`IfcBoolean`/generic-measure-class SELECT-typed stiffness attributes).
 - `test/api/cost/editCostValue.test.ts` (4), `test/api/cost/editCostValueFormula.test.ts` (2),
