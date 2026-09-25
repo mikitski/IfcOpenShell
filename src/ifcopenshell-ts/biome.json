@@ -8,7 +8,8 @@
 			"src/native/ifcopenshell_native.ts",
 			"src/generated",
 			"data",
-			"test/fixtures/reference/**/*.golden.json"
+			"test/fixtures/reference/**/*.golden.json",
+			"test/fixtures/mutations/**/*.golden.json"
 		]
 	},
 	"formatter": {

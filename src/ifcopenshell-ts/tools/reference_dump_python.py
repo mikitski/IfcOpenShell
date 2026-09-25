@@ -74,13 +74,29 @@ def normalize(value: Any) -> Any:
     return value
 
 
-def dump_file(path: Path) -> dict[str, Any]:
-    f = ifcopenshell.open(str(path))
+def dump_ifc_file(f: ifcopenshell.file) -> dict[str, Any]:
+    """Dumps an already-open/in-memory `ifcopenshell.file` -- the reusable half of this
+    script, shared with `reference_mutation_python.py` (chunk 3), which builds its own
+    in-memory file via `ifcopenshell.api.*` calls rather than reading one from disk."""
     result: dict[str, Any] = {}
     for inst in f:
         attrs = [normalize(v) for v in inst]
         result[f"#{inst.id()}"] = {"type": inst.is_a(), "attrs": attrs}
     return result
+
+
+def dump_file(path: Path) -> dict[str, Any]:
+    return dump_ifc_file(ifcopenshell.open(str(path)))
+
+
+def write_golden(dump: dict[str, Any], golden_path: Path) -> None:
+    """One compact JSON object per line, keyed by numeric STEP id (not `indent=`-pretty-
+    printed recursively) -- keeps each golden's repo footprint reasonable while staying
+    line-diffable: a mismatch on one instance shows as a one-line diff, not a multi-line
+    reflow of the whole file. Shared by `reference_dump_python.py` and
+    `reference_mutation_python.py` so both produce byte-identical formatting."""
+    lines = [json.dumps({key: dump[key]}, sort_keys=True)[1:-1] for key in sorted(dump, key=lambda k: int(k[1:]))]
+    golden_path.write_text("{\n" + ",\n".join(lines) + "\n}\n")
 
 
 def main() -> None:
@@ -96,13 +112,7 @@ def main() -> None:
     for ifc_path in ifc_files:
         golden_path = ifc_path.with_suffix(args.out_suffix)
         dump = dump_file(ifc_path)
-        # One compact JSON object per line, keyed by numeric STEP id (not
-        # `indent=`-pretty-printed recursively) -- keeps the ~30 goldens' total repo
-        # footprint reasonable for a file this size, while staying line-diffable: a
-        # mismatch on one instance shows as a one-line diff, not a multi-line reflow of
-        # the whole file.
-        lines = [json.dumps({key: dump[key]}, sort_keys=True)[1:-1] for key in sorted(dump, key=lambda k: int(k[1:]))]
-        golden_path.write_text("{\n" + ",\n".join(lines) + "\n}\n")
+        write_golden(dump, golden_path)
         print(f"{ifc_path} -> {golden_path} ({len(dump)} instances)")
 
 

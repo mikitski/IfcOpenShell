@@ -1,0 +1,17 @@
+{
+"#1": {"attrs": ["0ebuHayv50LvfDNsHoXYWb", null, "Test Project", null, null, null, null, null, null], "type": "IfcProject"},
+"#2": {"attrs": ["1av_VGvIjAZu3k7RmsAT$r", null, "Test Site", null, null, null, null, null, null, null, null, null, null, null], "type": "IfcSite"},
+"#3": {"attrs": ["2jNHsX90XCcQku8De7qdsN", null, "Test Building", null, null, null, null, null, null, null, null, null], "type": "IfcBuilding"},
+"#4": {"attrs": ["3NydKujK935xXtC5rwKay3", null, "Ground Floor", null, null, null, null, null, null, null], "type": "IfcBuildingStorey"},
+"#5": {"attrs": ["0XdOjoksD7LuTPJLa5QYzr", null, null, null, "#1", ["#2"]], "type": "IfcRelAggregates"},
+"#6": {"attrs": ["3o4e$aAWDDg82PjGUdKucY", null, null, null, "#2", ["#3"]], "type": "IfcRelAggregates"},
+"#7": {"attrs": ["2Esl9i4o9E$9Lx9BdTwytY", null, null, null, "#3", ["#4"]], "type": "IfcRelAggregates"},
+"#8": {"attrs": ["0gKni1lQX3XwjFwK4TBYKf", null, "Test Wall", null, null, null, null, null, null], "type": "IfcWall"},
+"#9": {"attrs": ["2Be8YCZoD26vcUJlUNXgD8", null, null, null, ["#8"], "#4"], "type": "IfcRelContainedInSpatialStructure"},
+"#10": {"attrs": ["Concrete", null, null], "type": "IfcMaterial"},
+"#11": {"attrs": ["2YAVCNB5f2mumcCEqaUBjC", null, null, null, ["#8"], "#10"], "type": "IfcRelAssociatesMaterial"},
+"#12": {"attrs": ["1W44wqaRr3vRwBSCkjDca6", null, "Pset_WallCommon", null, ["#14", "#15"]], "type": "IfcPropertySet"},
+"#13": {"attrs": ["2botKWKCL1FQXgUu2wFgsU", null, null, null, ["#8"], "#12"], "type": "IfcRelDefinesByProperties"},
+"#14": {"attrs": ["IsExternal", null, true, null], "type": "IfcPropertySingleValue"},
+"#15": {"attrs": ["FireRating", null, "1HR", null], "type": "IfcPropertySingleValue"}
+}
