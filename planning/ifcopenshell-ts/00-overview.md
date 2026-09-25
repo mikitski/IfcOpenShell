@@ -76,6 +76,9 @@ for the proposed internal package layout, native-addon build wiring, and CI inte
 - `70-express-rules-plan.md` — the phasing plan for EXPRESS derived-attribute support and the
   `validate.py` port (Phase 10), including the decision to port real Python's already-compiled
   rule output rather than build or port an EXPRESS→TS compiler.
+- `80-reference-parity-testing-plan.md` — a post-v1 testing initiative (not part of the v1 exit
+  criterion): read/write/mutation parity against buildingSMART's own real, published certification
+  reference models, diffed against real `ifcopenshell-python`.
 
 ## 6. Non-goals for v1 (explicitly out of scope, revisit later)
 
