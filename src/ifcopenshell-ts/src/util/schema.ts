@@ -392,20 +392,6 @@ export function ifc4OnlyGeometryClasses(): ReadonlySet<string> {
 
 // --- `reassignClass` ---
 
-/** Python's `if old_attribute:` truthiness guard in `reassign_class` (see that
- * function's own doc comment below) -- Python truthiness treats `None`, `False`, `0`,
- * `""`, and empty containers (`[]`/`()`/`{}`) as falsy. Ported as closely as JS's
- * different truthiness rules allow: JS already treats `null`/`undefined`/`false`/
- * `0`/`""`/`NaN` as falsy identically to Python, but (unlike Python) treats an empty
- * JS array as *truthy* -- special-cased here to match Python's actual behavior for an
- * empty aggregate attribute value, a small, disclosed divergence from plain JS
- * truthiness (not from Python).
- */
-function isPythonFalsy(value: unknown): boolean {
-	if (Array.isArray(value)) return value.length === 0;
-	return !value;
-}
-
 function attributeNameAt(entity: EntityInstance, index: number): string {
 	const meta = entity
 		._resolveTypeInfo()
@@ -516,7 +502,15 @@ export function reassignClass(ifcFile: IfcFile | null, element: EntityInstance, 
 	for (const attribute of newEntityDeclaration.all_attributes()) {
 		const name = attribute.name();
 		const oldValue = info[name];
-		if (isPythonFalsy(oldValue)) continue;
+		// Real upstream fix (`a904ac3a9`, `schema.py`'s `reassign_class`): Python's
+		// original `if old_attribute:` truthiness guard dropped a falsy-but-explicitly-
+		// set attribute value (e.g. `Name = ""`) as if it had never been set at all --
+		// upstream fixed this with an explicit `is not None` identity check instead.
+		// Ported here the same way: skip only a genuinely-unset attribute (`null` from
+		// `getInfo()`, or `undefined` for a name `info` has no entry for at all --
+		// `info.get(name, None)`'s own Python default), preserving every other
+		// falsy-but-set value (`""`, `0`, `false`, `[]`) unchanged.
+		if (oldValue === null || oldValue === undefined) continue;
 		if (getPrimitiveType(attribute) === "enum") {
 			if (isEnumMember(attribute, oldValue as string)) {
 				newAttributes[name] = oldValue;

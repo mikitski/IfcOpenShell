@@ -8,7 +8,7 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
-### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, not yet dispatched
+### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunk 1/4 landed
 
 Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
 Full investigation and proposed 4-chunk breakdown in
@@ -24,6 +24,77 @@ adjacent) were checked and confirmed not relevant. Also found: a full history re
 current tip hit a real, non-mechanical conflict at commit 11/263 (a fork-side ASan fix colliding
 with upstream's now-complete tokenizer rewrite) — deliberately not resolved yet, revisit once the
 chunks above land and the diffs are better understood.
+
+**Chunk 1 of 4 (bug fixes) is landed** -- see the entry directly below. Chunks 2-4 (Unit-override
+support, `IfcDerivedUnit`, the alignment stationing rework, selector grammar) are not yet dispatched.
+
+---
+
+### Upstream sync, chunk 1 of 4: 4 real bug fixes upstream made since the fork point, verified against this port
+
+**What:** Real `ifcopenshell-python` upstream (this fork's `upstream` remote) has moved on since the
+fork point (`2c1d445d5`) and landed several real bug fixes since then. This chunk verified 4 of them
+directly against the real upstream commit diff and this port's own current code (not assumed from a
+summary) and fixed the ones that were actually present:
+
+1. **Fixed** -- `util/schema.ts`'s `reassignClass` (real upstream `a904ac3a9`,
+   `ifcopenshell/util/schema.py`'s `reassign_class`). The bug: a falsy-but-explicitly-set attribute
+   value (e.g. `Name = ""`) was dropped during class reassignment because the old code used a
+   truthiness check (`if old_attribute:`) instead of an explicit `is not None` check -- Python
+   treats `""`/`0`/`false`/`[]` as falsy, so a genuinely-set-but-falsy value was silently treated
+   the same as "never set." This port's own `reassignClass` had ported that exact truthiness check
+   verbatim (a dedicated `isPythonFalsy` helper, deliberately built to match Python's truthiness
+   rules including the empty-array special case) -- confirmed present, not just theoretically
+   possible, then fixed by replacing it with an explicit `oldValue === null || oldValue ===
+   undefined` check, matching upstream's own fix. `BatchReassignClass.reassign` (the file's other
+   reassignment path) was checked too and does NOT share this bug -- real Python's own
+   `BatchReassignClass.reassign` never had a truthiness guard at all (a plain by-name attribute
+   copy), and this port's version already matches that. Regression test added:
+   `test/util/schema.test.ts`'s "keeps a falsy-but-explicitly-set attribute value (empty string
+   Name) across reassignment" -- confirmed it fails against the pre-fix code (`expected null to be
+   ''`) and passes after.
+2. **Fixed** -- `api/geometry/unassignRepresentation.ts`'s `unassignProductRepresentation` (real
+   upstream `2932a0ec6`, `ifcopenshell/api/geometry/unassign_representation.py`). The bug: crashes
+   (`AttributeError` in Python, `TypeError` here) when called on a product with no `Representation`
+   at all, because `product.Representation.Representations` was accessed unguarded. This port had
+   ported that exact crash verbatim (its own doc comment explicitly said so: "reproducing the crash
+   rather than silently avoiding it") -- confirmed present, then fixed with an early-return null
+   guard on `product.get("Representation")`, matching upstream's own fix (a no-op when there's
+   nothing to unassign). Regression test added: `test/api/geometry/unassignRepresentation.test.ts`'s
+   "unassigning a representation from a product without any representation is a no-op, not a crash"
+   -- confirmed it fails against the pre-fix code (`TypeError: Cannot read properties of null
+   (reading 'get')`) and passes after.
+3. **Already correct, no fix needed** -- `util/unit.ts`'s `getPropertyUnit` (real upstream
+   `0e8d0ee84`, `ifcopenshell/util/unit.py`'s `get_property_unit`). The bug real Python had: crashes
+   when an `IfcPropertySingleValue.NominalValue` is `None` (`prop.NominalValue.is_a()` accessed
+   unconditionally). Checked this port's own `getPropertyUnit` directly -- its
+   `IfcPropertySingleValue` branch already reads `NominalValue` via `attrOrNull` and guards it with
+   a ternary (`nominalValue ? nominalValue.isA() : null`) before ever calling `.isA()`, so the crash
+   never existed here. Added a regression test anyway to lock the existing-correct behavior in
+   (`test/util/unit.test.ts`'s "IfcPropertySingleValue: a null NominalValue does not crash, resolves
+   no unit") rather than leaving it unverified.
+4. **Verified, no gap found** -- upstream `261d2ce9a` is a `.pyi` type-stub documentation-only
+   change (no behavior change) clarifying that `get_attribute_category`'s category `3` return value
+   means "derived attribute." This port's own `AttributeCategory` enum (`attributeCache.ts`) already
+   defines `DERIVED: 3` and it's genuinely consumed as "derived attribute" by real, reachable
+   production code -- `validate.ts`'s per-forward-attribute EXPRESS validation check and
+   `express/ruleExecutor.ts`'s WHERE-rule dispatch both branch on `AttributeCategory.DERIVED`
+   directly, both covered by existing tests. No code change needed or made.
+
+**Verified (both before and after the above fixes), full suite, this worktree's own built native
+addon:** 433 test files, 11167 passed / 22 skipped / 0 failed (11189 total) before; 433 test files,
+11174 passed / 22 skipped / 0 failed (11196 total) after (+7 new regression tests across the 3
+schemas the local build supports). `npx tsc --noEmit` and `npx biome check .` both clean after the
+fix.
+
+**Context:** Chunk 1 of a 4-chunk upstream-sync initiative (`90-upstream-sync-plan.md`) auditing
+real bug fixes upstream landed since this fork's fork point (`2c1d445d5`) against this port's own
+code. Chunks 2-4 (Unit-override support, `IfcDerivedUnit`, the alignment stationing rework, selector
+grammar) are separate, not touched here.
+
+**Depends on / blocked by:** None -- this entry documents completed work, not a backlog item.
+
+---
 
 ### CI: cache the C++ core build instead of rebuilding it on every push
 

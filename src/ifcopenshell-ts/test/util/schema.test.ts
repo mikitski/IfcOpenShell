@@ -283,6 +283,23 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4"))("util.schema reassignClass"
 		expect(newElement.get("PredefinedType")).toBe("FLOOR");
 	});
 
+	// Regression test for upstream `a904ac3a9` ("schema: reassign_class must not drop
+	// falsy-but-set attribute values"): real Python's original `if old_attribute:`
+	// truthiness guard treated a `Name` explicitly set to `""` the same as a `Name`
+	// that was never set at all, silently dropping it during class reassignment. Before
+	// this port's own fix (mirroring upstream's `is not None` identity check), this
+	// test failed with `newElement.get("Name") === null` instead of `""`.
+	test("keeps a falsy-but-explicitly-set attribute value (empty string Name) across reassignment", () => {
+		const file = createTestFile("IFC4");
+		const wall = file.createEntity("IfcWall");
+		wall.set("GlobalId", guid("8"));
+		wall.set("Name", "");
+
+		const newElement = subject.reassignClass(file, wall, "IfcSlab");
+		expect(newElement.isA()).toBe("IfcSlab");
+		expect(newElement.get("Name")).toBe("");
+	});
+
 	test("uses an existing IfcFile mutation transaction -- undo restores the original class", () => {
 		const file = createTestFile("IFC4");
 		const wall = makeWall(file);
