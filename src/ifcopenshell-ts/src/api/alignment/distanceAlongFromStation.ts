@@ -7,19 +7,45 @@
 // `getAlignmentStartStation` (`./getAlignmentStartStation.ts`) and `util.element`'s
 // already-landed `getPset` -- no blocker.
 //
-// `_distanceAlongOfReferent`'s `placement.RelativePlacement.Location.DistanceAlong
-// .wrappedValue` reads a defined/select-type-wrapped scalar
-// (`IfcCurveMeasureSelect`, wrapping an `IfcNonNegativeLengthMeasure`/
-// `IfcParameterValue`) -- ported via `.getByIndex(0)` (`wrappedValueOf` below), NOT
-// `.get("wrappedValue")`, matching this project's established cross-module
-// `wrappedValueOf` convention (see `./hasZeroLengthSegment.ts`'s own doc comment for
-// why: the N-API attribute-value shim doesn't support the pseudo-attribute name
-// `"wrappedValue"`, only `.getByIndex(0)`, on a standalone declared-type instance;
-// `entityInstance.ts`'s own header comment, and `TODOS.md`'s
-// `EntityInstance.setByIndex`/`IfcFile.createEntity` entry, document the *write*
-// half of this same primitive-layer boundary -- *reading* an already-populated
-// simple-type value via `getByIndex` is confirmed to work fine regardless of how the
-// instance was constructed, so this file's own read-only usage hits no blocker).
+// --- UPDATE (upstream sync chunk 3 of 4, upstream commit
+//     `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b`): reverse (decreasing) stationing
+//     support ---
+//
+// See `TODOS.md`'s "Upstream sync, chunk 3 of 4" entry and
+// `planning/ifcopenshell-ts/90-upstream-sync-plan.md` §4c for the full context. Real
+// upstream's own 70-line rewrite of `distance_along_from_station.py` does two things:
+//
+// 1. **Factors the former private `_distance_along_of_referent` helper out** into a new
+//    shared file, `_referent_distance_along.py` (this port: `./_referentDistanceAlong.ts`),
+//    so `add_stationing_referent.py` can reuse it for its own nest-sort call too. This
+//    file's own former local `distanceAlongOfReferent`/`wrappedValueOf` pair is REMOVED;
+//    both now live in `./_referentDistanceAlong.ts`, imported directly.
+// 2. **Adds a direction-sign ("sigma") walk over the sorted referents**, reading each
+//    referent's own optional `Pset_Stationing.HasIncreasingStation` alongside its
+//    `DistanceAlong`/`Station`. `sigma` starts at `+1.0` (increasing) and is reassigned
+//    to `+1.0`/`-1.0` at any referent carrying an EXPLICIT `HasIncreasingStation` value
+//    (a `null` -- i.e. absent -- value leaves the current `sigma` unchanged, it does NOT
+//    reset to `+1.0`) -- so each referent's own "governs from here on" region has a
+//    known direction. The old `outgoingStation <= station` per-region test (which
+//    implicitly assumed stations only ever increase) becomes `sigma * (station -
+//    outgoingStation) >= 0.0`, and the old `distanceAlong + (station - outgoingStation)`
+//    extrapolation/interpolation becomes `distanceAlong + sigma * (station -
+//    outgoingStation))` throughout -- `sigma` may flip any number of times along the
+//    alignment (unrealistic, but valid IFC per real upstream's own new test,
+//    `test_distance_along_from_station_multiple_direction_switches`), and this handles
+//    that correctly. When `sigma` never flips (the common, `HasIncreasingStation`-never-set
+//    case), `sigma` stays `1.0` throughout and this is byte-for-byte the same computation
+//    as before -- a real, verified backward-compatible generalization, not a rewrite of
+//    the non-reverse-stationing behavior.
+//
+// Note that "gap"/"overlap" station equations and a `HasIncreasingStation` direction
+// reversal are now the SAME mechanism from this function's own point of view -- both are
+// just a place where the (distanceAlong, outgoingStation, sigma) triples stop advancing
+// monotonically in the way a plain forward walk would expect, and the shared
+// "does the next referent's own advance overshoot the gap to the FOLLOWING referent"
+// gap-detection test (`advance > nextDistanceAlong - distanceAlong`) and
+// "return the most downstream (last, by DistanceAlong) match" overlap-resolution rule
+// both still apply unchanged, whichever mechanism created the discontinuity.
 //
 // Real Python's own `station - start_station` (the no-`stationing_nest` branch) would
 // raise `TypeError` if `get_alignment_start_station` returns `None` (a real, disclosed
@@ -35,34 +61,12 @@
 // Not independently guarded against here -- preserving the CALLED function's own
 // already-disclosed quirk is this file's job, not re-deriving Python's exact crash
 // semantics for a value it merely passes through arithmetically.
-import { EntityInstance } from "../../entityInstance";
+import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import { getPset } from "../../util/element";
+import { _referentDistanceAlong } from "./_referentDistanceAlong";
 import { getAlignmentStartStation } from "./getAlignmentStartStation";
 import { getStationingNest } from "./getStationingNest";
-
-/** Python's `x.wrappedValue` for a defined/select-type-wrapped scalar -- see this
- * file's own header comment. */
-function wrappedValueOf(value: unknown): unknown {
-	return value instanceof EntityInstance ? value.getByIndex(0) : value;
-}
-
-/**
- * Python's `_distance_along_of_referent`. Returns the `DistanceAlong` of a
- * `STATION` referent's `IfcLinearPlacement`, or `0.0` for an `IfcLocalPlacement`
- * fallback (e.g. semantic-only alignment, or the placement could not yet be
- * expressed relative to a basis curve) -- which carries no `DistanceAlong`; it is
- * only ever used for the starting referent, at distance `0.0`.
- */
-function distanceAlongOfReferent(referent: EntityInstance): number {
-	const placement = referent.get("ObjectPlacement") as EntityInstance;
-	if (placement.isA("IfcLinearPlacement")) {
-		const relativePlacement = placement.get("RelativePlacement") as EntityInstance;
-		const location = relativePlacement.get("Location") as EntityInstance;
-		return wrappedValueOf(location.get("DistanceAlong")) as number;
-	}
-	return 0.0;
-}
 
 /**
  * Given a station, returns the distance along the horizontal alignment (Python:
@@ -72,22 +76,29 @@ function distanceAlongOfReferent(referent: EntityInstance): number {
  * of the alignment is assumed to be at station `0.0`. That is, the station is the
  * distance along.
  *
- * Station equations (where `Pset_Stationing.IncomingStation` is set on a referent)
- * are taken into account. For each `STATION` referent nested to the alignment,
- * `DistanceAlong` (D) and the outgoing station (S, i.e. `Pset_Stationing.Station`)
- * are read off, sorted by `DistanceAlong`. The requested station is located within
- * the segment defined by the last referent whose outgoing station is less than or
- * equal to it, and the distance along is computed as `D + (station - S)` for that
- * referent.
+ * Station equations (where `Pset_Stationing.IncomingStation` is set on a referent) and
+ * reverse (decreasing) stationing (where `Pset_Stationing.HasIncreasingStation` is
+ * `false`) are taken into account.
  *
- * If the station falls within a gap introduced by a forward (gap) station equation
- * -- that is, it was skipped over by the equation -- there is no distance along that
- * corresponds to it, and `null` is returned.
+ * For each `STATION` referent nested to the alignment, `DistanceAlong` (D) and the
+ * outgoing station (S, i.e. `Pset_Stationing.Station`) are read off and sorted by
+ * `DistanceAlong`. A direction sign is tracked while walking the sorted referents: it
+ * starts at `+1` and is set to `+1` or `-1` at any referent that carries an explicit
+ * `Pset_Stationing.HasIncreasingStation`, so each referent's region has a sign sigma of
+ * `+1` (increasing) or `-1` (decreasing). `HasIncreasingStation` may flip any number of
+ * times along the alignment -- unrealistic, but valid IFC, and handled. The governing
+ * referent is the last one, by `DistanceAlong`, for which `sigma * (station - S) >= 0`,
+ * and the distance along is `D + sigma * (station - S)`.
  *
- * Note that an overlap (backward) station equation causes a range of stations to
- * correspond to two distinct distances along the alignment, one on either side of
- * the equation. This implementation returns the distance along in the segment
- * following the equation (i.e. the outgoing side).
+ * If the station falls within a gap introduced by a station equation -- that is, it was
+ * skipped over by the equation -- there is no distance along that corresponds to it, and
+ * `null` is returned.
+ *
+ * Note that an overlap station equation -- or a `HasIncreasingStation` direction
+ * reversal, which creates an equivalent overlap zone -- causes a range of stations to
+ * correspond to two (or more) distinct distances along the alignment. This
+ * implementation returns the most downstream one (largest `DistanceAlong`), i.e. the
+ * match in the region following the last equation/reversal.
  *
  * @param file The model.
  * @param alignment The alignment.
@@ -110,32 +121,49 @@ export function distanceAlongFromStation(file: IfcFile, alignment: EntityInstanc
 		return station - (startStation as number);
 	}
 
-	const stations: Array<[number, number]> = (stationingNest.get("RelatedObjects") as EntityInstance[]).map(
-		(referent) => [distanceAlongOfReferent(referent), getPset(referent, "Pset_Stationing", "Station") as number],
-	);
-	stations.sort((a, b) => a[0] - b[0]);
+	const referents: Array<[number, number, boolean | null]> = (
+		stationingNest.get("RelatedObjects") as EntityInstance[]
+	).map((referent) => [
+		_referentDistanceAlong(referent),
+		getPset(referent, "Pset_Stationing", "Station") as number,
+		getPset(referent, "Pset_Stationing", "HasIncreasingStation") as boolean | null,
+	]);
+	referents.sort((a, b) => a[0] - b[0]);
+
+	// Assign each referent's region a direction sign: +1 increasing, -1 decreasing. The
+	// sign starts increasing and flips at any referent carrying an explicit
+	// HasIncreasingStation (a `null`/absent value leaves the current sign unchanged).
+	let sigma = 1.0;
+	const stations: Array<[number, number, number]> = [];
+	for (const [distanceAlong, outgoingStation, hasIncreasingStation] of referents) {
+		if (hasIncreasingStation !== null && hasIncreasingStation !== undefined) {
+			sigma = hasIncreasingStation ? 1.0 : -1.0;
+		}
+		stations.push([distanceAlong, outgoingStation, sigma]);
+	}
 
 	let index: number | null = null;
 	for (let i = 0; i < stations.length; i++) {
-		const [, outgoingStation] = stations[i];
-		if (outgoingStation <= station) index = i;
+		const [, outgoingStation, regionSign] = stations[i];
+		if (regionSign * (station - outgoingStation) >= 0.0) index = i;
 	}
 
 	if (index === null) {
 		// station precedes the alignment's starting station; extrapolate from the first referent
-		const [distanceAlong, outgoingStation] = stations[0];
-		return distanceAlong + (station - outgoingStation);
+		const [distanceAlong, outgoingStation, regionSign] = stations[0];
+		return distanceAlong + regionSign * (station - outgoingStation);
 	}
 
-	const [distanceAlong, outgoingStation] = stations[index];
+	const [distanceAlong, outgoingStation, regionSign] = stations[index];
+	const advance = regionSign * (station - outgoingStation);
 
 	if (index + 1 < stations.length) {
 		const [nextDistanceAlong] = stations[index + 1];
-		if (station - outgoingStation > nextDistanceAlong - distanceAlong) {
-			// the station was skipped over by a forward (gap) station equation
+		if (advance > nextDistanceAlong - distanceAlong) {
+			// the station was skipped over by a gap station equation
 			return null;
 		}
 	}
 
-	return distanceAlong + (station - outgoingStation);
+	return distanceAlong + advance;
 }

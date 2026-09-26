@@ -4,17 +4,21 @@
 // the whole real test directory). Original test coverage written here, gated to
 // IFC4X3.
 //
-// Every real invocation of `createAsPolyline` currently throws inside the
-// already-landed `_createPolylineRepresentation` (chunk 6)'s own already-disclosed
-// `IfcCartesianPoint.Dim` EXPRESS DERIVED-attribute gap (see `createAsPolyline.ts`'s
-// own header comment for why this chunk's own real `_create_layout` helper is
-// confirmed DEAD CODE, and is therefore NOT the actual blocker here, correcting this
-// chunk's own original task brief). The test below confirms the real `IfcAlignment`
-// entity is ALREADY created in the file by the time that throw happens -- pinning that
-// real orchestration logic genuinely runs first, not that the whole function is a
-// no-op stub. Neither the stationing referent (`addStationingReferent`) nor project
-// aggregation is ever reached for any real `points` input, since both come strictly
-// after the blocked `_createPolylineRepresentation` call.
+// The `Dim`-EXPRESS-DERIVED-attribute gap this file's own comment used to describe
+// (`IfcCartesianPoint.Dim`) was closed by Phase EX-2's IFC4X3 `calc_IfcPoint_Dim`
+// port -- `createAsPolyline` now runs to completion end-to-end.
+//
+// --- Upstream sync, chunk 3 of 4 (real upstream commit
+//     `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b`) ---
+//
+// `startStation` is now optional (default `null`, meaning "no stationing referent"),
+// not defaulted to `0.0` -- see `../../../src/api/alignment/createAsPolyline.ts`'s own
+// header comment. Added a new dedicated test confirming that omitting `startStation`
+// creates NO `IfcReferent` at all (the two pre-existing tests below -- one omitting
+// `startStation`, one passing it explicitly -- already exercised both the "no referent"
+// and "referent" cases by coincidence before this change, since the OLD default `0.0`
+// happened to be a valid station value too; this new test makes the "omitted means no
+// referent" behavior explicit and unambiguous).
 
 import { describe, expect, test } from "vitest";
 import { createAsPolyline } from "../../../src/api/alignment/createAsPolyline";
@@ -34,6 +38,18 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createAsPo
 		expect(file.byType("IfcAlignment").length).toBe(alignmentCountBefore + 1);
 		expect(alignment.get("Name")).toBe("P1");
 		expect(alignment.get("ObjectPlacement")).not.toBeNull();
+	});
+
+	test("startStation omitted (null default): no IfcReferent is created", () => {
+		const file = createTestFile("IFC4X3");
+		const points = [
+			file.createEntity("IfcCartesianPoint", [0.0, 0.0]),
+			file.createEntity("IfcCartesianPoint", [5.0, 0.0]),
+		];
+
+		createAsPolyline(file, "P0", points);
+
+		expect(file.byType("IfcReferent")).toHaveLength(0);
 	});
 
 	test("reaches addStationingReferent/aggregation: a real IfcReferent and IfcRelAggregates are created", () => {

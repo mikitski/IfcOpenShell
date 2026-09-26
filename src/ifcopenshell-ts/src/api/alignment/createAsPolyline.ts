@@ -61,6 +61,21 @@
 // evaluates to `undefined` instead, so `if (project)` here genuinely guards a
 // currently-unreachable-in-real-Python case: an `IfcAlignment` with no `IfcProject` in
 // the file at all).
+//
+// --- UPDATE (upstream sync chunk 3 of 4, upstream commit
+//     `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b`): `startStation` is now OPTIONAL
+//     (default `null`, meaning "no stationing referent"), not defaulted to `0.0` ---
+//
+// See `TODOS.md`'s "Upstream sync, chunk 3 of 4" entry and
+// `planning/ifcopenshell-ts/90-upstream-sync-plan.md` §4c for the full context. Real
+// Python's own `start_station: Optional[float] = None` (previously `float = 0.0`) --
+// the stationing referent is now only created when `startStation` is explicitly given
+// (`!== null`), matching real Python's own `if start_station is not None:` guard. This
+// function's own `_createPolylineRepresentation` call always runs first regardless (its
+// own real geometry, unlike `create()`'s), so the referent it creates here -- when
+// requested -- is placed correctly on the alignment's own already-real curve, unlike
+// `create()`'s own now-removed automatic call (see `./create.ts`'s own header comment
+// for why that one was reverted).
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as guid from "../../guid";
@@ -75,30 +90,34 @@ import { addStationingReferent } from "./addStationingReferent";
  *
  * The `IfcAlignment` is aggregated to `IfcProject`.
  *
- * The stationing referent created from `startStation` has `Name` "<alignment name>
- * <station>" (e.g. "MyAlignment 49+00.00"), the same convention `updateKeyPointReferents`
- * and `create()` use for their own referents, so every referent nested under an
- * alignment is identifiable by name alone.
+ * If `startStation` is given, a `STATION` `IfcReferent` named "<alignment name>
+ * <station>" (e.g. "MyAlignment 49+00.00") is added at distance along `0.0` -- the same
+ * naming convention `updateKeyPointReferents()` and `create()` use for their own
+ * referents, so every referent nested under an alignment is identifiable by name
+ * alone. If `null` (the default), no stationing referent is created.
  *
  * @param file The file.
  * @param name Assigned to `IfcAlignment.Name`.
  * @param points Sequence of points defining the polyline.
- * @param startStation Station value at the start of the alignment.
+ * @param startStation Station value at the start of the alignment, or `null` for no
+ *   stationing referent.
  * @returns The new `IfcAlignment`.
  */
 export function createAsPolyline(
 	file: IfcFile,
 	name: string,
 	points: readonly EntityInstance[],
-	startStation = 0.0,
+	startStation: number | null = null,
 ): EntityInstance {
 	const alignment = file.createEntity("IfcAlignment", guid.new(), null, name);
 
 	_createPolylineRepresentation(file, alignment, points);
 
 	// define stationing
-	const referentName = `${alignment.get("Name") as string} ${stationAsString(file, startStation)}`;
-	addStationingReferent(file, referentName, alignment, 0.0, startStation);
+	if (startStation !== null) {
+		const referentName = `${alignment.get("Name") as string} ${stationAsString(file, startStation)}`;
+		addStationingReferent(file, referentName, alignment, 0.0, startStation);
+	}
 
 	// IFC 4.1.4.1.1 Alignment Aggregation To Project
 	const project = file.byType("IfcProject")[0];

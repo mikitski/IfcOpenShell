@@ -609,6 +609,25 @@
 //   file's own header comment and its `TODOS.md` entry for the established precedent).
 //
 // 56 (landed) + 3 (permanently excluded) = 59, the full real file count.
+//
+// --- UPSTREAM SYNC, CHUNK 3 OF 4 (2026-09-26): stationing rework ported from real
+//     upstream commit `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b` ---
+//
+// See `TODOS.md`'s "Upstream sync, chunk 3 of 4" entry and
+// `planning/ifcopenshell-ts/90-upstream-sync-plan.md` §4c for the full context. Real
+// upstream reverted `create()`'s own automatic stationing-referent creation (and that of
+// its own callers `create_as_polyline`/`create_by_pi_method`/`create_from_csv`, all of
+// which now take an OPTIONAL `start_station` and create the referent themselves, AFTER
+// their own real geometry exists) and added reverse (decreasing) stationing support to
+// `add_stationing_referent`/`distance_along_from_station`, plus a new shared
+// `_referent_distance_along` helper (this port: `./_referentDistanceAlong.ts`, a new,
+// module-private, NOT-re-exported file, matching this module's own established
+// `_`-prefixed-helper convention) used by both to sort/interpret referents by
+// `DistanceAlong` rather than `Pset_Stationing.Station` directly. `create.ts`,
+// `createAsPolyline.ts`, `createByPiMethod.ts`, `createFromCsv.ts`,
+// `addStationingReferent.ts`, and `distanceAlongFromStation.ts` were all updated -- see
+// each file's own "UPDATE (upstream sync chunk 3 of 4, ...)" header-comment section for
+// the precise per-file diff. No other file in this module was touched by this chunk.
 export { addPositioningReferent } from "./addPositioningReferent";
 export { addStationingReferent } from "./addStationingReferent";
 export { addVerticalLayout } from "./addVerticalLayout";

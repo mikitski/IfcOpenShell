@@ -147,7 +147,7 @@ describe.skipIf(!AVAILABLE_SCHEMAS.includes("IFC4X3"))("api.alignment.createLayo
 	test("test_create_no_geometry.py's own real fixture: create() now succeeds, leaving a real IfcAlignment with nested horizontal+vertical layouts and a null curve -- createLayoutSegment with the real test's own literal LINE design parameters still throws at the SAME unconditional _getSegmentEndpoint gap, confirmed unreachable even for the simplest segment", () => {
 		const file = createTestFile("IFC4X3");
 
-		const ali = create(file, "A1", true, false, false, 0.0);
+		const ali = create(file, "A1", true, false, false);
 
 		const alignments = file.byType("IfcAlignment");
 		expect(alignments.length).toBe(1);
