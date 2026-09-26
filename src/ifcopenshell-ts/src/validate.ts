@@ -122,12 +122,14 @@
 //      is treated as a cache MISS and silently recomputed, not a hit. JS's empty `Set`
 //      is truthy, so this is reproduced explicitly (`cached.size > 0`) rather than left
 //      as a silent divergence -- the same "JS truthiness differs from Python's for empty
-//      containers" issue `util/schema.ts`'s own `isPythonFalsy` helper already
-//      documents and fixes for a different function. `get_entity_attributes`'s own
-//      cached value (a 2-tuple, always non-empty) has no equivalent trap, so its cache
-//      check (ported below following `attributeCache.ts`'s established
-//      never-evicted-`Map` pattern, per this chunk's own explicit instruction) is a
-//      plain "is present" check.
+//      containers" pitfall `util/schema.ts`'s `reassignClass` used to special-case too
+//      (removed 2026-09-25 fixing upstream `a904ac3a9`, since real Python's own
+//      equivalent check there turned out to need `is not None`, not truthiness, once
+//      upstream fixed its own falsy-but-set-value bug -- see that function's own doc
+//      comment). `get_entity_attributes`'s own cached value (a 2-tuple, always
+//      non-empty) has no equivalent trap, so its cache check (ported below following
+//      `attributeCache.ts`'s established never-evicted-`Map` pattern, per this chunk's
+//      own explicit instruction) is a plain "is present" check.
 //
 // 7. `format`/`repr(val)`/`str(val)`: Python's default SWIG `repr()`/`str()` for an
 //    opaque wrapper object is itself non-deterministic (embeds a raw memory address) and

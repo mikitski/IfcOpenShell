@@ -264,6 +264,23 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit getPropertyUnit (%s)", (schema) => {
 		expect(subject.getPropertyUnit(prop, file)?.equals(length2)).toBe(true);
 	});
 
+	// Regression test for upstream `0e8d0ee84` ("Fix get_property_unit() crash on
+	// IfcPropertySingleValue.NominalValue = None"): real Python originally did
+	// `prop.NominalValue.is_a()` unconditionally, crashing on a legitimately blank
+	// `NominalValue` (`IfcPropertySingleValue` permits a null value). This port's own
+	// `getPropertyUnit` (`src/util/unit.ts`) was verified to already guard this
+	// correctly (`attrOrNull(prop, "NominalValue")` + a ternary before `.isA()`) --
+	// this test locks that existing-correct behavior in rather than fixing a bug, since
+	// none was found here.
+	test("IfcPropertySingleValue: a null NominalValue does not crash, resolves no unit", () => {
+		const file = createTestFile(schema);
+		setupUnits(file);
+		const prop = file.createEntity("IfcPropertySingleValue");
+		prop.set("Name", "Foo");
+		prop.set("NominalValue", null);
+		expect(subject.getPropertyUnit(prop, file)).toBeNull();
+	});
+
 	test("IfcPropertyEnumeratedValue: own EnumerationValues, reference EnumerationValues, reference Unit precedence", () => {
 		const file = createTestFile(schema);
 		const { length, length2, area } = setupUnits(file);

@@ -114,6 +114,21 @@ describe.each(AVAILABLE_SCHEMAS)("api.geometry.unassignRepresentation (%s)", (sc
 		expect(wall.get("Representation")).toBeNull();
 		expect(file.byType("IfcProductDefinitionShape").length).toBe(0);
 	});
+
+	// Regression test for upstream `2932a0ec6` ("geometry.unassign_representation: fix
+	// None crash"): real Python's `unassign_product_representation` originally did
+	// `product.Representation.Representations` unguarded, crashing with an
+	// `AttributeError` when `product.Representation` was `None`. Before this port's own
+	// fix (an early-return guard mirroring upstream's), this test threw a `TypeError`
+	// instead of completing as a no-op.
+	test("unassigning a representation from a product without any representation is a no-op, not a crash", () => {
+		const file = blankFile(schema);
+		const wall = file.createEntity("IfcWall");
+		const representation = file.createEntity("IfcShapeRepresentation");
+
+		expect(() => unassignRepresentation(file, { product: wall, representation })).not.toThrow();
+		expect(wall.get("Representation")).toBeNull();
+	});
 });
 
 // --- Transaction/undo-redo regression coverage (no Python counterpart) ---

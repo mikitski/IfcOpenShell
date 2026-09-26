@@ -89,12 +89,15 @@ function processShapeAspects(file: IfcFile, productRepresentation: EntityInstanc
 
 /** Python: `Usecase.unassign_product_representation(product, representation)`. */
 function unassignProductRepresentation(file: IfcFile, product: EntityInstance, representation: EntityInstance): void {
-	// Python: `list(product.Representation.Representations or [])` -- an unguarded
-	// `product.Representation` access, crashing (`AttributeError` on `None`) if the
-	// product has no representation assigned at all; `.get(...)` on `null` below throws
-	// the TS/JS equivalent (`TypeError`), reproducing the crash rather than silently
-	// avoiding it.
-	const productDef = product.get("Representation") as EntityInstance;
+	// Real upstream fix (`2932a0ec6`, `unassign_representation.py`): Python originally
+	// did `list(product.Representation.Representations or [])` unguarded -- crashing
+	// (`AttributeError` on `None`) if `product` has no `Representation` assigned at all.
+	// Upstream fixed this with an early-return guard (`if not (product_def :=
+	// product.Representation): return`) before ever touching `.Representations`. Ported
+	// the same way here: a product with no `Representation` is simply a no-op, matching
+	// `unassignRepresentation`'s own overall usecase contract (nothing to unassign).
+	const productDef = product.get("Representation") as EntityInstance | null;
+	if (!productDef) return;
 	const representations = [...((productDef.get("Representations") as EntityInstance[] | null) ?? [])];
 	const index = representations.findIndex((r) => r.equals(representation));
 	if (index === -1) return;
