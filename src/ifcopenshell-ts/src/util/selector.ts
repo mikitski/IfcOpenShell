@@ -717,10 +717,11 @@ export function getElementValue(element: EntityInstance, query: string): unknown
 //    `element_value`, regardless of whether it happens to be a whole number. This is
 //    observably identical to Python in every case this module's own tests (and this
 //    chunk's own tests, ported from `test_selector.py`) exercise, and only diverges in
-//    one specific, narrow scenario: a *quoted, non-integer* value string (e.g.
-//    `Foobar.Baz>"100.5"` -- note the grammar's own `unquoted_string` production
-//    excludes `.`, so an unquoted decimal literal isn't even parseable in the first
-//    place) compared against an attribute/property whose underlying EXPRESS type is
+//    one specific, narrow scenario: a non-integer value string, quoted or (since real
+//    upstream 41390dad9's `decimal_string` grammar relaxation, ported below in
+//    `parseFacetValue`) unquoted alike -- e.g. `Foobar.Baz>"100.5"` and
+//    `Foobar.Baz>100.5` parse to the identical value and are equally affected here --
+//    compared against an attribute/property whose underlying EXPRESS type is
 //    declared INTEGER (not REAL) -- Python's `int("100.5")` raises `ValueError` there
 //    (caught, `result = False`), while this port's permissive float parse succeeds and
 //    produces a real (mathematically correct) comparison instead of Python's blanket
@@ -1011,6 +1012,32 @@ export function parseFilterQuery(query: string): FilterGroup {
 					i += literal.length;
 					return result;
 				}
+			}
+			// value: special | quoted_string | regex_string | decimal_string | unquoted_string
+			// decimal_string: SIGNED_DECIMAL
+			// SIGNED_DECIMAL: ["+"|"-"] (INT "." INT | "." INT)
+			// Real upstream 41390dad9 ("Accept an unquoted decimal in a selector value"):
+			// `unquoted_string` below excludes "." (it separates pset from prop elsewhere
+			// in the grammar), which made every decimal number a syntax error unless
+			// quoted (`Foobar.Baz>1.5` failed, `Foobar.Baz>"1.5"` was required). By the
+			// time a `value` is being read, the pset/prop separator has already been
+			// consumed, so a "." here is unambiguous -- this `decimal_string` alternative
+			// is tried first (a leading `+`/`-` sign is optional, and either `INT.INT` or
+			// a leading-dot `.INT` form is accepted; a digit is required after the ".",
+			// so a trailing-dot-only form like "1." is still a syntax error and falls
+			// through to `unquoted_string` below, which only consumes the "1" and then
+			// leaves the stray "." to be rejected as unexpected trailing content, exactly
+			// as before this change). `FacetTransformer.value` treats a matched
+			// `decimal_string` exactly like `unquoted_string`/`quoted_string` (returns the
+			// same raw text a quoted value would), so `=1.5` and `="1.5"` parse to the
+			// identical value and downstream `compareValues`' `pythonFloat` numeric
+			// coercion is completely unaffected -- this is a pure parser-level grammar
+			// relaxation, not a new value type or comparison behavior.
+			const decimalMatch = /^[+-]?(?:\d+\.\d+|\.\d+)/.exec(query.slice(i));
+			if (decimalMatch) {
+				const token = decimalMatch[0];
+				i += token.length;
+				return token;
 			}
 		}
 		return parseNameToken(true).value;

@@ -782,6 +782,40 @@ describe("selector.parseFilterQuery", () => {
 		expect(() => subject.parseFilterQuery("Name=//")).toThrow();
 		expect(() => subject.parseFilterQuery("IfcWall /* unterminated")).toThrow();
 	});
+
+	// Real upstream 41390dad9 ("Accept an unquoted decimal in a selector value"): `value`
+	// grew a `decimal_string` alternative (`["+"|"-"] (INT "." INT | "." INT)`), tried
+	// before falling back to `unquoted_string` (which excludes "." since it's the
+	// pset/prop separator elsewhere in the grammar). `FacetTransformer.value` treats a
+	// matched `decimal_string` exactly like `unquoted_string`/`quoted_string` -- returns
+	// the same raw text -- so this only relaxes what parses, not what a parsed value means.
+	test("unquoted decimal values in a comparison (real upstream 41390dad9)", () => {
+		expect(subject.parseFilterQuery("Foobar.Baz>1.5")).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Baz", comparison: ">", value: "1.5" }],
+		]);
+		// Leading-dot form.
+		expect(subject.parseFilterQuery("Foobar.Baz>.5")).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Baz", comparison: ">", value: ".5" }],
+		]);
+		// Signed forms, both the full INT.INT shape and the leading-dot shape.
+		expect(subject.parseFilterQuery("Foobar.Baz>-0.2")).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Baz", comparison: ">", value: "-0.2" }],
+		]);
+		expect(subject.parseFilterQuery("Foobar.Baz>+1.4")).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Baz", comparison: ">", value: "+1.4" }],
+		]);
+		expect(subject.parseFilterQuery("Foobar.Baz>-.5")).toEqual([
+			[{ kind: "property", pset: "Foobar", prop: "Baz", comparison: ">", value: "-.5" }],
+		]);
+		// A quoted decimal and the new unquoted form parse to the identical AST value.
+		expect(subject.parseFilterQuery("Foobar.Baz=1.5")).toEqual(subject.parseFilterQuery('Foobar.Baz="1.5"'));
+		// A trailing-dot-only form (no digit after the ".") is still a syntax error --
+		// `unquoted_string` only consumes the "1", leaving the stray "." to be rejected
+		// as unexpected trailing content, exactly as before this change.
+		expect(() => subject.parseFilterQuery("Foobar.Baz=1.")).toThrow();
+		// A "." in a value is only ever a number -- anything else still needs quoting.
+		expect(() => subject.parseFilterQuery("Name=v1.2")).toThrow();
+	});
 });
 
 // --- `filterElements` -- port of `test_selector.py`'s `TestFilterElements` class ---
@@ -940,6 +974,40 @@ describe("selector.filterElements", () => {
 		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo*=ar"), [element]);
 		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo!*=ar"), [element2]);
 		expectElements(subject.filterElements(file, "IfcWall, Foobar.Foo*=Foo"), []);
+	});
+
+	// Python: `test_selecting_by_property_with_an_unquoted_decimal` (real upstream
+	// 41390dad9, "Accept an unquoted decimal in a selector value" -- chunk 4 of 4 of the
+	// upstream-sync initiative, `planning/ifcopenshell-ts/90-upstream-sync-plan.md`).
+	test("selecting by property with an unquoted decimal", () => {
+		const file = newFile();
+		const element = file.createEntity("IfcWall");
+		const element2 = file.createEntity("IfcWall");
+		addPset(file, element, "Foobar", { Baz: 1.5 });
+		// A decimal needs no quotes. The pset/prop separator has already been consumed
+		// by the comparison, so a "." is unambiguous in a value.
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz=1.5"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>1"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>1.4"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz<1.4"), []);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>=1.5"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz<=1.5"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz!=1.5"), [element2]);
+		// Signed and leading dot forms.
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>-1.5"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>+1.4"), [element]);
+		expectElements(subject.filterElements(file, "IfcWall, Foobar.Baz>.5"), [element]);
+		// Quoting a decimal stays legal and means exactly the same thing.
+		expectElements(
+			subject.filterElements(file, "IfcWall, Foobar.Baz=1.5"),
+			Array.from(subject.filterElements(file, 'IfcWall, Foobar.Baz="1.5"')),
+		);
+		expectElements(
+			subject.filterElements(file, "IfcWall, Foobar.Baz>1.4"),
+			Array.from(subject.filterElements(file, 'IfcWall, Foobar.Baz>"1.4"')),
+		);
+		// A dot in a value is still only a number. Anything else needs quotes.
+		expect(() => subject.filterElements(file, "IfcWall, Foobar.Baz=v1.2")).toThrow();
 	});
 
 	// Python: `test_selecting_by_classification`.
