@@ -1,43 +1,45 @@
 // This file was generated with the assistance of an AI coding tool.
 //
-// Port of `ifcopenshell/api/alignment/create.py` (src/ifcopenshell-python, 105 lines) --
+// Port of `ifcopenshell/api/alignment/create.py` (src/ifcopenshell-python, ~95 lines) --
 // see `./index.ts`'s own header comment for this brand-new module's full scope (chunk 8
 // of many, the LAST chunk for this module). PUBLIC (confirmed present in real Python's
 // own `__init__.py` `__all__`). Depends on already-landed `_addZeroLengthSegment`
-// (chunk 7), `_createGeometricRepresentation` (chunk 6), `addStationingReferent`
-// (chunk 4), `api.aggregate.assignObject`/`api.nest.assignObject`,
-// `util.alignment.stationAsString` -- all verified directly against their real exported
+// (chunk 7), `_createGeometricRepresentation` (chunk 6), `api.aggregate.assignObject`/
+// `api.nest.assignObject` -- all verified directly against their real exported
 // name/signature before use.
 //
-// --- CONFIRMED: `addStationingReferent` is called UNCONDITIONALLY, not inside the
-//     `if include_geometry:` block -- a common point of confusion, verified precisely ---
+// --- UPDATE (upstream sync chunk 3 of 4, upstream commit
+//     `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b`): `create()` no longer creates a
+//     stationing referent, and the `startStation` parameter is REMOVED ---
 //
-// Reading the real source's own indentation directly: `_create_geometric_representation`
-// is inside `if include_geometry:` (indented one level deeper), but
-// `referent_name = ...` / `referent = ifcopenshell.api.alignment.add_stationing_referent
-// (...)` sit at the SAME indentation level as that `if` statement itself -- i.e. OUTSIDE
-// and AFTER it, always executed regardless of `include_geometry`'s value. Since
-// `addStationingReferent` is already confirmed (chunk 4) to be blocked on BOTH of its
-// own 2 disclosed gaps (the `IfcPointByDistanceExpression.DistanceAlong`/
-// `IfcLengthMeasure` standalone-construction gap for a real, non-empty composite curve;
-// `editPset`'s own new-property gap for the non-composite-curve fallback placement) for
-// EVERY real invocation, `create()` is **unconditionally blocked** at this exact call,
-// for every real invocation, regardless of `includeVertical`/`includeCant`/
-// `includeGeometry`/`startStation` -- not a NEW gap, just this function's own real,
-// unavoidable dependency on an already-fully-blocked one.
+// See `TODOS.md`'s "Upstream sync, chunk 3 of 4" entry and
+// `planning/ifcopenshell-ts/90-upstream-sync-plan.md` §4c for the full context. Real
+// upstream's own commit message: "Reverts from automatically adding stationing to
+// alignments because of missing initial geometry." -- the automatic
+// `add_stationing_referent()` call used to run here BEFORE `create()`'s own trailing
+// `_add_zero_length_segment` loop populates the basis curve's `Segments`, so it always
+// took the fallback (non-composite-curve) placement branch, even when
+// `includeGeometry=true` -- producing a referent placed with a plain `IfcLocalPlacement`
+// instead of a real `IfcLinearPlacement` on the alignment's own curve, "because of
+// missing initial geometry" (the real upstream commit message's own words). This is now
+// the CALLER's responsibility: call `addStationingReferent()` explicitly, once the
+// layout segments (and therefore the basis curve geometry) exist, to place the
+// starting-station referent correctly the first time -- and again for any station
+// equations. Until stationing is defined, `getAlignmentStartStation()` reports `0.0`.
 //
-// Ported the ENTIRE function faithfully regardless (entity creation, layout creation,
-// nesting, conditional geometric-representation creation, the stationing referent call,
-// the final `_add_zero_length_segment` loop over layouts, project aggregation) -- no
-// proactive guard added anywhere. `create.test.ts` pins the real, portable prefix that
-// runs before the throw (the `IfcAlignment`/layout entities and their nesting are all
-// real, for real, by the time the throw happens), for both `include_geometry=true` and
-// `include_geometry=false` (both reach the identical unconditional
-// `addStationingReferent` throw, confirming the indentation finding above precisely).
+// The `startStation` parameter is removed entirely (not defaulted to `null`/optional --
+// real upstream's own new signature has no such parameter at all, matching
+// `create_as_polyline.py`/`create_by_pi_method.py`/`create_from_csv.py`'s own newly
+// OPTIONAL `start_station` params, which this file's siblings -- `./createAsPolyline.ts`/
+// `./createByPiMethod.ts`/`./createFromCsv.ts` -- each still expose, calling
+// `addStationingReferent()` themselves afterward when given).
+//
+// This function is otherwise unaffected: entity creation, layout creation, nesting,
+// conditional geometric-representation creation, the trailing `_add_zero_length_segment`
+// loop over layouts, and project aggregation are all unchanged.
 //
 // --- Real, disclosed TS-vs-Python divergence: same empty-`IfcProject` quirk as
-//     `./createAsPolyline.ts`/`./createAsOffsetCurve.ts` (never actually reached here,
-//     since the function always throws earlier, but disclosed for completeness) ---
+//     `./createAsPolyline.ts`/`./createAsOffsetCurve.ts` ---
 //
 // Real Python's own `file.by_type("IfcProject")[0]` raises `IndexError` for an empty
 // file, before its own `if project:` check is ever meaningfully reached; this port's
@@ -46,12 +48,10 @@
 import type { EntityInstance } from "../../entityInstance";
 import type { IfcFile } from "../../file";
 import * as guid from "../../guid";
-import { stationAsString } from "../../util/alignment";
 import { assignObject as assignAggregateObject } from "../aggregate/assignObject";
 import { assignObject as assignNestObject } from "../nest/assignObject";
 import { _addZeroLengthSegment } from "./_addZeroLengthSegment";
 import { _createGeometricRepresentation } from "./_createGeometricRepresentation";
-import { addStationingReferent } from "./addStationingReferent";
 
 /**
  * Creates a new alignment with a horizontal layout (Python:
@@ -65,16 +65,11 @@ import { addStationingReferent } from "./addStationingReferent";
  * `getCantLayout(alignment)` to get the corresponding `IfcAlignmentHorizontal`,
  * `IfcAlignmentVertical`, and `IfcAlignmentCant` layout entities.
  *
- * If geometric representations are created, the alignment stationing referent is also
- * created using `startStation`. `IfcReferent.ObjectPlacement` is required for linear
- * position elements and `IfcLinearPlacement` is defined relative to alignment curve
- * geometry. This referent's `Name` follows the same "<alignment name> <station>"
- * convention `updateKeyPointReferents` uses for its own key-point referents (e.g.
- * "MyAlignment 49+00.00").
- *
- * **CONFIRMED unconditionally blocked** by the already-disclosed `addStationingReferent`
- * gap, called unconditionally regardless of `includeGeometry` -- see this file's own
- * header comment for the precise indentation-level verification.
+ * This function does not define the alignment's stationing. Call
+ * `addStationingReferent()` once the layout segments (and therefore the basis curve
+ * geometry) exist to place the starting-station `IfcReferent`, and again for any
+ * station equations. Until stationing is defined, `getAlignmentStartStation()` reports
+ * `0.0`.
  *
  * @param file The file.
  * @param name Name assigned to `IfcAlignment.Name`.
@@ -83,10 +78,7 @@ import { addStationingReferent } from "./addStationingReferent";
  * @param includeCant If `true`, `IfcAlignmentCant` is created. `IfcSegmentedReferenceCurve`
  *   is created if `includeGeometry` is `true`.
  * @param includeGeometry If `true`, the geometric representations are added.
- * @param startStation Station value at the start of the alignment.
  * @returns The new `IfcAlignment`.
- * @throws {Error} Always, from the already-unconditionally-blocked `addStationingReferent`
- *   -- see this file's own header comment.
  */
 export function create(
 	file: IfcFile,
@@ -94,7 +86,6 @@ export function create(
 	includeVertical = false,
 	includeCant = false,
 	includeGeometry = true,
-	startStation = 0.0,
 ): EntityInstance {
 	const alignment = file.createEntity(
 		"IfcAlignment",
@@ -129,11 +120,6 @@ export function create(
 	if (includeGeometry) {
 		_createGeometricRepresentation(file, alignment);
 	}
-
-	const referentName = `${name} ${stationAsString(file, startStation)}`;
-	// *** BLOCKED HERE, unconditionally, regardless of `includeGeometry` -- see this
-	// file's own header comment. ***
-	addStationingReferent(file, referentName, alignment, 0.0, startStation);
 
 	for (const layout of alignmentLayouts) {
 		_addZeroLengthSegment(file, layout);

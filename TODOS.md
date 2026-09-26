@@ -8,7 +8,7 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
-### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunks 1-2/4 landed
+### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunks 1-3/4 landed
 
 Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
 Full investigation and proposed 4-chunk breakdown in
@@ -25,8 +25,8 @@ current tip hit a real, non-mechanical conflict at commit 11/263 (a fork-side AS
 with upstream's now-complete tokenizer rewrite) — deliberately not resolved yet, revisit once the
 chunks above land and the diffs are better understood.
 
-**Chunks 1-2 of 4 are landed** -- see the two entries directly below. Chunks 3-4 (the alignment
-stationing rework, selector grammar) are not yet dispatched.
+**Chunks 1-3 of 4 are landed** -- see the three entries directly below. Chunk 4 (selector grammar
+relaxation) is not yet dispatched.
 
 ---
 
@@ -193,6 +193,90 @@ touched here.
 **Depends on / blocked by:** Item 4 above (the string decode/encode API) is blocked on native-layer
 work (see its own writeup) -- left as a follow-up, not tracked as a separate entry since the writeup
 above already captures the full investigation. Otherwise, this entry documents completed work.
+
+---
+
+### Upstream sync, chunk 3 of 4: alignment stationing rework (`create()` no longer auto-adds stationing, reverse/decreasing stationing support)
+
+**What:** Ported real upstream commit `b5670c4fc5347ec5c2c621f3f53a1a737bd21d2b` ("Reverts from
+automatically adding stationing to alignments because of missing initial geometry. Adds support for
+stationing with decreasing values.") -- a 21-file, ~394-insertion/131-deletion real upstream commit,
+read in full before starting, not assumed from a summary. Two real behavior changes, both ported:
+
+1. **`create()` (and its callers `createAsPolyline()`/`createByPiMethod()`/`createFromCsv()`) no
+   longer automatically create a stationing referent.** The automatic `addStationingReferent()` call
+   inside `create()` used to run BEFORE the basis curve had any real segments (those are only added
+   by `create()`'s own trailing `_addZeroLengthSegment` loop, which ran AFTER the stationing call) --
+   so it always produced a referent with the wrong placement kind (`IfcLocalPlacement`, not a real
+   `IfcLinearPlacement` on the curve), "because of missing initial geometry" (real upstream's own
+   commit message). This is now the caller's explicit responsibility, called once real geometry
+   exists. `create.ts`'s own `startStation` parameter is REMOVED entirely (matching real upstream's
+   new signature exactly -- not defaulted to `null`); `createAsPolyline.ts`/`createByPiMethod.ts`/
+   `createFromCsv.ts` each keep (or, for `createFromCsv.ts`, newly gain) an OPTIONAL `startStation`
+   parameter (default `null`) and call `addStationingReferent()` themselves, after their own real
+   geometry construction, only when given.
+2. **`addStationingReferent()` gains reverse (decreasing) stationing support**, via a new
+   `hasIncreasingStation` parameter (inserted before the existing `onBasisCurve` parameter, matching
+   real upstream's own new parameter order) written to `Pset_Stationing.HasIncreasingStation` only
+   when given. Referents nested under an alignment are now sorted by increasing `DistanceAlong`
+   (IFC CT 4.1.4.4.3), not `Pset_Stationing.Station` directly -- critical for a reverse-stationed
+   alignment, where increasing `DistanceAlong` means DECREASING `Station`. The sort key moved into a
+   new shared, module-private helper, `_referentDistanceAlong.ts` (ported from real upstream's own
+   brand-new `_referent_distance_along.py`, factored out of `distance_along_from_station.py`'s former
+   private helper so `add_stationing_referent.py` can reuse it too), used by both
+   `addStationingReferent.ts` and `distanceAlongFromStation.ts`. Additionally, the fallback
+   (non-composite-curve) placement branch in `addStationingReferent.ts` no longer reads
+   `alignment.ObjectPlacement`'s own location at all -- it now places the referent at the hardcoded
+   global origin `(0.0, 0.0)` unconditionally, matching real upstream's own new docstring ("place the
+   referent at the global origin; `create_representation()` restates it onto the curve later").
+   `distanceAlongFromStation.ts` was substantially rewritten (matching real upstream's own 70-line
+   diff) to track a direction sign ("sigma", `+1`/`-1`) while walking the sorted referents, flipping
+   at any referent carrying an explicit `HasIncreasingStation`, and using `sigma * (station -
+   outgoingStation)` throughout instead of a plain `station - outgoingStation` -- a real, verified
+   backward-compatible generalization (when `HasIncreasingStation` is never set, `sigma` stays `1.0`
+   throughout and the computation is byte-for-byte identical to the pre-change behavior).
+
+**Files changed** (all in `src/ifcopenshell-ts/src/api/alignment/`, matching the real upstream diff's
+own file list exactly): `create.ts`, `createAsPolyline.ts`, `createByPiMethod.ts`, `createFromCsv.ts`,
+`addStationingReferent.ts`, `distanceAlongFromStation.ts`, plus new file `_referentDistanceAlong.ts`
+(module-private, not re-exported from `index.ts`, matching this module's own `_`-prefixed-helper
+convention). `index.ts`'s own header comment was updated with a summary note; no other file in this
+module was touched.
+
+**Tests:** Real upstream's own new/changed test cases across `test_add_stationing_referent.py` (+42
+lines: `test_add_stationing_referent_without_geometry_placed_at_global_origin`,
+`test_add_stationing_referent_has_increasing_station`), `test_distance_along_from_station.py` (+160
+lines: 4 new reverse-stationing/direction-switch test functions), and the removed-auto-stationing
+behavior change across `test_create.py`, `test_add_positioning_referent.py`,
+`test_add_segment_to_layout.py`, `test_add_stationing_to_alignment.py`, `test_add_vertical_alignment.py`,
+`test_create_by_pi_method.py`, `test_create_representation.py`, `test_horizontal_layout_by_pi_method.py`,
+`test_update_key_point_referents.py`, `test_vertical_layout_by_pi_method.py` were all read and adapted
+into this port's own `test/api/alignment/*.test.ts` suite (using the fixture techniques this suite's
+own tests already established, since none of those real Python fixtures are directly reusable here --
+`create_by_pi_method`/`create_layout_segment` remain independently blocked on the still-open,
+real-geometry-kernel-needing `_getSegmentEndpoint` gap, unrelated to this chunk). Concretely:
+`create.test.ts` (all 3 tests updated: no `IfcReferent`/stationing nest is created by a bare `create()`
+call anymore -- this port's OWN pre-existing tests here were the ones asserting the old, now-incorrect
+auto-stationing behavior, found and fixed, matching this chunk's own standing instruction to sweep for
+that); `addStationingReferent.test.ts` (existing positional-argument calls fixed for the new
+`hasIncreasingStation` parameter position, plus 3 new tests: global-origin placement,
+`HasIncreasingStation` write behavior, and DistanceAlong-vs-Station nest sorting); `distanceAlongFromStation.test.ts`
+(4 new test functions, one per real upstream test, all numeric assertions ported verbatim);
+`createAsPolyline.test.ts`/`createByPiMethod.test.ts`/`createFromCsv.test.ts` (new tests confirming
+the optional-`startStation` behavior, including the "never reached, still throws at the same
+pre-existing kernel gap" case for the latter two, which are independently blocked before reaching their
+own new `addStationingReferent` call regardless of this chunk's changes); `createLayoutSegment.test.ts`
+(one stale 6-positional-argument `create()` call updated to match the removed `startStation` parameter).
+
+**Verified (both before and after the above changes), full suite, this worktree's own built native
+addon:** 433 test files, 11174 passed / 22 skipped / 0 failed (11196 total) before; 433 test files,
+11184 passed / 22 skipped / 0 failed (11206 total) after (+10 net new tests across the 3 schemas the
+local build supports). `npx tsc --noEmit` and `npx biome check .` both clean after the change.
+
+**Context:** Chunk 3 of the 4-chunk upstream-sync initiative (`90-upstream-sync-plan.md`). Chunk 4
+(selector grammar relaxation) is separate, not touched here.
+
+**Depends on / blocked by:** None -- this entry documents completed work, not a backlog item.
 
 ---
 
