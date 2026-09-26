@@ -8,6 +8,23 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
+### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, not yet dispatched
+
+Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
+Full investigation and proposed 4-chunk breakdown in
+`planning/ifcopenshell-ts/90-upstream-sync-plan.md`. Short version: of the 100 upstream commits
+touching `src/ifcopenshell-python`/`src/ifcparse` (the only areas relevant to this port), ~22 are
+real and relevant — bug fixes to verify (`reassignClass`, `unassignRepresentation`,
+`util/unit.ts`'s `getPropertyUnit`), real new features not yet ported (`editPset`/`editQto`
+per-property Unit-override support, `IfcDerivedUnit` support in `util.unit`, a new top-level string
+decode/encode API), a substantial `api.alignment` stationing-behavior rework (6 already-shipped
+files + 1 new file), and a selector-grammar relaxation (unquoted decimals in comparisons). The rest
+(tooling noise, the `ifcparse` tokenizer rewrite, SWIG/SQL/RocksDB-backend-specific, geometry-kernel-
+adjacent) were checked and confirmed not relevant. Also found: a full history rebase onto upstream's
+current tip hit a real, non-mechanical conflict at commit 11/263 (a fork-side ASan fix colliding
+with upstream's now-complete tokenizer rewrite) — deliberately not resolved yet, revisit once the
+chunks above land and the diffs are better understood.
+
 ### CI: cache the C++ core build instead of rebuilding it on every push
 
 **What:** `ci-ifcopenshell-ts.yml`'s `build-and-test` job reconfigures and rebuilds the entire

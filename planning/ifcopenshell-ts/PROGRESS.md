@@ -550,6 +550,30 @@ chunk 3's own note below). One genuine new finding surfaced along the way, track
 | Chunk 2 — round-trip write-back parity | ✅ | [#254](https://github.com/mikitski/IfcOpenShell/pull/254) | `test/referenceParity/writeParity.test.ts`: for each of the 30 fixtures, TS reads it, writes it back out, re-parses via TS's own `dumpFile`, and diffs against the SAME chunk-1 golden (no second Python pass needed). **Result: all 30 fixtures round-trip with ZERO mismatches** (31/31 tests incl. bookkeeping; combined with chunk 1, `test/referenceParity/` is 62/62) — independently re-verified by the orchestrating session (fresh native rebuild, full suite: 428/4/432 files, 10966/218/11184 tests, 0 failures, matching the dispatch's own report exactly). The chunk-1 `LOGICAL`-attribute native gap was re-confirmed not relevant here for the same reason as chunk 1 (none of the 30 fixtures exercise it). |
 | Chunk 3 — mutation differential battery | ✅ | [#255](https://github.com/mikitski/IfcOpenShell/pull/255) (Python golden generation, orchestrating-session-authored), [#257](https://github.com/mikitski/IfcOpenShell/pull/257) (TS replay + verification suite) | Initial battery landed: a single `wall-lifecycle` scenario (create project/site/building/storey/wall, assign container, add+assign material, add pset, edit+remove properties — the plan doc's own worked example) run through both real `ifcopenshell-python` and this port's own `api.*` functions across all 3 schemas, diffed via chunk 1's engine. **Result: 4/4 tests pass, ZERO mismatches.** Two real determinism problems were found and fixed before this could work at all: random `GlobalId`s (hardcoded to fixed values on both sides) and `IfcOwnerHistory`'s real-`time.time()` timestamps (normalized to `0` on both sides post-dump). One disclosed, non-blocking API-shape divergence: `editPset`'s new-property values had to be pre-built typed `EntityInstance`s rather than raw JS scalars, due to the already-known `attribute_kind_of` primitive-layer gap — confirmed to produce identical resulting IFC data (the diff itself is the proof). Independently re-verified by the orchestrating session (fresh native rebuild, full suite: 429/4/433 files, 10970/218/11188 tests, 0 failures, matching the dispatch's own report exactly). **Deliberately growable, not exhaustive** — this is the plan's own explicit framing (no "reference model" analog forces mutation coverage the way read/round-trip gets it for free); adding more scenarios remains open, low-priority follow-on work, not a completeness gap. |
 
+## Upstream Sync (scoped 2026-09-26)
+
+See `90-upstream-sync-plan.md` for the full writeup. Before proposing this fork fold back into
+`IfcOpenShell/IfcOpenShell`, investigated how far the two have diverged since the fork point
+(`2c1d445d5`, 2026-03-03): this fork is 263 commits ahead (the entire TS port, confirmed
+self-contained to `src/ifcopenshell-ts/`/`planning/ifcopenshell-ts/` plus 5 small additive files),
+real upstream is 584 commits ahead. A scratch-branch rebase attempt (never touching real `v0.9.0`)
+hit a real, substantive conflict at commit 11/263 — a fork-side ASan bug fix colliding with
+upstream's complete rewrite of the `ifcparse` tokenizer — and was deliberately aborted rather than
+resolved uninformed, pending this scoping pass.
+
+Of upstream's 584 commits, 100 touch `src/ifcopenshell-python`/`src/ifcparse` (the only areas
+genuinely relevant to this port's methodology/native binding); of those, 34 are pure tooling noise,
+~20 are the (functionally inert, confirmed-unused-by-this-port) tokenizer rewrite, ~10 are
+SWIG-wrapper-specific, ~10 are SQL/RocksDB-backend-specific (out of scope), ~4 are geometry-kernel-
+adjacent (post-v1 scope) — leaving **~22 real, relevant changes**: several bug fixes to verify against
+this port (`reassignClass`, `unassignRepresentation`, `getPropertyUnit`, an `express::base::as<T>()`
+null guard), real new features not yet ported (`editPset`/`editQto` per-property Unit-override
+support with a `_NO_UNIT` sentinel, `IfcDerivedUnit` support in `util.unit`, a new top-level string
+decode/encode API), a substantial alignment-stationing behavior rework touching 6 already-shipped
+`api.alignment` files plus one new file, and a selector-grammar relaxation (unquoted decimals in
+comparisons). Proposed 4-chunk breakdown in the plan doc; not yet dispatched — this was scoping only,
+per explicit user instruction to investigate before deciding on next steps.
+
 ## Blockers / escalations
 
 - **2026-09-04 — GitHub push access — RESOLVED.** User fixed the PAT (it previously lacked repo
