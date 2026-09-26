@@ -8,7 +8,7 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
-### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunks 1-3/4 landed
+### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, ALL 4 CHUNKS LANDED
 
 Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
 Full investigation and proposed 4-chunk breakdown in
@@ -25,8 +25,14 @@ current tip hit a real, non-mechanical conflict at commit 11/263 (a fork-side AS
 with upstream's now-complete tokenizer rewrite) — deliberately not resolved yet, revisit once the
 chunks above land and the diffs are better understood.
 
-**Chunks 1-3 of 4 are landed** -- see the three entries directly below. Chunk 4 (selector grammar
-relaxation) is not yet dispatched.
+**All 4 chunks are landed** -- see the four entries directly below. This closes out the
+upstream-sync investigation and porting work scoped in `90-upstream-sync-plan.md`. Two other commits
+found by the same investigation (`1c6362ec3`, `ff4ef510f`) were checked and confirmed to be pure
+documentation commits (real Python's own `.rst` docs only, zero code changes) -- correctly not
+ported, not a missed chunk. The still-open item from this whole initiative is the rebase-vs-fresh-
+branch decision for actually folding this fork's history into real upstream (see this entry's own
+"full history rebase" note above) -- revisit now that all 4 chunks' worth of real behavior
+differences are understood.
 
 ---
 
@@ -277,6 +283,73 @@ local build supports). `npx tsc --noEmit` and `npx biome check .` both clean aft
 (selector grammar relaxation) is separate, not touched here.
 
 **Depends on / blocked by:** None -- this entry documents completed work, not a backlog item.
+
+---
+
+### Upstream sync, chunk 4 of 4 (LAST): selector mini-language now accepts an unquoted decimal in a comparison value
+
+**What:** Real `ifcopenshell-python` upstream's `util.selector` filter-query mini-language (this
+fork's fork point: `2c1d445d5`) relaxed its grammar in `41390dad9` ("Accept an unquoted decimal in a
+selector value"): a `value` (in a `pset.prop`/attribute/`type`/`material`/`classification`/`location`/
+`group`/`parent`/`query:` comparison) could previously never contain a literal `.` unquoted --
+`unquoted_string: /[^,.=><*!\s]+/` excludes it because `.` is also the pset/prop separator --  so
+`Foobar.Baz>1.5` was a syntax error and `Foobar.Baz>"1.5"` was required, which read like a text
+comparison even though `>`/`>=`/`<`/`<=` always compare numerically. `41390dad9` adds a
+`decimal_string` alternative to the `value` rule ONLY (`decimal_string: SIGNED_DECIMAL`;
+`SIGNED_DECIMAL: ["+"|"-"] (INT "." INT | "." INT)`) -- an optional leading `+`/`-` sign, then either
+the full `INT.INT` shape or a leading-dot `.INT` shape, with a digit always required after the `.` (so
+a trailing-dot-only form like `1.` is still a syntax error). `pset`/`prop`/`query:` keys are
+unaffected -- they still require quoting for a literal `.`. `FacetTransformer.value` treats a matched
+`decimal_string` exactly like `unquoted_string`/`quoted_string` (returns the same raw text), so
+`=1.5` and `="1.5"` parse to the identical value -- this is a pure parser-level grammar relaxation,
+not a new value type or a change to `compare()`'s existing numeric coercion. Two other commits found
+by the same investigation (`1c6362ec3`, `ff4ef510f`) were checked and confirmed to be pure
+documentation commits (real Python's own `docs/ifcopenshell-python/selector_syntax.rst` only, zero
+code changes) -- correctly not ported here.
+
+**Ported** -- this port's own `util/selector.ts` hand-rolls the same grammar (`parseFilterQuery`,
+since Python's `lark` dependency has no equivalent here). The `value` production is scanned by
+`parseFacetValue`, which already special-cased `NULL`/`TRUE`/`FALSE` and delegated everything else to
+`parseNameToken`'s `unquoted_string` scan (`/[^,.=><*!\s]+/`, stopping at the first `.`). Added a
+`decimal_string` check in `parseFacetValue` itself -- tried after the `special` literals and before
+falling back to `parseNameToken`, matching a `/^[+-]?(?:\d+\.\d+|\.\d+)/` regex at the current
+position (the exact same shape as real `SIGNED_DECIMAL` above) and, on a match, consuming it and
+returning the matched text directly (mirroring `FacetTransformer.value`'s own decimal_string handling
+-- return the raw text unchanged, letting the existing `compareValues`/`pythonFloat` numeric coercion
+handle it downstream, completely untouched by this change). Deliberately scoped to `parseFacetValue`
+only, not `parseNameToken` generally, since `parseNameToken` is also used to scan `pset`/`prop`/
+`query:` keys elsewhere in the same parser, which must NOT gain this relaxation (matching real
+Python's own scoping of `decimal_string` to the `value` rule only). Also updated one pre-existing
+doc-comment (`parseFilterQuery`'s header comment, finding #2 on `int`-vs-`float` value-string
+coercion) that had stated an unquoted decimal literal "isn't even parseable in the first place" --
+now both quoted and unquoted decimal value strings are equally affected by that finding's `int`-vs-
+`float` divergence, so the comment was updated to say so instead of leaving stale, pre-relaxation
+prose in place.
+
+New tests, adapted from real Python's own `test_selector.py` diff (`41390dad9` added
+`test_selecting_by_property_with_an_unquoted_decimal` and a `Foobar.Bay` assertion the commit message
+calls out as "the filter test set up but never checked" -- both ported): `test/util/selector.test.ts`'s
+`selector.parseFilterQuery` describe block gained "unquoted decimal values in a comparison (real
+upstream 41390dad9)" (plain/leading-dot/signed decimal AST shapes, quoted-vs-unquoted equivalence,
+and confirming `Foobar.Baz=1.` and `Name=v1.2` both still throw); `selector.filterElements` gained
+"selecting by property with an unquoted decimal" (a full port of the real Python test, covering `=`,
+`>`, `<`, `>=`, `<=`, `!=`, signed and leading-dot forms, and quoted/unquoted equivalence against a
+real `Foobar.Baz` pset property).
+
+**Verified, full suite, this worktree's own built native addon (reused from a sibling worktree's
+identical, up-to-date build -- `src/ifcparse`/`src/wrappergen`/`native/` sources confirmed
+byte-identical, only build artifacts differed, so no rebuild was needed for this TS-only change):**
+433 test files, 11264 passed / 22 skipped (11286 total), 0 failed before; 433 test files, 11266
+passed / 22 skipped (11288 total), 0 failed after (+2 new tests, 0 regressions). `npx tsc --noEmit`
+and `npx biome check .` both clean after the change.
+
+**Context:** Chunk 4 of 4 (the LAST chunk) of the same upstream-sync initiative (`90-upstream-sync-plan.md`),
+scoped to `util/selector.ts` only. Dispatched and landed out of order relative to chunk 3 (no file
+overlap), but by the time both were merged all 4 chunks were complete -- see the section header
+above.
+
+**Depends on / blocked by:** None -- this entry documents completed work. This closes out all 4
+planned chunks of the upstream-sync initiative.
 
 ---
 
