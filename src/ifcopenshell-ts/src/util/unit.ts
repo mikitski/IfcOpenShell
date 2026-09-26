@@ -609,6 +609,56 @@ export function getNamedDimensions(name: string): DimensionalExponents {
 	return namedDimensions[name] ?? [0, 0, 0, 0, 0, 0, 0];
 }
 
+/**
+ * Python: `get_unit_dimensions(unit) -> DimensionalExponents` (upstream `20a6c73fb`,
+ * ported here). Get the dimensional exponents of a unit, per `IfcDimensionalExponents`.
+ *
+ * Supports `IfcSIUnit`, `IfcConversionBasedUnit`, `IfcContextDependentUnit` (via
+ * `getNamedDimensions` on `UnitType`), and `IfcDerivedUnit` (composed recursively from
+ * its `Elements`).
+ */
+export function getUnitDimensions(unit: EntityInstance): DimensionalExponents {
+	if (unit.isA("IfcDerivedUnit")) {
+		const dimensions: [number, number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0, 0];
+		for (const element of attrList(unit, "Elements")) {
+			const elementDimensions = getUnitDimensions(element.get("Unit") as EntityInstance);
+			const exponent = element.get("Exponent") as number;
+			for (let i = 0; i < 7; i++) {
+				dimensions[i] += elementDimensions[i] * exponent;
+			}
+		}
+		return dimensions;
+	}
+	if (unit.isA("IfcSIUnit")) {
+		return getSiDimensions((unit.get("Name") as string).replaceAll("METER", "METRE"));
+	}
+	return getNamedDimensions((attrOrNull(unit, "UnitType") as string | null) ?? "");
+}
+
+/**
+ * Python: `identify_unit_dimensions(unit) -> Union[str, None]` (upstream `20a6c73fb`,
+ * ported here). Identify which named `IfcUnitEnum` type a unit's dimensions correspond
+ * to.
+ *
+ * Mainly useful for an `IfcDerivedUnit` with no named `IfcDerivedUnitEnum` match for its
+ * measure type, allowing it to still be recognised as, e.g., a pressure unit by
+ * dimensional analysis alone.
+ *
+ * Note that dimensionless quantities (e.g. plane angle, solid angle, or a genuinely
+ * unitless value) are dimensionally indistinguishable, so this heuristically returns the
+ * first zero-dimension match rather than disambiguating them -- matching real Python's
+ * own `dict` iteration order over `named_dimensions` (this port's `namedDimensions`
+ * object preserves the same insertion/key order, so `for...in`/`Object.entries` below
+ * iterates identically).
+ */
+export function identifyUnitDimensions(unit: EntityInstance): string | null {
+	const dimensions = getUnitDimensions(unit);
+	for (const [name, named] of Object.entries(namedDimensions)) {
+		if (named.every((value, i) => value === dimensions[i])) return name;
+	}
+	return null;
+}
+
 // --- project/property unit resolution ---
 
 /**
@@ -646,10 +696,19 @@ export function cacheUnits(ifcFile: IfcFile): void {
 	ifcFile.units = {};
 	const assignment = getUnitAssignment(ifcFile);
 	if (assignment) {
+		const allUnits = attrList(assignment, "Units");
 		const units: Record<string, EntityInstance> = {};
-		for (const u of attrList(assignment, "Units")) {
+		for (const u of allUnits) {
 			const unitType = attrOrNull(u, "UnitType") as string | null;
 			if (unitType) units[unitType] = u;
+		}
+		// Upstream `d11c4411e`: as in `getProjectUnit` below, a literal `UnitType` match
+		// always wins; an `IfcDerivedUnit` with no literal match is matched dimensionally
+		// instead, only to fill a gap left by the literal pass above.
+		for (const unit of allUnits) {
+			if (!unit.isA("IfcDerivedUnit")) continue;
+			const dimension = identifyUnitDimensions(unit);
+			if (dimension && !(dimension in units)) units[dimension] = unit;
 		}
 		ifcFile.units = units;
 	}
@@ -663,6 +722,10 @@ export function clearUnitCache(ifcFile: IfcFile): void {
 /**
  * Python: `get_project_unit(ifc_file, unit_type, use_cache=False) -> Union[entity_instance, None]`.
  * Get the default project unit of a particular unit type (e.g. `"LENGTHUNIT"`).
+ *
+ * `IfcDerivedUnit` is matched first by a literal `UnitType` match, then, as a fallback,
+ * by dimensional analysis (`identifyUnitDimensions`), mirroring `getCandidateUnits`
+ * below (upstream `d11c4411e`, ported here).
  */
 export function getProjectUnit(ifcFile: IfcFile, unitType: string, useCache = false): EntityInstance | null {
 	if (useCache && Object.keys(ifcFile.units).length === 0) {
@@ -674,11 +737,43 @@ export function getProjectUnit(ifcFile: IfcFile, unitType: string, useCache = fa
 	}
 	const unitAssignment = getUnitAssignment(ifcFile);
 	if (unitAssignment) {
+		let dimensionalMatch: EntityInstance | null = null;
 		for (const unit of attrList(unitAssignment, "Units")) {
 			if ((attrOrNull(unit, "UnitType") as string | null) === unitType) return unit;
+			if (dimensionalMatch === null && unit.isA("IfcDerivedUnit") && identifyUnitDimensions(unit) === unitType) {
+				dimensionalMatch = unit;
+			}
 		}
+		return dimensionalMatch;
 	}
 	return null;
+}
+
+/**
+ * Python: `get_candidate_units(ifc_file, unit_type) -> list[entity_instance]` (upstream
+ * `d19c86c72`, ported here). Get all units in the file usable as an override for
+ * `unit_type`.
+ *
+ * Unlike `getProjectUnit`, this returns every matching unit defined in the file (e.g.
+ * both an mm and an m `IfcSIUnit` might be present), not just the one currently
+ * assigned as the project default.
+ *
+ * `IfcDerivedUnit` is matched first by a literal `UnitType` match, then, as a fallback,
+ * by dimensional analysis (`identifyUnitDimensions`) -- that fallback only helps for the
+ * dimension families covered by `namedDimensions` (the core `IfcUnitEnum` types); it
+ * won't match e.g. `"MODULUSOFELASTICITYUNIT"` by dimension alone, only by literal
+ * `UnitType`.
+ */
+export function getCandidateUnits(ifcFile: IfcFile, unitType: string): EntityInstance[] {
+	const candidates = ifcFile
+		.byType("IfcNamedUnit")
+		.filter((u) => (attrOrNull(u, "UnitType") as string | null) === unitType);
+	for (const unit of ifcFile.byType("IfcDerivedUnit")) {
+		if ((attrOrNull(unit, "UnitType") as string | null) === unitType || identifyUnitDimensions(unit) === unitType) {
+			candidates.push(unit);
+		}
+	}
+	return candidates;
 }
 
 /**
@@ -866,6 +961,7 @@ export function getSymbolQuantityClass(symbol?: string | null): QUANTITY_CLASS {
 
 /** Python: `get_unit_symbol(unit: entity_instance) -> str`. */
 export function getUnitSymbol(unit: EntityInstance): string {
+	if (unit.isA("IfcDerivedUnit")) return getDerivedUnitSymbol(unit);
 	let symbol = "";
 	if (unit.isA("IfcSIUnit")) {
 		const prefix = attrOrNull(unit, "Prefix") as string | null;
@@ -877,6 +973,26 @@ export function getUnitSymbol(unit: EntityInstance): string {
 		symbol = unit.get("Name") as string;
 	}
 	return symbol;
+}
+
+/**
+ * Python: `get_derived_unit_symbol(unit) -> str` (upstream `20a6c73fb`, ported here).
+ * Compose a unit symbol for an `IfcDerivedUnit` from its elements -- e.g. a derived unit
+ * of NEWTON / SQUARE_METRE composes to `"N/m2"`.
+ */
+export function getDerivedUnitSymbol(unit: EntityInstance): string {
+	const numerator: string[] = [];
+	const denominator: string[] = [];
+	for (const element of attrList(unit, "Elements")) {
+		let symbol = getUnitSymbol(element.get("Unit") as EntityInstance);
+		const exponent = element.get("Exponent") as number;
+		const absExponent = Math.abs(exponent);
+		if (absExponent !== 1) symbol += String(absExponent);
+		(exponent > 0 ? numerator : denominator).push(symbol);
+	}
+	let result = numerator.join(".") || "1";
+	if (denominator.length > 0) result += `/${denominator.join(".")}`;
+	return result;
 }
 
 // --- scalar conversion ---
@@ -948,27 +1064,105 @@ export function convert(
 // --- calculateUnitScale ---
 
 /**
- * @internal Answers `IfcUnitEnum` membership without needing the (unbound, see this
+ * @internal Answers enumeration membership without needing the (unbound, see this
  * file's header comment, finding #3) full forward enumeration-item list --
  * `enumeration_type.lookup_enum_offset(value)` is a real, working reverse (name ->
- * index) lookup that throws for an unknown name.
+ * index) lookup that throws for an unknown name. Shared by `calculateUnitScale`'s
+ * `IfcUnitEnum`/`IfcDerivedUnitEnum` membership check below (upstream `20a6c73fb` widened
+ * this from `IfcUnitEnum`-only to accept either).
  */
-function isValidUnitEnumMember(ifcFile: IfcFile, unitType: string): boolean {
-	const enumerationType = ifcFile.nativeFile
-		.schema()
-		.declaration_by_name_with_name("IfcUnitEnum")
-		.as_enumeration_type();
+function isEnumMember(ifcFile: IfcFile, enumName: string, value: string): boolean {
+	const enumerationType = ifcFile.nativeFile.schema().declaration_by_name_with_name(enumName).as_enumeration_type();
 	if (enumerationType === null) {
-		// Should never happen for a real, schema-registered file -- `IfcUnitEnum` is a
-		// real enumeration in every IFC schema version this project supports.
+		// Should never happen for a real, schema-registered file -- both `IfcUnitEnum`
+		// and `IfcDerivedUnitEnum` are real enumerations in every IFC schema version this
+		// project supports.
 		return true;
 	}
 	try {
-		enumerationType.lookup_enum_offset(unitType);
+		enumerationType.lookup_enum_offset(value);
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Python: `get_named_unit_scale(unit) -> float` (upstream `20a6c73fb`, ported here;
+ * extracted from `calculate_unit_scale`'s own former inline dispatch, per that commit's
+ * de-duplication). Get the scale factor to convert a value in a named unit to SI units.
+ *
+ * Supports `IfcSIUnit` and `IfcConversionBasedUnit` (including chains of
+ * conversion-based units). Does not support `IfcDerivedUnit` -- see
+ * `getDerivedUnitScale` for that.
+ */
+export function getNamedUnitScale(unit: EntityInstance): number {
+	let scale = 1;
+	let current = unit;
+	while (current.isA("IfcConversionBasedUnit")) {
+		const conversionFactor = current.get("ConversionFactor") as EntityInstance;
+		const valueComponent = conversionFactor.get("ValueComponent") as EntityInstance;
+		scale *= valueComponent.getByIndex(0) as number;
+		current = conversionFactor.get("UnitComponent") as EntityInstance;
+	}
+	if (current.isA("IfcSIUnit")) {
+		let prefixMultiplier = getPrefixMultiplier(attrOrNull(current, "Prefix") as string | null);
+		// An SI prefix attaches to the base unit symbol, and the prefixed symbol is
+		// raised to the power as a whole: dm3 = (dm)3 = 1e-3 m3, not 0.1 m3. For units
+		// whose dimensions are a pure power of length (METRE, SQUARE_METRE,
+		// CUBIC_METRE) the prefix multiplier must therefore be raised to the length
+		// exponent. Units with mixed or non-length dimensions (PASCAL, NEWTON, GRAM,
+		// ...) keep the linear multiplier, as there the prefix scales the derived unit
+		// itself. https://github.com/IfcOpenShell/IfcOpenShell/issues/9278
+		//
+		// See this file's header comment, finding #2: computed via `getSiDimensions`
+		// (name-keyed, prefix-independent) instead of reading the real EXPRESS
+		// *derived* `unit.Dimensions` attribute (out of scope for this whole port).
+		const [
+			lengthExponent,
+			massExponent,
+			timeExponent,
+			currentExponent,
+			temperatureExponent,
+			amountExponent,
+			luminousExponent,
+		] = getSiDimensions((current.get("Name") as string).replaceAll("METER", "METRE"));
+		const hasOtherDimension =
+			massExponent !== 0 ||
+			timeExponent !== 0 ||
+			currentExponent !== 0 ||
+			temperatureExponent !== 0 ||
+			amountExponent !== 0 ||
+			luminousExponent !== 0;
+		if (lengthExponent > 0 && !hasOtherDimension) {
+			prefixMultiplier **= lengthExponent;
+		}
+		scale *= prefixMultiplier;
+	}
+	return scale;
+}
+
+/**
+ * Python: `get_derived_unit_scale(unit) -> float` (upstream `20a6c73fb`, ported here).
+ * Get the scale factor to convert a value in an `IfcDerivedUnit` to SI units.
+ */
+export function getDerivedUnitScale(unit: EntityInstance): number {
+	let scale = 1;
+	for (const element of attrList(unit, "Elements")) {
+		scale *= getNamedUnitScale(element.get("Unit") as EntityInstance) ** (element.get("Exponent") as number);
+	}
+	return scale;
+}
+
+/**
+ * Python: `get_unit_scale(unit) -> float` (upstream `d19c86c72`, ported here). Get the
+ * scale factor to convert a value in `unit` to SI units -- dispatches to
+ * `getDerivedUnitScale` for an `IfcDerivedUnit`, or `getNamedUnitScale` otherwise
+ * (`IfcSIUnit` / `IfcConversionBasedUnit`, including chains).
+ */
+export function getUnitScale(unit: EntityInstance): number {
+	if (unit.isA("IfcDerivedUnit")) return getDerivedUnitScale(unit);
+	return getNamedUnitScale(unit);
 }
 
 /**
@@ -977,15 +1171,20 @@ function isValidUnitEnumMember(ifcFile: IfcFile, unitType: string): boolean {
  * Returns a unit scale factor to convert to and from IFC project units and SI units:
  * `ifc_project_length * unit_scale = si_meters`.
  *
+ * `unit_type` may also be an `IfcDerivedUnitEnum` value (e.g. `"MASSDENSITYUNIT"`) to
+ * support project units defined as an `IfcDerivedUnit` (upstream `20a6c73fb` widened the
+ * membership check accordingly, and the per-unit scale computation below now dispatches
+ * through `getUnitScale`, which is real `IfcDerivedUnit`-aware).
+ *
  * Python's own `type(ifc_file) is ifcopenshell.file` guard (skipping validation for a
  * mocked/subclassed file object in Python's own test suite) has no TS equivalent to
- * skip -- `IfcFile` is the only concrete class this port has, so the `IfcUnitEnum`
- * membership check always runs. See this file's header comment, findings #2 (the
+ * skip -- `IfcFile` is the only concrete class this port has, so the enum membership
+ * check always runs. See this file's header comment, findings #2 (the
  * `IfcSIUnit.Dimensions` derived-attribute workaround via `getSiDimensions`) and #3
- * (the `IfcUnitEnum` validation workaround).
+ * (the `IfcUnitEnum`/`IfcDerivedUnitEnum` validation workaround).
  */
 export function calculateUnitScale(ifcFile: IfcFile, unitType = "LENGTHUNIT"): number {
-	if (!isValidUnitEnumMember(ifcFile, unitType)) {
+	if (!isEnumMember(ifcFile, "IfcUnitEnum", unitType) && !isEnumMember(ifcFile, "IfcDerivedUnitEnum", unitType)) {
 		throw new Error(`Unit type '${unitType}' does not name a valid type`);
 	}
 
@@ -996,51 +1195,9 @@ export function calculateUnitScale(ifcFile: IfcFile, unitType = "LENGTHUNIT"): n
 	if (!unitsInContext) return 1;
 
 	let unitScale = 1;
-	for (const rawUnit of attrList(unitsInContext, "Units")) {
-		let unit = rawUnit;
+	for (const unit of attrList(unitsInContext, "Units")) {
 		if ((attrOrNull(unit, "UnitType") as string | null) !== unitType) continue;
-
-		while (unit.isA("IfcConversionBasedUnit")) {
-			const conversionFactor = unit.get("ConversionFactor") as EntityInstance;
-			const valueComponent = conversionFactor.get("ValueComponent") as EntityInstance;
-			unitScale *= valueComponent.getByIndex(0) as number;
-			unit = conversionFactor.get("UnitComponent") as EntityInstance;
-		}
-		if (unit.isA("IfcSIUnit")) {
-			let prefixMultiplier = getPrefixMultiplier(attrOrNull(unit, "Prefix") as string | null);
-			// An SI prefix attaches to the base unit symbol, and the prefixed symbol is
-			// raised to the power as a whole: dm3 = (dm)3 = 1e-3 m3, not 0.1 m3. For units
-			// whose dimensions are a pure power of length (METRE, SQUARE_METRE,
-			// CUBIC_METRE) the prefix multiplier must therefore be raised to the length
-			// exponent. Units with mixed or non-length dimensions (PASCAL, NEWTON, GRAM,
-			// ...) keep the linear multiplier, as there the prefix scales the derived unit
-			// itself. https://github.com/IfcOpenShell/IfcOpenShell/issues/9278
-			//
-			// See this file's header comment, finding #2: computed via `getSiDimensions`
-			// (name-keyed, prefix-independent) instead of reading the real EXPRESS
-			// *derived* `unit.Dimensions` attribute (out of scope for this whole port).
-			const dimensions = getSiDimensions(unit.get("Name") as string);
-			const [
-				lengthExponent,
-				massExponent,
-				timeExponent,
-				currentExponent,
-				temperatureExponent,
-				amountExponent,
-				luminousExponent,
-			] = dimensions;
-			const hasOtherDimension =
-				massExponent !== 0 ||
-				timeExponent !== 0 ||
-				currentExponent !== 0 ||
-				temperatureExponent !== 0 ||
-				amountExponent !== 0 ||
-				luminousExponent !== 0;
-			if (lengthExponent > 0 && !hasOtherDimension) {
-				prefixMultiplier **= lengthExponent;
-			}
-			unitScale *= prefixMultiplier;
-		}
+		unitScale *= getUnitScale(unit);
 	}
 	return unitScale;
 }

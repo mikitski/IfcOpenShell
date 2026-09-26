@@ -369,6 +369,100 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editQto (%s)", (schema) => {
 		).toThrow(TypeError);
 	});
 
+	// --- Upstream `d19c86c72` (test_edit_qto.py): per-quantity Unit-override support,
+	// ported here -- this file had no `Unit`-handling capability at all before this. ---
+
+	// Disclosed JS int/float representational gap (see this file's own header comment,
+	// and `editQto.ts`'s): a whole-number JS value (e.g. `30.0`, bit-identical to `30`)
+	// can't be distinguished from an intentional Python `int`, so `inferPropertyType`
+	// would classify it as `Count`, not `Length` -- these tests use genuinely fractional
+	// values (`30.5` etc, still keyword-matching "Length" via the "MyLength"/"Width"
+	// name) so the ported assertions exercise a meaningful, unambiguous type, matching
+	// this file's own established convention elsewhere (e.g. `"MyFloat": 42.5`).
+
+	test("adding a new quantity with a custom unit (test_adding_a_new_quantity_with_a_custom_unit)", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", "MILLI", "METRE");
+		const qto = addQto(file, { product: element, name: "Foo_Bar" }) as EntityInstance;
+		editQto(file, { qto, properties: { MyLength: { NominalValue: 30.5, Unit: customUnit } } });
+
+		const quantities = qto.get("Quantities") as EntityInstance[];
+		expect(quantities[0].get("Name")).toBe("MyLength");
+		expect(quantities[0].get("LengthValue")).toBe(30.5);
+		expect((quantities[0].get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+	});
+
+	test("editing an existing quantity's unit (test_editing_an_existing_quantitys_unit)", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", "MILLI", "METRE");
+		const qto = addQto(file, { product: element, name: "Foo_Bar" }) as EntityInstance;
+		editQto(file, { qto, properties: { MyLength: 12.5 } });
+		const quantity = (qto.get("Quantities") as EntityInstance[])[0];
+		expect(quantity.get("Unit")).toBeNull();
+
+		editQto(file, { qto, properties: { MyLength: { NominalValue: 30.5, Unit: customUnit } } });
+		expect((quantity.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+		expect(quantity.get("LengthValue")).toBe(30.5);
+	});
+
+	test("explicitly clearing a quantity's unit override (test_explicitly_clearing_a_quantitys_unit_override)", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", "MILLI", "METRE");
+		const qto = addQto(file, { product: element, name: "Foo_Bar" }) as EntityInstance;
+		editQto(file, { qto, properties: { MyLength: { NominalValue: 30.5, Unit: customUnit } } });
+		const quantity = (qto.get("Quantities") as EntityInstance[])[0];
+		expect((quantity.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+
+		editQto(file, { qto, properties: { MyLength: { NominalValue: 40.5, Unit: null } } });
+		expect(quantity.get("Unit")).toBeNull();
+		expect(quantity.get("LengthValue")).toBe(40.5);
+	});
+
+	test("a bare value does not disturb an existing quantity's unit override (test_a_bare_value_does_not_disturb_an_existing_units_override)", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "LENGTHUNIT", "MILLI", "METRE");
+		const qto = addQto(file, { product: element, name: "Foo_Bar" }) as EntityInstance;
+		editQto(file, { qto, properties: { MyLength: { NominalValue: 30.5, Unit: customUnit } } });
+		const quantity = (qto.get("Quantities") as EntityInstance[])[0];
+		expect((quantity.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+
+		editQto(file, { qto, properties: { MyLength: 42.5 } });
+		expect((quantity.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+		expect(quantity.get("LengthValue")).toBe(42.5);
+	});
+
+	test("complex quantity editing is unaffected by the unit-wrapper convention (test_complex_quantity_editing_is_unaffected_by_the_unit_wrapper_convention)", () => {
+		// Regression guard: dict values are already overloaded to mean "this is an
+		// IfcPhysicalComplexQuantity spec" ({Discrimination, HasQuantities}). The new
+		// {Unit, NominalValue} convention must not be confused with it -- disambiguated
+		// purely by the presence of a "Unit" key (see isComplexValue/isUnitWrappedValue).
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const qto = addQto(file, { product: element, name: "Foo_Bar" }) as EntityInstance;
+		editQto(file, {
+			qto,
+			properties: { Layers: { Discrimination: "layer", HasQuantities: { Width: 5.5 } } },
+		});
+		const complexQty = (qto.get("Quantities") as EntityInstance[])[0];
+		expect(complexQty.isA("IfcPhysicalComplexQuantity")).toBe(true);
+		expect(complexQty.get("Name")).toBe("Layers");
+		expect(complexQty.get("Discrimination")).toBe("layer");
+		expect((complexQty.get("HasQuantities") as EntityInstance[])[0].get("Name")).toBe("Width");
+		expect((complexQty.get("HasQuantities") as EntityInstance[])[0].get("LengthValue")).toBe(5.5);
+
+		// Editing it again (update_existing_property's complex-quantity branch) still works too.
+		editQto(file, {
+			qto,
+			properties: { Layers: { Discrimination: "layer2", HasQuantities: { Width: 6.0 } } },
+		});
+		expect(complexQty.get("Discrimination")).toBe("layer2");
+		expect((complexQty.get("HasQuantities") as EntityInstance[])[0].get("LengthValue")).toBe(6.0);
+	});
+
 	// --- Original coverage: no template + no keyword match + int -> always Count,
 	// regardless of name (real Python: `infer_property_type`'s `int` branch never even
 	// consults FLOAT_TYPE_KEYWORDS) ---

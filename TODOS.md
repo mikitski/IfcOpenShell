@@ -8,7 +8,7 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
-### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunk 1/4 landed
+### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, chunks 1-2/4 landed
 
 Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
 Full investigation and proposed 4-chunk breakdown in
@@ -25,8 +25,8 @@ current tip hit a real, non-mechanical conflict at commit 11/263 (a fork-side AS
 with upstream's now-complete tokenizer rewrite) — deliberately not resolved yet, revisit once the
 chunks above land and the diffs are better understood.
 
-**Chunk 1 of 4 (bug fixes) is landed** -- see the entry directly below. Chunks 2-4 (Unit-override
-support, `IfcDerivedUnit`, the alignment stationing rework, selector grammar) are not yet dispatched.
+**Chunks 1-2 of 4 are landed** -- see the two entries directly below. Chunks 3-4 (the alignment
+stationing rework, selector grammar) are not yet dispatched.
 
 ---
 
@@ -93,6 +93,106 @@ code. Chunks 2-4 (Unit-override support, `IfcDerivedUnit`, the alignment station
 grammar) are separate, not touched here.
 
 **Depends on / blocked by:** None -- this entry documents completed work, not a backlog item.
+
+---
+
+### Upstream sync, chunk 2 of 4: `editPset`/`editQto` per-property Unit-override support, `IfcDerivedUnit` support in `util.unit`, string decode/encode API investigated and found not portable yet
+
+**What:** Real `ifcopenshell-python` upstream added 4 real features since the fork point
+(`2c1d445d5`) this chunk was scoped to port: per-property/quantity `Unit`-override support in
+`edit_pset`/`edit_qto` (`d19c86c72`), `IfcDerivedUnit` support in `util.unit` (`20a6c73fb`), a
+dimensional-analysis fallback for `IfcDerivedUnit` in `get_project_unit()` (`d11c4411e`), and a new
+top-level SPF string decode/encode API (`87bc6bfba`). Items 1-3 ported; item 4 investigated and found
+to need native-layer work out of scope for this chunk -- see below.
+
+1. **Ported** -- per-property/quantity `Unit`-override support (`d19c86c72`,
+   `api/pset/edit_pset.py`/`edit_qto.py`). Before this commit, `editPset`'s own `unpackUnitValue`
+   couldn't distinguish "no `Unit` was passed at all" from "`{Unit: null, ...}` passed to explicitly
+   clear an existing override" -- both collapsed to a bare `null`, so an existing property `Unit`
+   override could never actually be cleared. Ported the real `_NO_UNIT` sentinel mechanism as a
+   module-level `unique symbol` (`NO_UNIT`) in both `editPset.ts` and `editQto.ts` -- the latter had
+   NO `Unit`-handling capability at all before this chunk. `editQto.ts`'s own new
+   `{Unit, NominalValue}` wrapped-dict convention is disambiguated from the pre-existing
+   `ComplexQuantityValue` dict convention (`{Discrimination, HasQuantities}`) purely by the presence
+   of a `Unit` key, matching upstream's own `"Unit" in value`/`"Unit" not in value` checks exactly.
+   Upstream's own new `get_unit_scale`/`get_candidate_units` helpers (also part of this same commit)
+   ported into `util/unit.ts` alongside items 2-3 below, since they share the same dependency
+   (`identify_unit_dimensions`). New tests: `test/api/pset/editPset.test.ts`'s "explicitly clearing a
+   property's unit override"/"a bare value does not disturb an existing property's unit override"
+   (adapted from `test_edit_pset.py`'s own new tests); `test/api/pset/editQto.test.ts`'s 5 new tests
+   adapted from `test_edit_qto.py`'s own new tests (custom-unit creation, editing, explicit clear,
+   bare-value-preserves, and a regression guard confirming the new `Unit`-wrapper convention doesn't
+   get confused with the pre-existing complex-quantity dict convention). Disclosed, JS-only wrinkle:
+   the new `editQto.ts` tests use fractional quantity values (e.g. `30.5`, not upstream's own `30.0`)
+   -- a whole-number JS value is bit-identical to an intended Python `int`, so this port's own
+   already-disclosed `inferPropertyType` int/float ambiguity would otherwise misclassify them as
+   `Count` rather than the intended `Length`, matching this file's own pre-existing convention for
+   the same gap (`"MyFloat": 42.5` elsewhere in the same file).
+2. **Ported** -- `IfcDerivedUnit` support in `util.unit` (`20a6c73fb`). Added `getUnitDimensions`
+   (recursive dimensional-exponent composition from an `IfcDerivedUnit`'s own `Elements`, falling
+   back to `getSiDimensions`/`getNamedDimensions` for non-derived units), `identifyUnitDimensions`
+   (matches a unit's dimensions against the `namedDimensions` table to recognize an unnamed/
+   `USERDEFINED` derived unit as e.g. a pressure unit), `getDerivedUnitSymbol` (dispatched to from
+   `getUnitSymbol` for an `IfcDerivedUnit`, composing e.g. `"N/m2"` from its elements),
+   `getNamedUnitScale`/`getDerivedUnitScale` (extracted from `calculateUnitScale`'s own former inline
+   dispatch, matching upstream's own de-duplication), and `getUnitScale` (a thin dispatcher over the
+   two, per item 1's own `d19c86c72`). `calculateUnitScale`'s own `IfcUnitEnum`-only membership check
+   widened to also accept `IfcDerivedUnitEnum` (renamed the internal helper
+   `isValidUnitEnumMember` -> `isEnumMember`, now parameterized by enum name). New tests:
+   `test/util/unit.test.ts`'s `getUnitDimensions`/`identifyUnitDimensions`,
+   `getNamedUnitScale`/`getDerivedUnitScale`/`getUnitScale`, and `getCandidateUnits` describe blocks
+   (adapted from `test_unit.py`'s own new `TestIdentifyUnitDimensions`/`TestGetNamedUnitScale`/
+   `TestGetDerivedUnitScale`/`TestGetUnitScale`/`TestGetCandidateUnits` classes), plus a
+   `calculateUnitScale` derived-unit test and a `getUnitSymbol` derived-unit test.
+3. **Ported** -- dimensional-analysis fallback in `get_project_unit()` (`d11c4411e`, closely related
+   to/sequential with item 2, read together per this chunk's own briefing). `getProjectUnit` and
+   `cacheUnits` both now match an `IfcDerivedUnit` first by a literal `UnitType` match, then, as a
+   fallback, by `identifyUnitDimensions` -- lets a project whose area/volume default is defined as an
+   `IfcDerivedUnit` (no literal `IfcUnitEnum` member exists for `"AREAUNIT"`/`"VOLUMEUNIT"` as a
+   derived-unit type) still resolve correctly. New tests: `test/util/unit.test.ts`'s "area and volume
+   derived from length are matched dimensionally"/"a literal UnitType match takes priority over a
+   dimensional one"/"the dimensional fallback also applies when using a cache" (adapted from
+   `test_unit.py`'s own 3 new `TestGetProjectUnit` methods).
+4. **Investigated, found NOT portable without native-layer work -- skipped, not forced.** Upstream's
+   new top-level `ifcopenshell.decode_spf_string`/`encode_spf_string` (`87bc6bfba`) are thin Python
+   wrappers over two new free C++ functions (`ifcopenshell::encode_spf_string`/`decode_spf_string`,
+   `src/ifcparse/parse.h`/`parse.cpp`) that don't exist anywhere in this fork's own `src/ifcparse`
+   snapshot (confirmed: grepped the real source, not assumed from the commit subject) -- this fork's
+   C++ core predates that commit and was never updated with it. Checked whether this port's own
+   native binding (`src/wrappergen/`, `src/ifcopenshell-ts/src/native/ifcopenshell_native.ts`)
+   already exposes an equivalent lower-level primitive to build this on top of without touching C++:
+   it does NOT. `character_encoder` (the class `encode_spf_string` is a one-line wrapper over) IS
+   already exposed via wrappergen (`character_encoder.with_input(input)`), but only half-usable --
+   there is no binding for its own `operator std::string()` conversion (the only way to actually read
+   the encoded result back out), so the exposed constructor alone can't produce a usable value.
+   `character_decoder` (the class `decode_spf_string` is built on top of, via a full
+   `file_reader`+`spf_lexer` construction) has NO binding at all -- `spf_lexer`/`file_reader` are
+   likewise unexposed. Confirmed via `token.as_string()`/`token.to_string()` (which ARE exposed) that
+   there's no way to construct a real, lexed `token` from an arbitrary string either, since nothing
+   exposes `spf_lexer::next()`. Porting this item for real requires: (a) backporting the 2 new C++
+   free functions + the `character_decoder.h` namespace-nesting fix from upstream's own diff into
+   this fork's `src/ifcparse`, (b) regenerating `src/wrappergen/generated_napi/` against the updated
+   headers, (c) rebuilding the native addon, (d) re-syncing
+   `src/ifcopenshell-ts/src/native/ifcopenshell_native.ts` from the regenerated output (per the
+   two-separate-copies gap `PROGRESS.md`'s `EntityInstance.toString()` entry already disclosed), and
+   only then (e) a thin `decodeSpfString`/`encodeSpfString` TS wrapper at `src/index.ts`. All of (a)-
+   (d) is native/build-layer work explicitly out of scope for this TS-only chunk -- left as a
+   follow-up, not forced into this PR.
+
+**Verified (both before and after items 1-3 above), full suite, this worktree's own built native
+addon:** 433 test files, 11167 passed / 22 skipped / 0 failed (11189 total) before; 433 test files,
+11257 passed / 22 skipped / 0 failed (11279 total) after (+90 new regression tests across the 3
+schemas the local build supports, 0 regressions). `npx tsc --noEmit` and `npx biome check .` both
+clean after the change.
+
+**Context:** Chunk 2 of the same 4-chunk upstream-sync initiative chunk 1 belongs to
+(`90-upstream-sync-plan.md`), scoped to `util/unit.ts`/`api/pset/editPset.ts`/`api/pset/editQto.ts`
+only -- chunks 3 (alignment stationing rework) and 4 (selector grammar relaxation) are separate, not
+touched here.
+
+**Depends on / blocked by:** Item 4 above (the string decode/encode API) is blocked on native-layer
+work (see its own writeup) -- left as a follow-up, not tracked as a separate entry since the writeup
+above already captures the full investigation. Otherwise, this entry documents completed work.
 
 ---
 

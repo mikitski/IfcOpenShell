@@ -45,6 +45,7 @@ import { editGeoreferencing } from "../../src/api/georeference/editGeoreferencin
 import { addPset } from "../../src/api/pset/addPset";
 import { editPset } from "../../src/api/pset/editPset";
 import { createEntity } from "../../src/api/root/createEntity";
+import { addDerivedUnit } from "../../src/api/unit/addDerivedUnit";
 import { addSiUnit } from "../../src/api/unit/addSiUnit";
 import { assignUnit } from "../../src/api/unit/assignUnit";
 import { EntityInstance } from "../../src/entityInstance";
@@ -128,6 +129,16 @@ function assignUnits(file: IfcFile, project: EntityInstance, units: readonly Ent
 	return assignment;
 }
 
+/** Thin wrapper over `api.unit.addDerivedUnit` -- see this file's header comment. */
+function createDerivedUnit(
+	file: IfcFile,
+	unitType: string,
+	userDefinedType: string | null,
+	attributes: readonly (readonly [EntityInstance, number])[],
+): EntityInstance {
+	return addDerivedUnit(file, { unitType, userDefinedType, attributes });
+}
+
 // --- TestMmToM (direct port -- pure, no file needed) ---
 
 describe("util.unit mmToM", () => {
@@ -197,6 +208,44 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit cacheUnits / clearUnitCache / getPro
 
 		subject.clearUnitCache(file);
 		expect(subject.getProjectUnit(file, "LENGTHUNIT", true)?.equals(length2)).toBe(true);
+	});
+
+	// --- Upstream `d11c4411e` (test_unit.py::TestGetProjectUnit): dimensional-analysis
+	// fallback for IfcDerivedUnit, both with and without the cache (cacheUnits' own
+	// dimensional-fallback pass, added by the same commit). ---
+
+	test("area and volume derived from length are matched dimensionally (test_area_and_volume_derived_from_length_are_matched_dimensionally)", () => {
+		const file = createTestFile(schema);
+		const project = createProject(file);
+		const length = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const area = createDerivedUnit(file, "USERDEFINED", "area-ish", [[length, 2]]);
+		const volume = createDerivedUnit(file, "USERDEFINED", "volume-ish", [[length, 3]]);
+		assignUnits(file, project, [length, area, volume]);
+
+		expect(subject.getProjectUnit(file, "AREAUNIT")?.equals(area)).toBe(true);
+		expect(subject.getProjectUnit(file, "VOLUMEUNIT")?.equals(volume)).toBe(true);
+	});
+
+	test("a literal UnitType match takes priority over a dimensional one (test_literal_unit_type_match_takes_priority_over_dimensional)", () => {
+		const file = createTestFile(schema);
+		const project = createProject(file);
+		const length = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const literalArea = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const derivedArea = createDerivedUnit(file, "USERDEFINED", "area-ish", [[length, 2]]);
+		assignUnits(file, project, [length, literalArea, derivedArea]);
+
+		expect(subject.getProjectUnit(file, "AREAUNIT")?.equals(literalArea)).toBe(true);
+	});
+
+	test("the dimensional fallback also applies when using a cache (test_dimensional_fallback_also_applies_when_using_a_cache)", () => {
+		const file = createTestFile(schema);
+		const project = createProject(file);
+		const length = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const area = createDerivedUnit(file, "USERDEFINED", "area-ish", [[length, 2]]);
+		assignUnits(file, project, [length, area]);
+
+		expect(subject.getProjectUnit(file, "AREAUNIT", true)?.equals(area)).toBe(true);
+		expect(file.units.AREAUNIT.equals(area)).toBe(true);
 	});
 });
 
@@ -476,6 +525,63 @@ describe("util.unit getSiDimensions / getNamedDimensions", () => {
 	});
 });
 
+// --- getUnitDimensions / identifyUnitDimensions (upstream `20a6c73fb`, direct port of
+// test_unit.py::TestIdentifyUnitDimensions plus original coverage for getUnitDimensions
+// itself, which real Python's own test suite never exercises directly -- only through
+// identify_unit_dimensions/calculate_unit_scale). ---
+
+describe.each(AVAILABLE_SCHEMAS)("util.unit getUnitDimensions / identifyUnitDimensions (%s)", (schema) => {
+	test("getUnitDimensions: IfcSIUnit resolves via getSiDimensions (prefix-independent)", () => {
+		const file = createTestFile(schema);
+		const millimetre = createSiUnit(file, "LENGTHUNIT", "METRE", "MILLI");
+		expect(subject.getUnitDimensions(millimetre)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+	});
+
+	test("getUnitDimensions: IfcConversionBasedUnit/IfcContextDependentUnit fall back to getNamedDimensions via UnitType", () => {
+		const file = createTestFile(schema);
+		const metre = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const foot = createConversionBasedUnit(file, "LENGTHUNIT", "foot", 0.3048, metre);
+		expect(subject.getUnitDimensions(foot)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+	});
+
+	test("getUnitDimensions: IfcDerivedUnit composes recursively from its Elements", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const modulus = createDerivedUnit(file, "MODULUSOFELASTICITYUNIT", null, [
+			[force, 1],
+			[area, -1],
+		]);
+		// FORCEUNIT [1,1,-2,0,0,0,0] - AREAUNIT [2,0,0,0,0,0,0] = PRESSUREUNIT [-1,1,-2,0,0,0,0].
+		expect(subject.getUnitDimensions(modulus)).toEqual([-1, 1, -2, 0, 0, 0, 0]);
+	});
+
+	test("identifyUnitDimensions: matches a named unit type by dimension (test_matches_a_named_unit_type_by_dimension)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const modulus = createDerivedUnit(file, "MODULUSOFELASTICITYUNIT", null, [
+			[force, 1],
+			[area, -1],
+		]);
+		expect(subject.identifyUnitDimensions(modulus)).toBe("PRESSUREUNIT");
+	});
+
+	test("identifyUnitDimensions: returns null for no match (test_returns_none_for_no_match)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const time = createSiUnit(file, "TIMEUNIT", "SECOND");
+		const weird = createDerivedUnit(file, "USERDEFINED", "force per time", [
+			[force, 1],
+			[time, -1],
+		]);
+		expect(subject.identifyUnitDimensions(weird)).toBeNull();
+	});
+});
+
 // --- getUnitMeasureClass / getMeasureUnitType (original coverage, pure, inverse pair) ---
 
 describe("util.unit getUnitMeasureClass / getMeasureUnitType", () => {
@@ -533,6 +639,32 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit getUnitSymbol (%s)", (schema) => {
 		const foot = createConversionBasedUnit(file, "LENGTHUNIT", "foot", 0.3048, metre);
 		expect(subject.getUnitSymbol(foot)).toBe("ft");
 	});
+
+	// Upstream `20a6c73fb` (test_unit.py::TestGetUnitSymbol): getUnitSymbol dispatches to
+	// getDerivedUnitSymbol for an IfcDerivedUnit.
+	test("derived unit composes a symbol from its elements (test_derived_unit_composes_a_symbol)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const modulus = createDerivedUnit(file, "MODULUSOFELASTICITYUNIT", null, [
+			[force, 1],
+			[area, -1],
+		]);
+		expect(subject.getUnitSymbol(modulus)).toBe("N/m2");
+	});
+
+	test("an unnamed (USERDEFINED) derived unit still composes a symbol without crashing (test_unnamed_derived_unit_still_composes_a_symbol_without_crashing)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const time = createSiUnit(file, "TIMEUNIT", "SECOND");
+		const weird = createDerivedUnit(file, "USERDEFINED", "force per time", [
+			[force, 1],
+			[time, -1],
+		]);
+		expect(subject.getUnitSymbol(weird)).toBe("N/s");
+	});
 });
 
 // --- TestCalculateUnitScale (direct port) ---
@@ -586,6 +718,164 @@ describe.each(AVAILABLE_SCHEMAS)("util.unit calculateUnitScale (%s)", (schema) =
 		const file = createTestFile(schema);
 		expect(subject.calculateUnitScale(file, "LENGTHUNIT")).toBe(1); // template's own default METRE unit
 		expect(() => subject.calculateUnitScale(file, "NOT_A_REAL_UNIT_TYPE")).toThrow(/does not name a valid type/);
+	});
+
+	// Upstream `20a6c73fb` (test_unit.py::TestCalculateUnitScale::test_derived_units_are_considered).
+	test("derived units are considered (test_derived_units_are_considered)", () => {
+		const file = createTestFile(schema);
+		const project = createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE", "MILLI");
+		const modulus = createDerivedUnit(file, "MODULUSOFELASTICITYUNIT", null, [
+			[force, 1],
+			[area, -1],
+		]);
+		assignUnits(file, project, [modulus]);
+		// AREAUNIT is a pure power of length, so its MILLI prefix is raised to the length
+		// exponent (2) per #9278: (1e-3)**2 = 1e-6, inverted by the derived unit's -1
+		// exponent to give 1e6.
+		expect(subject.calculateUnitScale(file, "MODULUSOFELASTICITYUNIT")).toBeCloseTo(1_000_000, 6);
+	});
+
+	// Upstream `20a6c73fb`: the IfcUnitEnum-only membership check widened to also accept
+	// IfcDerivedUnitEnum (an IfcDerivedUnit project unit's own unit_type).
+	test("accepts an IfcDerivedUnitEnum unit_type even with no matching unit assigned", () => {
+		const file = createTestFile(schema);
+		expect(subject.calculateUnitScale(file, "MODULUSOFELASTICITYUNIT")).toBe(1);
+	});
+});
+
+// --- getNamedUnitScale / getDerivedUnitScale / getUnitScale (upstream `20a6c73fb`
+// extracts the first two from calculateUnitScale's own former inline dispatch;
+// `d19c86c72` adds getUnitScale as a thin dispatcher over both -- direct ports of
+// test_unit.py::TestGetNamedUnitScale/TestGetDerivedUnitScale/TestGetUnitScale). ---
+
+describe.each(AVAILABLE_SCHEMAS)("util.unit getNamedUnitScale / getDerivedUnitScale / getUnitScale (%s)", (schema) => {
+	test("getNamedUnitScale: prefix is raised to the length exponent for area and volume (test_prefix_is_raised_to_the_length_exponent_for_area_and_volume)", () => {
+		const file = createTestFile(schema);
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE", "DECI");
+		expect(subject.getNamedUnitScale(area)).toBeCloseTo(0.1 ** 2, 12);
+	});
+
+	test("getNamedUnitScale: prefix stays linear for units that are not a pure power of length (test_prefix_stays_linear_for_units_that_are_not_a_pure_power_of_length)", () => {
+		const file = createTestFile(schema);
+		const pressure = createSiUnit(file, "PRESSUREUNIT", "PASCAL", "KILO");
+		expect(subject.getNamedUnitScale(pressure)).toBeCloseTo(1000, 9);
+	});
+
+	test("getDerivedUnitScale: composes scale from elements (test_composes_scale_from_elements)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const mass = createSiUnit(file, "MASSUNIT", "GRAM", "KILO");
+		const volume = createSiUnit(file, "VOLUMEUNIT", "CUBIC_METRE");
+		const density = createDerivedUnit(file, "MASSDENSITYUNIT", null, [
+			[mass, 1],
+			[volume, -1],
+		]);
+		expect(subject.getDerivedUnitScale(density)).toBe(1000.0);
+	});
+
+	test("getDerivedUnitScale: an unnamed derived unit still composes (test_unnamed_derived_unit_still_composes)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const time = createSiUnit(file, "TIMEUNIT", "SECOND", "MILLI");
+		const weird = createDerivedUnit(file, "USERDEFINED", "force per time", [
+			[force, 1],
+			[time, -1],
+		]);
+		expect(subject.getDerivedUnitScale(weird)).toBeCloseTo(1 / 0.001, 9);
+	});
+
+	test("getUnitScale: dispatches to getNamedUnitScale for SI/conversion-based units (test_dispatches_to_named_unit_scale_for_si_and_conversion_based_units)", () => {
+		const file = createTestFile(schema);
+		const mm = createSiUnit(file, "LENGTHUNIT", "METRE", "MILLI");
+		const metre = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const foot = createConversionBasedUnit(file, "LENGTHUNIT", "foot", 0.3048, metre);
+		expect(subject.getUnitScale(mm)).toBe(subject.getNamedUnitScale(mm));
+		expect(subject.getUnitScale(foot)).toBe(subject.getNamedUnitScale(foot));
+	});
+
+	test("getUnitScale: dispatches to getDerivedUnitScale for derived units (test_dispatches_to_derived_unit_scale_for_derived_units)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const mass = createSiUnit(file, "MASSUNIT", "GRAM", "KILO");
+		const volume = createSiUnit(file, "VOLUMEUNIT", "CUBIC_METRE");
+		const density = createDerivedUnit(file, "MASSDENSITYUNIT", null, [
+			[mass, 1],
+			[volume, -1],
+		]);
+		expect(subject.getUnitScale(density)).toBe(subject.getDerivedUnitScale(density));
+	});
+});
+
+// --- getCandidateUnits (upstream `d19c86c72`, direct port of
+// test_unit.py::TestGetCandidateUnits). ---
+
+describe.each(AVAILABLE_SCHEMAS)("util.unit getCandidateUnits (%s)", (schema) => {
+	// Uses `blankProjectFile` (defined below, hoisted) rather than `createTestFile`
+	// directly -- `createTestFile`'s own `template.create`-seeded default LENGTHUNIT
+	// (METRE) would otherwise be a 3rd, unwanted `getCandidateUnits(file, "LENGTHUNIT")`
+	// match, unlike real Python's genuinely blank `test.bootstrap.IFC4` fixture.
+
+	test("returns only units matching the unit type (test_returns_only_units_matching_the_unit_type)", () => {
+		const file = blankProjectFile(schema);
+		const mm = createSiUnit(file, "LENGTHUNIT", "METRE", "MILLI");
+		const m = createSiUnit(file, "LENGTHUNIT", "METRE");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const candidates = subject.getCandidateUnits(file, "LENGTHUNIT");
+		expect(candidates).toHaveLength(2);
+		expect(candidates.some((u) => u.equals(mm))).toBe(true);
+		expect(candidates.some((u) => u.equals(m))).toBe(true);
+		expect(candidates.some((u) => u.equals(area))).toBe(false);
+	});
+
+	test("returns all matching units, not just the assigned default (test_returns_all_matching_units_not_just_the_assigned_default)", () => {
+		const file = blankProjectFile(schema);
+		const project = createProject(file);
+		const mm = createSiUnit(file, "LENGTHUNIT", "METRE", "MILLI");
+		const m = createSiUnit(file, "LENGTHUNIT", "METRE");
+		assignUnits(file, project, [mm]);
+		expect(subject.getProjectUnit(file, "LENGTHUNIT")?.equals(mm)).toBe(true);
+		const candidates = subject.getCandidateUnits(file, "LENGTHUNIT");
+		expect(candidates).toHaveLength(2);
+		expect(candidates.some((u) => u.equals(mm))).toBe(true);
+		expect(candidates.some((u) => u.equals(m))).toBe(true);
+	});
+
+	test("a derived unit is matched by literal unit type (test_derived_unit_matched_by_literal_unit_type)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const modulus = createDerivedUnit(file, "MODULUSOFELASTICITYUNIT", null, [
+			[force, 1],
+			[area, -1],
+		]);
+		const candidates = subject.getCandidateUnits(file, "MODULUSOFELASTICITYUNIT");
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0].equals(modulus)).toBe(true);
+	});
+
+	test("a USERDEFINED derived unit is matched by dimensional fallback (test_userdefined_derived_unit_matched_by_dimensional_fallback)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		const force = createSiUnit(file, "FORCEUNIT", "NEWTON");
+		const area = createSiUnit(file, "AREAUNIT", "SQUARE_METRE");
+		const weirdPressure = createDerivedUnit(file, "USERDEFINED", "pressure-ish", [
+			[force, 1],
+			[area, -1],
+		]);
+		const candidates = subject.getCandidateUnits(file, "PRESSUREUNIT");
+		expect(candidates).toHaveLength(1);
+		expect(candidates[0].equals(weirdPressure)).toBe(true);
+	});
+
+	test("empty when nothing matches (test_empty_when_nothing_matches)", () => {
+		const file = createTestFile(schema);
+		createProject(file);
+		createSiUnit(file, "LENGTHUNIT", "METRE");
+		expect(subject.getCandidateUnits(file, "MASSUNIT")).toEqual([]);
 	});
 });
 
