@@ -10,6 +10,15 @@
 // plain values, an optional property-set TEMPLATE to drive that inference, and support
 // for enumerated/list-valued/unit-wrapped/pre-built-entity property values.
 //
+// **UPDATE (upstream sync chunk 2, `d19c86c72`):** before this commit, real Python's own
+// `unpack_unit_value` couldn't distinguish "no `Unit` dict was passed" from "`{"Unit":
+// None, ...}` passed to explicitly clear an existing override" -- both collapsed to a
+// bare `None`, so an existing property `Unit` override could never actually be cleared.
+// Fixed upstream with a private `_NO_UNIT` sentinel; ported here as the `NO_UNIT` module-
+// level `unique symbol` below (bare/unwrapped values still leave `Unit` untouched exactly
+// as before). See `unpackUnitValue`'s own doc comment, and `test/api/pset/editPset.test.ts`
+// for the adapted real Python regression tests from the same commit.
+//
 // *** CRITICAL, THIRD INDEPENDENT CONFIRMATION of a real, pre-existing, already-
 // disclosed primitive-layer gap -- read this before anything else below. Ported
 // completely and faithfully anyway (correct the moment the gap closes), per this
@@ -393,9 +402,15 @@ export type PropertyPrimitive = string | number | boolean | Date | EntityInstanc
  * header comment's `unpack_unit_value` section for a real, disclosed quirk this shape
  * enables (a unit-wrapped `null` bypasses the `should_purge` skip check for NEW
  * properties).
+ *
+ * `Unit` is optional/nullable (upstream `d19c86c72`, ported here): omitting the key
+ * entirely leaves an existing property's `Unit` override untouched, while passing
+ * `Unit: null` explicitly CLEARS an existing override (falling back to the project
+ * default) -- see `unpackUnitValue`'s own doc comment for the `NO_UNIT` sentinel this
+ * port uses to distinguish the two.
  */
 export interface UnitWrappedPropertyValue {
-	Unit: EntityInstance;
+	Unit?: EntityInstance | null;
 	NominalValue: PropertyPrimitive | readonly PropertyPrimitive[] | null;
 }
 
@@ -465,13 +480,33 @@ function isUnitWrappedValue(value: unknown): value is UnitWrappedPropertyValue {
 	);
 }
 
-/** Python (staticmethod): `Usecase.unpack_unit_value`. Returns `[Unit, NominalValue]`, `Unit` falling back to `null`. */
-function unpackUnitValue(valueCandidate: PropertyValue): [EntityInstance | null, unknown] {
+/**
+ * Python (module-level): `_NO_UNIT = object()` (upstream `d19c86c72`, ported here).
+ * Sentinel distinguishing "no `Unit` was specified at all" (bare value, or a
+ * unit-wrapper dict with no `Unit` key) from an explicit `{Unit: null, ...}` (clear an
+ * existing `Unit` override). Callers compare with `===` -- never re-exported, never
+ * constructed anywhere else.
+ */
+const NO_UNIT: unique symbol = Symbol("NO_UNIT");
+
+/**
+ * Python (staticmethod): `Usecase.unpack_unit_value`. Returns `[Unit, NominalValue]`.
+ *
+ * `Unit` is the `NO_UNIT` sentinel when no `Unit` was specified at all (bare value, or a
+ * dict without a `Unit` key), so callers can distinguish "leave the existing `Unit`
+ * untouched" from an explicit `{Unit: null, ...}` (clear the existing `Unit` override,
+ * falling back to the project default) -- upstream `d19c86c72`, ported here. The
+ * `valueCandidate === null`/`undefined` case (the WHOLE raw property value being
+ * cleared, not a unit-wrapper dict) is unaffected and still returns a real `null` Unit,
+ * matching real Python's own `unpack_unit_value(None) -> (None, None)`: clearing a
+ * property's value this way also clears any `Unit` override on it.
+ */
+function unpackUnitValue(valueCandidate: PropertyValue): [EntityInstance | null | typeof NO_UNIT, unknown] {
 	if (valueCandidate === null || valueCandidate === undefined) return [null, null];
 	if (isUnitWrappedValue(valueCandidate)) {
-		return [valueCandidate.Unit, valueCandidate.NominalValue];
+		return ["Unit" in valueCandidate ? (valueCandidate.Unit ?? null) : NO_UNIT, valueCandidate.NominalValue];
 	}
-	return [null, valueCandidate];
+	return [NO_UNIT, valueCandidate];
 }
 
 /**
@@ -641,7 +676,10 @@ function updateExistingPropSingleValue(
 		const casted = castValueToPrimaryMeasureType(file, value, primaryMeasureType as string);
 		prop.set("NominalValue", file.createEntity(primaryMeasureType as string, casted));
 	}
-	if (unit) prop.set("Unit", unit);
+	// Upstream `d19c86c72`: `if unit is not _NO_UNIT: prop.Unit = unit` -- a real Unit
+	// (or an explicit `null`, clearing the override) always applies; only the "no Unit
+	// specified at all" sentinel skips this write, leaving any existing override intact.
+	if (unit !== NO_UNIT) prop.set("Unit", unit);
 	properties.delete(name);
 	return prop;
 }
@@ -705,7 +743,8 @@ function updateExistingPropEnum(
 		throw new Error(`Value "${String(rawValue)}" is not a valid value for enum property ${name}.`);
 	}
 
-	if (unit) prop.set("Unit", unit);
+	// Upstream `d19c86c72` -- see `updateExistingPropSingleValue`'s identical comment above.
+	if (unit !== NO_UNIT) prop.set("Unit", unit);
 	properties.delete(name);
 	return prop;
 }
@@ -770,7 +809,12 @@ function addNewProperties(
 		// header comment's disclosed quirk (`{Unit, NominalValue: null}` is NOT skipped
 		// here even when `shouldPurge` is true, since it isn't itself strictly `null`).
 		if (rawValue === null && shouldPurge) continue;
-		const [unit, value] = unpackUnitValue(rawValue);
+		const [rawUnit, value] = unpackUnitValue(rawValue);
+		// New-property creation always passes `Unit` positionally (never a Python-style
+		// omitted kwarg), so the `NO_UNIT`/explicit-`null` distinction collapses here --
+		// both mean "no Unit override on the new property", matching real Python's own
+		// `unit is not None and unit is not _NO_UNIT` guards at each of these call sites.
+		const unit = rawUnit === NO_UNIT ? null : rawUnit;
 
 		if (value instanceof EntityInstance) {
 			if (value.isA("IfcProperty")) {

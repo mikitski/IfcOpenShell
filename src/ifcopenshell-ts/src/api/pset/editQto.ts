@@ -7,6 +7,16 @@
 // adds/edits/removes the individual quantities inside it, with type inference for
 // plain numeric values and full support for nested `IfcPhysicalComplexQuantity`.
 //
+// **UPDATE (upstream sync chunk 2, `d19c86c72`):** this file originally had NO
+// `Unit`-handling capability at all (real Python's own docstring example never showed
+// one either). Upstream added a `{"Unit": ..., "NominalValue": ...}` wrapped-dict
+// convention -- identical in shape to `../pset/editPset.ts`'s own pre-existing one --
+// disambiguated from the pre-existing `ComplexQuantityValue` dict convention purely by
+// the presence of a `Unit` key (a complex-quantity spec never contains one). See
+// `UnitWrappedQuantityValue`/`unpackUnitValue`/the `NO_UNIT` sentinel below for the full
+// port, and `test/api/pset/editQto.test.ts` for the adapted real Python regression
+// tests (`test_edit_qto.py`'s own new `Unit`-related test methods from the same commit).
+//
 // --- Overall shape (`Usecase.execute`, read directly, not assumed) ---
 //
 // 1. `qtoIdx`: `5` (`IfcElementQuantity.Quantities`) normally, `2`
@@ -205,8 +215,28 @@ export interface ComplexQuantityValue {
 	HasQuantities: Record<string, QuantityValue>;
 }
 
+/**
+ * Python: a `dict` value shaped `{"Unit": ..., "NominalValue": ...}` (upstream
+ * `d19c86c72`, ported here -- this file had NO `Unit`-handling capability at all before
+ * this). Pairs an arbitrary custom `IfcUnit` with an otherwise-plain (or pre-built
+ * `entity_instance`) value. Disambiguated from `ComplexQuantityValue` above purely by
+ * the presence of a `Unit` key (a complex-quantity spec never contains one) -- see
+ * `isUnitWrappedValue`/`isComplexValue` below, matching real Python's own `"Unit" in
+ * value`/`"Unit" not in value` checks exactly.
+ *
+ * `Unit` is optional/nullable: omitting the key leaves an existing quantity's `Unit`
+ * override untouched, while passing `Unit: null` explicitly CLEARS an existing override
+ * -- see `unpackUnitValue`'s own doc comment for the `NO_UNIT` sentinel this port uses
+ * to distinguish the two (same mechanism as `../pset/editPset.ts`'s own port of this
+ * upstream commit).
+ */
+export interface UnitWrappedQuantityValue {
+	Unit?: EntityInstance | null;
+	NominalValue: EntityInstance | number;
+}
+
 /** Python: `PROP_VALUE_TYPE = Union[entity_instance, float, int, dict[str, "PROP_VALUE_TYPE"]]`. */
-export type QuantityValue = EntityInstance | number | ComplexQuantityValue | null;
+export type QuantityValue = EntityInstance | number | ComplexQuantityValue | UnitWrappedQuantityValue | null;
 
 export interface EditQtoSettings {
 	/** The `IfcElementQuantity` or `IfcPhysicalComplexQuantity` to edit. */
@@ -241,8 +271,49 @@ function wrappedNumericValueOf(value: EntityInstance | number | ComplexQuantityV
 	throw new TypeError("float() argument must be a string or a real number, not a complex-quantity object");
 }
 
+/**
+ * Python: `isinstance(value_candidate, dict) and "Unit" not in value_candidate` (the
+ * complex-quantity half of the disambiguation upstream `d19c86c72` introduced -- see
+ * `UnitWrappedQuantityValue`'s own doc comment).
+ */
 function isComplexValue(value: QuantityValue): value is ComplexQuantityValue {
-	return value !== null && typeof value === "object" && !(value instanceof EntityInstance);
+	return value !== null && typeof value === "object" && !(value instanceof EntityInstance) && !("Unit" in value);
+}
+
+/**
+ * Python: `isinstance(value_candidate, dict) and "Unit" in value_candidate` (the
+ * unit-wrapper half of the disambiguation upstream `d19c86c72` introduced -- see
+ * `UnitWrappedQuantityValue`'s own doc comment).
+ */
+function isUnitWrappedValue(value: QuantityValue): value is UnitWrappedQuantityValue {
+	return value !== null && typeof value === "object" && !(value instanceof EntityInstance) && "Unit" in value;
+}
+
+/**
+ * Python (module-level): `_NO_UNIT = object()` (upstream `d19c86c72`, ported here).
+ * Sentinel distinguishing "no `Unit` was specified at all" from an explicit
+ * `{Unit: null, ...}` (clear an existing `Unit` override) -- see `../pset/editPset.ts`'s
+ * own identical sentinel for the shared rationale. Callers compare with `===`.
+ */
+const NO_UNIT: unique symbol = Symbol("NO_UNIT");
+
+/**
+ * Python (staticmethod): `Usecase.unpack_unit_value` (upstream `d19c86c72`, ported here
+ * -- this file had no such helper at all before this commit). Returns `[Unit,
+ * NominalValue]`; `Unit` is the `NO_UNIT` sentinel when the raw value isn't a
+ * `{Unit, NominalValue}`-shaped dict at all (a bare `entity_instance`/`number`), so
+ * callers can distinguish "leave the existing `Unit` untouched" from an explicit
+ * `{Unit: null, ...}` (clear it). Only ever called with a value already confirmed to be
+ * a bare value or a genuine `UnitWrappedQuantityValue` (never `null`/a
+ * `ComplexQuantityValue`) -- both call sites below guard for those first.
+ */
+function unpackUnitValue(
+	valueCandidate: EntityInstance | number | UnitWrappedQuantityValue,
+): [EntityInstance | null | typeof NO_UNIT, EntityInstance | number] {
+	if (isUnitWrappedValue(valueCandidate)) {
+		return [valueCandidate.Unit ?? null, valueCandidate.NominalValue];
+	}
+	return [NO_UNIT, valueCandidate];
 }
 
 /** Python: `infer_property_type(name, value) -> str`. See header comment for the disclosed int-vs-float limitation. */
@@ -311,7 +382,8 @@ function updateExistingProperty(file: IfcFile, prop: EntityInstance, properties:
 		// edit too (see `../context/removeContext.ts`'s own identical precedent).
 		editQto(file, { qto: prop, properties: value.HasQuantities });
 	} else if (prop.isA("IfcPhysicalSimpleQuantity")) {
-		const numeric = wrappedNumericValueOf(value);
+		const [rawUnit, unwrapped] = unpackUnitValue(value as EntityInstance | number | UnitWrappedQuantityValue);
+		const numeric = wrappedNumericValueOf(unwrapped);
 		// IfcPhysicalSimpleQuantity: Name(0), Description(1), Unit(2), XXXValue(3) --
 		// identical index in all 3 schemas (Formula(4), IFC4+ only, unused here).
 		if (file.schema === "IFC4X3" && prop.isA("IfcQuantityCount")) {
@@ -319,6 +391,10 @@ function updateExistingProperty(file: IfcFile, prop: EntityInstance, properties:
 		} else {
 			prop.setByIndex(3, numeric);
 		}
+		// Upstream `d19c86c72`: `if unit is not _NO_UNIT: prop.Unit = unit` -- a real Unit
+		// (or an explicit `null`, clearing the override) always applies; only the "no Unit
+		// specified at all" sentinel skips this write, leaving any existing override intact.
+		if (rawUnit !== NO_UNIT) prop.set("Unit", rawUnit);
 	}
 	// Unconditional, matching real Python's own `del` sitting OUTSIDE the if/elif chain:
 	// even the "complex quantity fed a non-dict value" case (none of the 3 branches
@@ -334,10 +410,10 @@ function addNewProperties(
 	qtoTemplate: EntityInstance | null,
 ): EntityInstance[] {
 	const created: EntityInstance[] = [];
-	for (const [name, value] of properties) {
-		if (value === null) continue;
-		if (isComplexValue(value)) {
-			if (value.Discrimination === undefined) {
+	for (const [name, rawValue] of properties) {
+		if (rawValue === null) continue;
+		if (isComplexValue(rawValue)) {
+			if (rawValue.Discrimination === undefined) {
 				// Python: bare `value["Discrimination"]` -- a required key when CREATING a
 				// new complex quantity (see header comment for the asymmetry with the
 				// optional-on-update path above).
@@ -346,18 +422,24 @@ function addNewProperties(
 			// IfcPhysicalComplexQuantity: Name(0), Description(1, skipped), HasQuantities(2,
 			// populated below via the recursive editQto call, not passed here),
 			// Discrimination(3).
-			const complexQto = file.createEntity("IfcPhysicalComplexQuantity", name, null, null, value.Discrimination);
+			const complexQto = file.createEntity("IfcPhysicalComplexQuantity", name, null, null, rawValue.Discrimination);
 			created.push(complexQto);
-			editQto(file, { qto: complexQto, properties: value.HasQuantities });
+			editQto(file, { qto: complexQto, properties: rawValue.HasQuantities });
 			continue;
 		}
+		const [rawUnit, value] = unpackUnitValue(rawValue);
 		const propertyType = getCanonicalPropertyType(name, value, qtoTemplate);
 		const numeric = wrappedNumericValueOf(value);
-		// IfcQuantityXXX: Name(0), Description(1, skipped), Unit(2, skipped), XXXValue(3).
+		// New-quantity creation always passes `Unit` positionally (never a Python-style
+		// omitted kwarg), so the `NO_UNIT`/explicit-`null` distinction collapses here --
+		// both mean "no Unit override on the new quantity", matching real Python's own
+		// `unit is not None and unit is not _NO_UNIT` guard (upstream `d19c86c72`).
+		const unit = rawUnit === NO_UNIT ? null : rawUnit;
+		// IfcQuantityXXX: Name(0), Description(1, skipped), Unit(2), XXXValue(3).
 		// No IFC4X3-`IfcQuantityCount`-as-integer coercion here -- see header comment:
 		// real Python's own `add_new_properties` has no such special case, unlike
 		// `update_existing_property` above (a genuine, disclosed asymmetry).
-		created.push(file.createEntity(`IfcQuantity${propertyType}`, name, null, null, numeric));
+		created.push(file.createEntity(`IfcQuantity${propertyType}`, name, null, unit, numeric));
 	}
 	return created;
 }

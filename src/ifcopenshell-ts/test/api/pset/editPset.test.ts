@@ -271,6 +271,36 @@ describe.each(AVAILABLE_SCHEMAS)("api.pset.editPset (%s)", (schema) => {
 		expect(unit.get("Name")).toBe("PASCAL");
 	});
 
+	// Upstream `d19c86c72` (test_edit_pset.py::TestEditPsetIFC2X3::test_explicitly_clearing_a_propertys_unit_override).
+	test("explicitly clearing a property's unit override (Unit: null) clears it, falling back to the project default", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "PRESSUREUNIT", "GIGA", "PASCAL");
+		const pset = addPset(file, { product: element, name: "Foo_Bar" });
+		editPset(file, { pset, properties: { MyCustom: { NominalValue: 30.0, Unit: customUnit } } });
+		const prop = (pset.get("HasProperties") as EntityInstance[])[0];
+		expect((prop.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+
+		editPset(file, { pset, properties: { MyCustom: { NominalValue: 40.0, Unit: null } } });
+		expect(prop.get("Unit")).toBeNull();
+		expect((prop.get("NominalValue") as EntityInstance).getByIndex(0)).toBe(40.0);
+	});
+
+	// Upstream `d19c86c72` (test_edit_pset.py::TestEditPsetIFC2X3::test_a_bare_value_does_not_disturb_an_existing_units_override).
+	test("a bare value does not disturb an existing property's unit override", () => {
+		const file = createTestFile(schema);
+		const element = file.createEntity("IfcWall");
+		const customUnit = file.createEntity("IfcSIUnit", null, "PRESSUREUNIT", "GIGA", "PASCAL");
+		const pset = addPset(file, { product: element, name: "Foo_Bar" });
+		editPset(file, { pset, properties: { MyCustom: { NominalValue: 30.0, Unit: customUnit } } });
+		const prop = (pset.get("HasProperties") as EntityInstance[])[0];
+		expect((prop.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+
+		editPset(file, { pset, properties: { MyCustom: 42.0 } });
+		expect((prop.get("Unit") as EntityInstance).equals(customUnit)).toBe(true);
+		expect((prop.get("NominalValue") as EntityInstance).getByIndex(0)).toBe(42.0);
+	});
+
 	test("editing properties of non-rooted elements -- unblocked (pre-built entity_instance value)", () => {
 		const file = createTestFile(schema);
 		const element = file.createEntity("IfcMaterial");
