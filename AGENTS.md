@@ -115,6 +115,12 @@ AI-generated, identify them.
 - **Formatter**: clang-format (configuration in `.clang-format`)
 - **Linter**: clang-tidy (configuration in `.clang-tidy`)
 
+### JavaScript/TypeScript
+
+- **Line length**: 120 characters
+- **Formatter/Linter**: Biome (configuration in each package's own `biome.json`,
+  e.g. `src/ifcopenshell-ts/biome.json`)
+
 Run linters and formatters **before submitting** your pull request. Do not rely
 on CI to catch formatting issues.
 
@@ -139,6 +145,8 @@ on CI to catch formatting issues.
 - `src/ifcwrap/` — SWIG Python bindings
 - `src/ifcconvert/` — CLI conversion tool
 - `src/ifcopenshell-python/` — Python API (`ifcopenshell` package)
+- `src/ifcopenshell-ts/` — TypeScript API (`ifcopenshell` npm package), native
+  Node.js addon binding onto the C++ core
 - `src/bonsai/` — Blender add-on (GPL-3.0-or-later)
 - `src/ifctester/` — IDS model auditing
 - `src/ifcpatch/` — IFC file manipulation scripts
