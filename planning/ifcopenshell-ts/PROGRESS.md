@@ -571,8 +571,25 @@ null guard), real new features not yet ported (`editPset`/`editQto` per-property
 support with a `_NO_UNIT` sentinel, `IfcDerivedUnit` support in `util.unit`, a new top-level string
 decode/encode API), a substantial alignment-stationing behavior rework touching 6 already-shipped
 `api.alignment` files plus one new file, and a selector-grammar relaxation (unquoted decimals in
-comparisons). Proposed 4-chunk breakdown in the plan doc; not yet dispatched — this was scoping only,
-per explicit user instruction to investigate before deciding on next steps.
+comparisons).
+
+**All 4 proposed chunks are now landed** (PRs [#267](https://github.com/mikitski/IfcOpenShell/pull/267),
+[#268](https://github.com/mikitski/IfcOpenShell/pull/268), [#269](https://github.com/mikitski/IfcOpenShell/pull/269),
+[#270](https://github.com/mikitski/IfcOpenShell/pull/270)), each independently reviewed against the
+real upstream diff (not the dispatch's own self-report) and independently rebuilt/retested by the
+orchestrating session before merge:
+
+| Chunk | Status | PR | Notes |
+|---|---|---|---|
+| Chunk 1 — 4 real bug fixes (`reassignClass`, `unassignRepresentation`, `getPropertyUnit`, `AttributeCategory`) | ✅ | [#267](https://github.com/mikitski/IfcOpenShell/pull/267) | 2 real bugs found and fixed (`reassignClass`'s stale `isPythonFalsy` truthiness check, `unassignRepresentation`'s unguarded-null crash); 2 already correct/no-op, verified and locked in with regression tests rather than left unverified. |
+| Chunk 2 — `editPset`/`editQto` Unit-override support, `IfcDerivedUnit` support in `util.unit` | ✅ | [#268](https://github.com/mikitski/IfcOpenShell/pull/268) | 3 of 4 items ported (`_NO_UNIT` sentinel, `IfcDerivedUnit` dimensional analysis/scale/symbol support, `getProjectUnit`'s dimensional fallback); the 4th (a new top-level SPF string decode/encode API) investigated and confirmed genuinely not portable without native-layer work — the underlying C++ free functions don't exist in this fork's own `src/ifcparse` snapshot, confirmed by direct grep, not assumed — correctly left as a disclosed follow-up rather than forced. |
+| Chunk 3 — alignment stationing rework (`create()` no longer auto-adds stationing; reverse/decreasing stationing support) | ✅ | [#269](https://github.com/mikitski/IfcOpenShell/pull/269) | The highest-risk chunk (a real behavior change to 6 already-shipped, already-tested `api.alignment` files) — verified line-by-line against the real upstream diff, including a byte-for-byte match on `distanceAlongFromStation`'s substantially-rewritten direction-sign ("sigma") logic. Found and fixed 3 of this port's own pre-existing tests that asserted the now-superseded auto-stationing behavior. |
+| Chunk 4 — selector mini-language accepts an unquoted decimal in a comparison value | ✅ | [#270](https://github.com/mikitski/IfcOpenShell/pull/270) | Small, self-contained `util/selector.ts` grammar relaxation; the other 2 commits this same investigation flagged (`1c6362ec3`, `ff4ef510f`) were confirmed to be pure `.rst`-documentation commits with zero code changes, correctly not ported. |
+
+This closes out the porting/catch-up work identified by the upstream-sync investigation. The
+still-open thread from this same initiative is the rebase-vs-fresh-branch decision for actually
+folding this fork's history into real upstream (see the aborted-rebase note above) — revisit now that
+all 4 chunks' worth of real behavior differences are understood in detail.
 
 ## Blockers / escalations
 
