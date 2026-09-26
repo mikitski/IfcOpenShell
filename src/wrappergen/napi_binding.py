@@ -1,0 +1,723 @@
+# This file was generated with the assistance of an AI coding tool.
+
+"""Entry point for IfcOpenShell-TS's Phase 1 primitive binding
+(planning/ifcopenshell-ts/20-roadmap.md's Phase 1, planning/ifcopenshell-ts/
+research/06-wrappergen-spike-results.md).
+
+This supersedes `napi_spike.py`'s scope in every way that matters: the spike deliberately
+narrowed the variant adapter to 7 of the ~15 `ifcopenshell::argument_type` cases (no
+BINARY, no aggregates) and only *verified* file/entity_instance/declaration end-to-end,
+even though its `WrapperConfig` already pointed clang at the full `src/ifcparse/*.h`
+header set. This module:
+
+- Completes the variant adapter (`attribute_value_shim.h`/`.cpp`): BINARY plus a single,
+  generic, recursive `AGGREGATE` case that covers every `AGGREGATE_OF_*`/
+  `AGGREGATE_OF_AGGREGATE_OF_*`/`EMPTY_AGGREGATE` case in one mechanism -- see
+  `attribute_value_shim.h`'s doc comment for why one case suffices instead of one per
+  element type.
+- Injects the full `entity_instance` (`express::base`) primitive surface that only
+  exists today as SWIG `%extend` glue in `src/ifcwrap/IfcParseWrapper.i`, not as real
+  C++ methods clang can discover: `get_argument_index`, `attribute_name`,
+  `attribute_type`, `get_attribute_category`, `is_a`, plus `attribute_kind_of` (the
+  SET-side ergonomic helper research/06 SS2.4 designed) and `get_all_attribute_values`
+  (the bulk fetch standing in for Python's fully-recursive `get_info_cpp` -- see
+  `attribute_value_shim.h`'s doc comment for the disclosed scope of that stand-in).
+- Points at the real, full `src/ifcparse/*.h` header set (already true of the spike's
+  config, carried over here) -- `entity`/`attribute`/`inverse_attribute`/
+  `schema_definition`/the `parameter_type` hierarchy/`type_declaration`/
+  `enumeration_type`/`select_type` are all clang-discovered generically, not
+  hand-listed; `class_handle_kinds` below only needs to override the ones whose
+  *ownership* isn't the generic "value" default.
+
+Generated output goes to `src/wrappergen/generated_napi/` (checked in, like the
+existing `generated/` and `napi_spike_generated/` snapshots) -- see that directory's
+own note on why this is checked-in rather than generated at CI/build time.
+"""
+
+from __future__ import annotations
+
+import argparse
+import functools
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from wrappergen.clang_frontend import build_module_model
+    from wrappergen.config import CompilationConfig, IgnoreConfig, WrapperConfig
+    from wrappergen.emit import (
+        emit_c_api_header,
+        emit_c_api_implementation,
+        emit_napi_extension,
+        emit_typescript_facade,
+    )
+    from wrappergen.model import (
+        AsyncVariantModel,
+        CallableModel,
+        ParameterModel,
+        VariantAdapterModel,
+        VariantCaseModel,
+    )
+else:
+    from .clang_frontend import build_module_model
+    from .config import CompilationConfig, IgnoreConfig, WrapperConfig
+    from .emit import emit_c_api_header, emit_c_api_implementation, emit_napi_extension, emit_typescript_facade
+    from .model import AsyncVariantModel, CallableModel, ParameterModel, VariantAdapterModel, VariantCaseModel
+
+# See `napi_spike.py`'s identical constant for the full rationale: a real, pre-existing
+# `src/ifcparse/rocksdb_map_adapter.h` header-hygiene bug (missing `<vector>`/
+# `<string>`/`<sstream>` includes), independent of wrappergen, filed as a follow-up
+# rather than fixed here (out of this PR's `src/wrappergen/`-only scope).
+_ROCKSDB_HEADER_ORDERING_WORKAROUND = ["-include", "vector", "-include", "string", "-include", "sstream"]
+
+
+@functools.lru_cache(maxsize=1)
+def _discover_boost_include_dir() -> str | None:
+    """Best-effort discovery of a directory containing `boost/*.hpp` headers, needed
+    because `clang_frontend.py`'s `_build_translation_unit` calls `clang.cindex.Index.parse`
+    directly with no `compile_commands.json` configured (there isn't one anywhere in this
+    repo -- confirmed by search) and no Boost include path of its own. Several
+    `src/ifcparse/*.h` headers this generator parses (`argument.h`, `file.h`, `schema.h`,
+    `parse.h`, `instance_data.h`, `file_reader.h`, `global_id.h`, `exception.h`)
+    transitively include real Boost headers (e.g. `boost/lexical_cast.hpp`), so without
+    *some* Boost include path this fails outright with a "file not found" fatal diagnostic
+    on every run, on every machine where Boost doesn't happen to already sit on clang's
+    default search path.
+
+    This project's real C++ build (`cmake/CMakeLists.txt`) already solves the identical
+    problem portably via CMake's `find_package(Boost)`, which locates Boost correctly
+    regardless of where it's installed on the build machine. `clang_frontend.py`'s
+    clang-based parser has no equivalent mechanism, so it needs its own, deliberately NOT
+    a single hardcoded path (that would only work on one machine's exact package-manager
+    layout, and fail silently -- no error, just a confusing later crash -- everywhere
+    else). Instead, in order: (1) `BOOST_INCLUDEDIR`/`BOOST_ROOT`, the same environment
+    variables CMake's own `FindBoost` module already recognizes, so any non-Homebrew or
+    non-macOS setup can point this at the right place with zero code changes; (2) `brew
+    --prefix boost` when Homebrew is on `PATH`, which resolves correctly on any Homebrew
+    install location (Apple Silicon `/opt/homebrew`, Intel `/usr/local`, or a custom
+    prefix) rather than assuming one; (3) a short list of locations Boost conventionally
+    ends up at system-wide (mainly Linux package managers, where Boost is typically
+    already reachable without any extra flag -- this fallback exists so a genuinely
+    missing Boost still fails loudly via `_check_diagnostics` rather than silently, not
+    because these paths are expected to fire often in practice). Every candidate is
+    verified to actually contain `boost/version.hpp` before being used, so a stale or
+    wrong guess can never inject a bogus `-isystem` path.
+    """
+    candidates: list[Path] = []
+
+    boost_includedir = os.environ.get("BOOST_INCLUDEDIR")
+    if boost_includedir:
+        candidates.append(Path(boost_includedir))
+    boost_root = os.environ.get("BOOST_ROOT")
+    if boost_root:
+        candidates.append(Path(boost_root) / "include")
+
+    if shutil.which("brew"):
+        try:
+            prefix = subprocess.run(
+                ["brew", "--prefix", "boost"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+            if prefix:
+                candidates.append(Path(prefix) / "include")
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+    candidates.extend(Path(path) for path in ("/opt/homebrew/include", "/usr/local/include", "/usr/include"))
+
+    for candidate in candidates:
+        if (candidate / "boost" / "version.hpp").is_file():
+            return str(candidate)
+    return None
+
+
+def build_napi_binding_config(repo_root: Path) -> WrapperConfig:
+    src_ifcparse = repo_root / "src" / "ifcparse"
+    shim_header = repo_root / "src" / "wrappergen" / "shim" / "attribute_value_shim.h"
+    file_shim_header = repo_root / "src" / "wrappergen" / "shim" / "file_shim.h"
+    header_shim_header = repo_root / "src" / "wrappergen" / "shim" / "header_shim.h"
+    headers = [str(path.resolve()) for path in sorted(src_ifcparse.glob("*.h")) if path.parent.name != "schemas"]
+    headers = [header for header in headers if not header.endswith(("rocksdb_map_adapter.h", "rocksdb_set_view.h"))]
+    headers.append(str(shim_header.resolve()))
+    headers.append(str(file_shim_header.resolve()))
+    headers.append(str(header_shim_header.resolve()))
+
+    include_dirs = [str(src_ifcparse.resolve())]
+
+    return WrapperConfig(
+        module_name="ifcopenshell_native",
+        c_prefix="ifcopenshell",
+        api_header_name="ifcopenshell_native_c_api.h",
+        api_implementation_name="ifcopenshell_native_c_api.cpp",
+        extension_source_name="ifcopenshell_native.cpp",
+        python_source_name="ifcopenshell_native_unused.py",
+        allowed_namespaces=["ifcopenshell", "express"],
+        enum_names={"ifcopenshell::filetype": "FileType"},
+        # See `napi_spike.py`'s identical entry: `express::entity` (a `base` narrowed to
+        # "definitely an ENTITY_INSTANCE") would otherwise collide 1:1 on the py_name
+        # "entity" with the unrelated `ifcopenshell::entity` schema-declaration class.
+        class_names={"express::base": "entity_instance", "express::entity": "typed_entity_instance"},
+        parameter_names={"type": "filetype", "read_only": "readonly"},
+        class_handle_kinds={
+            "ifcopenshell::file": "shared_ptr",
+            # Every one of these is a long-lived object owned by the process-wide
+            # schema-registry singleton (`Ifc4::get_schema()` etc.), reached only by raw
+            # pointer, and never safe to copy-by-value through the generic "value"
+            # handle_kind (research/06-wrappergen-spike-results.md SS3.5's confirmed
+            # double-free/use-after-free finding -- `schema_definition`'s and several
+            # siblings' destructors `delete` pointers they assume they alone own).
+            # Verified per-class, not copy-pasted blind: every one of these types is
+            # reached exclusively through `schema_definition`'s owned vectors (or, for
+            # `attribute`/`inverse_attribute`, through `entity`'s owned vectors) --
+            # none has a public, non-deleted constructor this generator would ever call
+            # to independently allocate a *new*, generator-owned instance (the
+            # constructors clang discovers for them are used internally by the schema
+            # *building* code, `ifcparse`'s own `.cpp`, not by anything this addon
+            # exposes as a primitive) -- so "borrowed" (raw pointer, no copy, no delete)
+            # is the correct ownership model for all of them, not just a convenient
+            # default.
+            "ifcopenshell::declaration": "borrowed",
+            "ifcopenshell::type_declaration": "borrowed",
+            "ifcopenshell::select_type": "borrowed",
+            "ifcopenshell::enumeration_type": "borrowed",
+            "ifcopenshell::entity": "borrowed",
+            "ifcopenshell::attribute": "borrowed",
+            "ifcopenshell::inverse_attribute": "borrowed",
+            "ifcopenshell::schema_definition": "borrowed",
+            "ifcopenshell::parameter_type": "borrowed",
+            "ifcopenshell::named_type": "borrowed",
+            "ifcopenshell::simple_type": "borrowed",
+            "ifcopenshell::aggregation_type": "borrowed",
+        },
+        class_owner_types={
+            "express::base": "ifcopenshell::file",
+            "express::entity": "ifcopenshell::file",
+            "express::select": "ifcopenshell::file",
+        },
+        # Native memory accounting for V8's GC (planning/ifcopenshell-ts/10-architecture.md's
+        # "Native object lifetime" section, `20-roadmap.md`'s "Native memory accounting" Phase
+        # 1 task) -- a per-class hint, in bytes, of how much off-heap memory each class's JS
+        # wrapper represents, reported via `napi_adjust_external_memory` (`emit.py`'s
+        # `_native_memory_size_hint`/wrap+finalizer emission). Only `ifcopenshell::file` is
+        # overridden here: it owns an entire parsed IFC model (every entity, attribute value,
+        # and string in the file), whose real size is unknowable from this generator's side --
+        # it depends entirely on the specific file opened, from empty to hundreds of MB, and
+        # nothing in the C++ API exposes a byte-accurate "how much memory does this model use"
+        # query for the generator to call. 1 MiB is a deliberately coarse, documented
+        # order-of-magnitude stand-in (real-world parsed models commonly land in the single-
+        # to double-digit-MB range): the goal is giving V8's GC *some* signal that a `file`
+        # handle is meaningfully heavier than an ordinary small wrapper, not billing it
+        # precisely -- V8's own docs describe this API as a GC-pressure hint, not a precise
+        # accounting requirement. Every other class either keeps `WrapperConfig`'s generic
+        # 64-byte default (small metadata/handle wrapper objects -- e.g. `entity_instance`
+        # itself only stores a pointer/index into data actually owned by its `file`, per
+        # `class_owner_types` above) or is `"borrowed"` handle_kind (schema-registry-owned
+        # singletons; `emit.py` accounts only for their tiny wrapper struct, never the
+        # singleton's own memory -- see `_native_memory_size_hint`'s doc comment).
+        class_native_size_hints={
+            "ifcopenshell::file": 1024 * 1024,
+        },
+        type_adapters={
+            "std::string": "string",
+            "int": "integer",
+            "size_t": "integer",
+            "std::size_t": "integer",
+            "unsigned int": "integer",
+            "uint32_t": "integer",
+            "bool": "bool",
+            "void": "void",
+            # The buffer-based file-open constructor's `void* data` parameter -- see
+            # `research/06-wrappergen-spike-results.md` SS1 item 2.
+            "void*": "buffer",
+        },
+        ignore=IgnoreConfig(
+            namespaces=["ifcopenshell::impl"],
+            classes=[
+                "ifcopenshell::log_message",
+                "ifcopenshell::instance_data",
+                "ifcopenshell::rocks_db_attribute_storage",
+            ],
+            methods=[
+                # The real, unmodified `express::base`/`express::entity` methods this
+                # config's injected variant adapter (`_inject_entity_instance_primitives`
+                # below) replaces -- both return the real `ifcopenshell::attribute_value`
+                # (instance_data.h), which clang discovers as an ordinary (mostly
+                # useless -- its accessors are C++ implicit-conversion operators clang
+                # doesn't discover, research/01 SS5) handle class. Left in, these would
+                # collide on the `get_attribute_value` py_name with the injected methods
+                # of the same name.
+                "express::base::get_attribute_value",
+                "express::entity::get",
+                # `ifcopenshell::logger` has a deleted copy constructor and an
+                # implicitly-deleted move constructor (see `no_constructors` below) --
+                # breaks the generic "wrap a by-value handle" emission path shared by
+                # every class-returning method. Only `file::logger()`/
+                # `spf_header::logger()` (methods that *return* one) hit this -- `logger`
+                # still needs to stay a resolvable *parameter* type, since every `file`
+                # constructor takes an optional trailing `logger&`.
+                "ifcopenshell::file::logger",
+                "ifcopenshell::spf_header::logger",
+            ],
+            no_constructors=["ifcopenshell::logger"],
+        ),
+        compilation=CompilationConfig(
+            headers=headers,
+            include_dirs=include_dirs,
+            clang_args=[
+                "-x",
+                "c++",
+                "-std=c++17",
+                *_ROCKSDB_HEADER_ORDERING_WORKAROUND,
+                # See `_discover_boost_include_dir`'s doc comment: several parsed
+                # `src/ifcparse/*.h` headers transitively include real Boost headers, and
+                # this generator has no `compile_commands.json` to source an include path
+                # from. Portably discovered per-environment rather than hardcoded; a `None`
+                # result (Boost genuinely not found anywhere) intentionally adds nothing
+                # here, so the resulting "file not found" fails loudly via
+                # `_check_diagnostics` instead of silently omitting Boost-dependent
+                # headers' content.
+                *(["-isystem", boost_include_dir] if (boost_include_dir := _discover_boost_include_dir()) else []),
+            ],
+        ),
+    )
+
+
+def _case(kind_name: str, field: str, field_kind: str, handle_target: str | None = None) -> VariantCaseModel:
+    return VariantCaseModel(
+        kind_name=kind_name,
+        kind_c_name=f"IFCOPENSHELL_ATTRIBUTE_VALUE_KIND_{kind_name}",
+        native_kind_name=f"ifcopenshell::wrappergen::ATTRIBUTE_VALUE_KIND_{kind_name}",
+        field=field,
+        field_kind=field_kind,
+        handle_target=handle_target,
+    )
+
+
+def _attribute_value_variant_model() -> VariantAdapterModel:
+    """The full ~15-way `ifcopenshell::argument_type` dispatch
+    (research/01-python-core-and-lowlevel.md SS5), completing the spike's 7-case subset:
+    BINARY (reusing the STRING case's field -- a string of '0'/'1' characters, matching
+    `ifcopenshell::valid_binary_string`'s own textual convention) and the single,
+    generic, recursive AGGREGATE case (a "sequence" field_kind -- see
+    `attribute_value_shim.h`'s class doc comment) covering every
+    `AGGREGATE_OF_*`/`AGGREGATE_OF_AGGREGATE_OF_*`/`EMPTY_AGGREGATE` case in one
+    mechanism instead of one adapter case per element type.
+    """
+    return VariantAdapterModel(
+        cpp_type="ifcopenshell::wrappergen::attribute_value_variant",
+        c_type_name="ifcopenshell_attribute_value_variant_t",
+        kind_enum_c_name="ifcopenshell_attribute_value_kind_t",
+        kind_field="kind",
+        cases=[
+            _case("NULL", "integer_value", "integer"),
+            _case("BOOL", "integer_value", "integer"),
+            _case("LOGICAL", "logical_value", "integer"),
+            _case("INTEGER", "integer_value", "integer"),
+            _case("DOUBLE", "double_value", "double"),
+            _case("STRING", "string_value", "string"),
+            _case("ENUMERATION", "string_value", "string"),
+            _case("ENTITY_INSTANCE", "entity_value", "handle", handle_target="express::base"),
+            _case("BINARY", "string_value", "string"),
+            _case("AGGREGATE", "aggregate_value", "sequence"),
+        ],
+    )
+
+
+def _free_function(
+    entity_instance,
+    cpp_name: str,
+    py_name: str,
+    c_name: str,
+    parameters: list[ParameterModel],
+    return_cpp_type: str = "void",
+    return_adapter: str = "void",
+) -> CallableModel:
+    return CallableModel(
+        kind="free_function",
+        owner_cpp_name=entity_instance.cpp_name,
+        owner_py_name=entity_instance.py_name,
+        cpp_name=cpp_name,
+        py_name=py_name,
+        c_name=c_name,
+        return_cpp_type=return_cpp_type,
+        return_adapter=return_adapter,
+        parameters=parameters,
+    )
+
+
+def _inject_entity_instance_primitives(model, variant_adapter: VariantAdapterModel) -> None:
+    """Appends every `entity_instance` (`express::base`) primitive that only exists as
+    SWIG `%extend` glue today (research/01-python-core-and-lowlevel.md SS5 point 3), as
+    `free_function`-kind `CallableModel`s -- the same technique
+    `napi_spike.py`/`research/06` already established for
+    `get_attribute_value_variant`/`set_attribute_value_variant`, extended to the rest of
+    the entity_instance surface `attribute_value_shim.h`/`.cpp` now also implements:
+    `attribute_kind_of`, `get_argument_index`, `attribute_name`, `attribute_type`,
+    `get_attribute_category`, `is_a`, `get_all_attribute_values`, plus `traverse`/
+    `traverse_breadth_first` -- unlike the rest of this list, these two are thin
+    pass-throughs to real, existing `ifcopenshell::file::traverse`/
+    `traverse_breadth_first` static methods (file.h), not SWIG-only glue; they were
+    missing only because `clang_frontend.py`'s `_discover_methods` unconditionally
+    skips static methods (`if child.is_static_method(): continue`), so the same
+    free-function injection technique picks them up here.
+
+    `to_string` (PROGRESS.md's `EntityInstance.toString()` row) was added afterwards,
+    the first genuinely new primitive since this project's Phase 1/2 bootstrap: unlike
+    the rest of this list, the real underlying C++ method (`express::base::to_string`,
+    parse.cpp) is neither missing nor static -- clang's generator skips it only because
+    its `std::ostream&` output parameter has no adapter, matching the existing
+    "return-type collision"/ordinary-discovery-gap category this whole mechanism exists
+    for. Also the first entry here needing a `bool`-adapter *parameter* (every prior
+    entry only used `bool` as a return type, on `is_a`) -- confirmed working end-to-end
+    (C ABI `_parameter_c_type`, N-API `napi_get_value_bool`, TS `boolean`) by reading
+    `emit.py` before relying on it, not assumed.
+
+    Deliberately NOT injected here (disclosed scope cut, not an oversight):
+    `get_attribute_names`/`get_inverse_attribute_names` (`std::vector<std::string>`
+    returns) -- doing so would need a third new adapter kind ("sequence of scalar",
+    distinct from both `sequence:` (sequence of class handle) and the
+    `sequence_of_variant:` adapter this PR already adds) purely for enumerating
+    attribute *names* in bulk. The *capability* is not missing: `entity_attribute_count`
+    + `attribute_name(index)` (an ordinary, already-working `attribute` class method) or
+    this module's own `get_argument_index`/`base_attribute_name`-equivalent already let a
+    caller enumerate every attribute name one at a time -- just not in a single bulk
+    call. Left for a follow-up alongside the "sequence of variant" mechanism this PR
+    does add for `get_all_attribute_values`.
+    """
+    entity_instance = next(class_model for class_model in model.classes if class_model.cpp_name == "express::base")
+    variant_adapter_name = f"variant:{variant_adapter.cpp_type}"
+    sequence_of_variant_adapter_name = f"sequence_of_variant:{variant_adapter.cpp_type}"
+
+    index_parameter = ParameterModel(
+        name="attribute_index", cpp_name="attribute_index", cpp_type="int", adapter="integer"
+    )
+    name_parameter = ParameterModel(name="name", cpp_name="name", cpp_type="std::string", adapter="string")
+
+    get_value = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_attribute_value_variant",
+        "get_attribute_value",
+        "get_attribute_value_variant",
+        [index_parameter],
+        return_cpp_type=variant_adapter.cpp_type,
+        return_adapter=variant_adapter_name,
+    )
+    set_value = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::set_attribute_value_variant",
+        "set_attribute_value",
+        "set_attribute_value_variant",
+        [
+            index_parameter,
+            ParameterModel(
+                name="value", cpp_name="value", cpp_type=variant_adapter.cpp_type, adapter=variant_adapter_name
+            ),
+        ],
+    )
+    attribute_kind_of = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::attribute_kind_of",
+        "attribute_kind_of",
+        "attribute_kind_of",
+        [index_parameter],
+        return_cpp_type="int",
+        return_adapter="integer",
+    )
+    get_argument_index = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_argument_index",
+        "get_argument_index",
+        "get_argument_index",
+        [name_parameter],
+        return_cpp_type="int",
+        return_adapter="integer",
+    )
+    attribute_name = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_attribute_name",
+        "attribute_name",
+        "attribute_name",
+        [index_parameter],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
+    attribute_type = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_attribute_type_name",
+        "attribute_type",
+        "attribute_type",
+        [index_parameter],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
+    get_attribute_category = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_attribute_category",
+        "get_attribute_category",
+        "get_attribute_category",
+        [name_parameter],
+        return_cpp_type="int",
+        return_adapter="integer",
+    )
+    is_a = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::is_a",
+        "is_a",
+        "is_a",
+        [name_parameter],
+        return_cpp_type="bool",
+        return_adapter="bool",
+    )
+    uppercase_parameter = ParameterModel(name="uppercase", cpp_name="uppercase", cpp_type="bool", adapter="bool")
+    to_string = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::to_string",
+        "to_string",
+        "to_string",
+        [uppercase_parameter],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
+    get_all_attribute_values = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::get_all_attribute_values",
+        "get_all_attribute_values",
+        "get_all_attribute_values",
+        [],
+        return_cpp_type=f"std::vector<{variant_adapter.cpp_type}>",
+        return_adapter=sequence_of_variant_adapter_name,
+    )
+    max_depth_parameter = ParameterModel(name="max_depth", cpp_name="max_depth", cpp_type="int", adapter="integer")
+    entity_instance_sequence_adapter = f"sequence:{entity_instance.cpp_name}"
+    traverse = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::traverse",
+        "traverse",
+        "traverse",
+        [max_depth_parameter],
+        return_cpp_type=f"std::vector<{entity_instance.cpp_name}>",
+        return_adapter=entity_instance_sequence_adapter,
+    )
+    traverse_breadth_first = _free_function(
+        entity_instance,
+        "ifcopenshell::wrappergen::traverse_breadth_first",
+        "traverse_breadth_first",
+        "traverse_breadth_first",
+        [max_depth_parameter],
+        return_cpp_type=f"std::vector<{entity_instance.cpp_name}>",
+        return_adapter=entity_instance_sequence_adapter,
+    )
+
+    entity_instance.callables.extend(
+        [
+            get_value,
+            set_value,
+            attribute_kind_of,
+            get_argument_index,
+            attribute_name,
+            attribute_type,
+            get_attribute_category,
+            is_a,
+            to_string,
+            get_all_attribute_values,
+            traverse,
+            traverse_breadth_first,
+        ]
+    )
+
+
+def _inject_file_primitives(model) -> None:
+    """Appends the `ifcopenshell::file`-level primitives that only exist as SWIG
+    `%extend` glue today (`file_shim.h`/`.cpp`, TODOS.md's "Phase 1 primitive binding"
+    gap #2): `write` (needed by the async work) and `file_pointer` (Phase 2's
+    `IfcFile`-level identity key, `research/07-fresh-wrapper-per-access.md`). Same
+    injection technique `_inject_entity_instance_primitives` already established for
+    `express::base`.
+    """
+    file_class = next(class_model for class_model in model.classes if class_model.cpp_name == "ifcopenshell::file")
+    path_parameter = ParameterModel(name="path", cpp_name="path", cpp_type="std::string", adapter="string")
+    write = _free_function(
+        file_class,
+        "ifcopenshell::wrappergen::write_file",
+        "write",
+        "write",
+        [path_parameter],
+    )
+    file_pointer = _free_function(
+        file_class,
+        "ifcopenshell::wrappergen::file_pointer",
+        "file_pointer",
+        "file_pointer",
+        [],
+        return_cpp_type="std::string",
+        return_adapter="string",
+    )
+    file_class.callables.extend([write, file_pointer])
+
+
+def _inject_header_primitives(model) -> None:
+    """Appends `ifcopenshell::spf_header`'s 10 sub-entity field accessors -- the "f.header
+    sub-entity accessors" gap `planning/ifcopenshell-ts/70-express-rules-plan.md` (Phase
+    EX-3 chunk 1) flags as a real, confirmed, blocking primitive gap for `validate.py`'s
+    `validate_ifc_header`. Backed by `header_shim.h`/`.cpp` -- see that header's own doc
+    comment for why these are flat, ownerless free functions (`spf_header.
+    file_description_description()` etc.) reading straight through to each field's plain
+    scalar/`vector<string>` value, rather than wrappergen-discovered handle classes for
+    `Header_section_schema::file_description`/`file_name`/`file_schema` themselves (which
+    would need a `spf_header`-to-`shared_ptr` ownership change this chunk deliberately
+    doesn't make, real Python's own upcast-to-`express::base` SWIG glue equivalent being
+    unavailable here for the same reason).
+
+    Named `file_description_*`/`file_name_*`/`file_schema_*` (not a flatter
+    `description`/`name`/... -- `implementation_level`/`name`/`time_stamp` alone would be
+    ambiguous or collide) to make each accessor's real EXPRESS-schema origin
+    (`Header_section_schema.h`) unambiguous from the TS call site, matching this
+    generator's own convention of deriving names mechanically from the underlying C++
+    shape rather than inventing new ones.
+    """
+    header_class = next(
+        class_model for class_model in model.classes if class_model.cpp_name == "ifcopenshell::spf_header"
+    )
+    string_sequence_functions = [
+        ("header_file_description_description", "file_description_description"),
+        ("header_file_name_author", "file_name_author"),
+        ("header_file_name_organization", "file_name_organization"),
+        ("header_file_schema_schema_identifiers", "file_schema_schema_identifiers"),
+    ]
+    scalar_string_functions = [
+        ("header_file_description_implementation_level", "file_description_implementation_level"),
+        ("header_file_name_name", "file_name_name"),
+        ("header_file_name_time_stamp", "file_name_time_stamp"),
+        ("header_file_name_preprocessor_version", "file_name_preprocessor_version"),
+        ("header_file_name_originating_system", "file_name_originating_system"),
+        ("header_file_name_authorization", "file_name_authorization"),
+    ]
+    injected = [
+        _free_function(
+            header_class,
+            f"ifcopenshell::wrappergen::{cpp_name}",
+            py_name,
+            py_name,
+            [],
+            return_cpp_type="std::vector<std::string>",
+            return_adapter="sequence_of_string",
+        )
+        for cpp_name, py_name in string_sequence_functions
+    ] + [
+        _free_function(
+            header_class,
+            f"ifcopenshell::wrappergen::{cpp_name}",
+            py_name,
+            py_name,
+            [],
+            return_cpp_type="std::string",
+            return_adapter="string",
+        )
+        for cpp_name, py_name in scalar_string_functions
+    ]
+    header_class.callables.extend(injected)
+
+
+def _inject_async_variants(model) -> None:
+    """The three primitives planning/ifcopenshell-ts/10-architecture.md's "Async story"
+    section names as needing a `napi_create_async_work`-based sibling alongside their
+    sync counterpart: file open/parse (path- and buffer-based), the bulk
+    `get_all_attribute_values` serializer, and `write` (see `_inject_file_primitives`
+    above for the sync primitive this last one needed first). Each entry names an
+    already-emitted sync `CallableVariant` by its `api_name` -- resolved back to its full
+    signature by `emit.py`'s `_variant_by_api_name` at emission time -- plus where/how the
+    TS facade should additionally expose it.
+
+    File open only gets an async sibling for its *minimal*-arity sync entry point
+    (`file_new_with_path`/`file_new_with_data_data_size`, i.e. no explicit filetype/
+    readonly/logger) -- the same disclosed, bounded scope the sync facade's own
+    constructors already have (TODOS.md gap #4: the TS facade doesn't support C++
+    default-argument parameters, so only the maximal-arity overload of each constructor
+    family gets a class-level convenience method; the minimal-arity ones are only
+    reachable via the raw `native.*` function either way). Extending async file-open to
+    the fuller-arity overloads is the same bounded follow-up as that existing gap, not a
+    new one this PR introduces.
+    """
+    model.async_variants.extend(
+        [
+            AsyncVariantModel(
+                sync_api_name="file_new_with_path",
+                async_api_name="file_new_with_path_async",
+                ts_owner_py_name="file",
+                ts_method_name="open_path_async",
+                ts_is_static=True,
+            ),
+            AsyncVariantModel(
+                sync_api_name="file_new_with_data_data_size",
+                async_api_name="file_new_with_data_data_size_async",
+                ts_owner_py_name="file",
+                ts_method_name="open_buffer_async",
+                ts_is_static=True,
+            ),
+            AsyncVariantModel(
+                sync_api_name="base_get_all_attribute_values",
+                async_api_name="base_get_all_attribute_values_async",
+                ts_owner_py_name="entity_instance",
+                ts_method_name="get_all_attribute_values_async",
+                ts_is_static=False,
+            ),
+            AsyncVariantModel(
+                sync_api_name="file_write",
+                async_api_name="file_write_async",
+                ts_owner_py_name="file",
+                ts_method_name="write_async",
+                ts_is_static=False,
+            ),
+        ]
+    )
+
+
+def build_napi_binding_model(repo_root: Path):
+    config = build_napi_binding_config(repo_root)
+    model = build_module_model(config)
+    variant_adapter = _attribute_value_variant_model()
+    model.variant_adapters.append(variant_adapter)
+    _inject_entity_instance_primitives(model, variant_adapter)
+    _inject_file_primitives(model)
+    _inject_header_primitives(model)
+    _inject_async_variants(model)
+    # The injected free functions above aren't discovered from any clang cursor, so
+    # `build_module_model`'s `source_headers` computation (which only walks
+    # *discovered* classes' cursor locations) never has a reason to include the shim
+    # header that declares them -- see `napi_spike.py`'s identical fix.
+    if "attribute_value_shim.h" not in model.source_headers:
+        model.source_headers.append("attribute_value_shim.h")
+    if "file_shim.h" not in model.source_headers:
+        model.source_headers.append("file_shim.h")
+    if "header_shim.h" not in model.source_headers:
+        model.source_headers.append("header_shim.h")
+    return model
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[2]))
+    parser.add_argument("--output-dir", default=str(Path(__file__).resolve().parent / "generated_napi"))
+    return parser.parse_args()
+
+
+def main() -> int:
+    arguments = parse_args()
+    repo_root = Path(arguments.repo_root).resolve()
+    output_dir = Path(arguments.output_dir).resolve()
+    model = build_napi_binding_model(repo_root)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / model.api_header_name).write_text(emit_c_api_header(model), encoding="utf-8")
+    (output_dir / model.api_implementation_name).write_text(emit_c_api_implementation(model), encoding="utf-8")
+    (output_dir / model.extension_source_name).write_text(emit_napi_extension(model), encoding="utf-8")
+    (output_dir / "ifcopenshell_native.ts").write_text(emit_typescript_facade(model), encoding="utf-8")
+
+    print(f"Generated {len(model.classes)} classes, {sum(len(c.callables) for c in model.classes)} callables")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

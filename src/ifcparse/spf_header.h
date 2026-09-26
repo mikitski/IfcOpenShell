@@ -38,6 +38,18 @@ class IFC_PARSE_API spf_header {
 
   public:
     explicit spf_header(ifcopenshell::file* file = nullptr, ifcopenshell::logger* logger = nullptr);
+    // Rule-of-five: header_entities_ holds 3 heap-owned instance_data* (see
+    // spf_header.cpp's own comments) that ~spf_header() now actually frees (a real
+    // LeakSanitizer-caught leak fix) - copy/move must be defined explicitly instead of
+    // relying on the (now dangerous) implicitly-generated ones. Copy performs a real
+    // deep clone via assign() (each copy gets its own independent header entities, so
+    // e.g. `file::header()`'s caller-owned snapshot never aliases the file's own
+    // persistent header_ member); move transfers ownership of the 3 pointers and nulls
+    // the source so its destructor becomes a no-op.
+    spf_header(const spf_header& other);
+    spf_header& operator=(const spf_header& other);
+    spf_header(spf_header&& other) noexcept;
+    spf_header& operator=(spf_header&& other) noexcept;
     ~spf_header();
 
     void write(std::ostream& stream) const;

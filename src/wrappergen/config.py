@@ -18,6 +18,15 @@ class IgnoreConfig:
     classes: list[str] = field(default_factory=list)
     enums: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
+    # Unlike `classes` (which also removes the class as a *target* -- e.g. as a resolvable
+    # parameter/return type elsewhere), this only suppresses a class's own constructors,
+    # for the case where a class needs to remain a valid handle-adapter target (e.g. an
+    # optional trailing parameter on another class's constructor) but its own constructors
+    # can't be wrapped by the generic "construct and wrap by value" emission path (e.g. a
+    # deleted copy constructor + an implicitly-deleted move constructor -- found by the
+    # wrappergen N-API spike at full-header-set scale, see
+    # planning/ifcopenshell-ts/research/06-wrappergen-spike-results.md).
+    no_constructors: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -38,5 +47,15 @@ class WrapperConfig:
     parameter_names: dict[str, str] = field(default_factory=dict)
     class_handle_kinds: dict[str, str] = field(default_factory=dict)
     class_owner_types: dict[str, str] = field(default_factory=dict)
+    # A per-class hint, in bytes, for how much native (off-heap) memory each of this
+    # class's JS wrapper objects should report to V8 via `napi_adjust_external_memory`
+    # (planning/ifcopenshell-ts/10-architecture.md's "Native object lifetime" section) --
+    # deliberately a coarse GC-pressure hint, not a precise accounting requirement (V8's
+    # own docs describe the API that way). `default_class_native_size_hint` applies to
+    # every class not listed here; `"borrowed"`-handle_kind classes never consult either
+    # of these (see `emit.py`'s `_native_memory_size_hint`) -- their wrapper owns only a
+    # raw, non-owning pointer, never the pointee's memory.
+    class_native_size_hints: dict[str, int] = field(default_factory=dict)
+    default_class_native_size_hint: int = 64
     type_adapters: dict[str, str] = field(default_factory=dict)
     ignore: IgnoreConfig = field(default_factory=IgnoreConfig)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import functools
+import platform
+import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +118,44 @@ def _parse_parameter_specs(cursor) -> list[_ParameterSpec]:
     return specs
 
 
+@functools.lru_cache(maxsize=1)
+def _default_system_include_args() -> tuple[str, ...]:
+    """Best-effort C++ system/standard-library search paths for use when no
+    ``compile_commands.json`` is configured.
+
+    ``clang.cindex.Index.parse`` calls libclang's low-level parsing entry point
+    directly, which -- unlike invoking the ``clang`` driver executable -- does
+    NOT inject the toolchain's default header search paths. Without them, a
+    header that includes e.g. ``<string>`` fails with a fatal "file not found"
+    diagnostic, and clang's C++ error-recovery silently reinterprets the
+    now-unresolved ``std::string`` as ``int`` -- so a run without this ends up
+    invisibly wrong rather than loudly broken (see ``_check_diagnostics``,
+    which turns the "invisibly wrong" half of that into "loudly broken" as a
+    second, independent line of defense).
+    """
+    args: list[str] = []
+    try:
+        resource_dir = subprocess.run(
+            ["clang++", "-print-resource-dir"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        if resource_dir:
+            args.append(f"-resource-dir={resource_dir}")
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    if platform.system() == "Darwin":
+        try:
+            sdk_path = subprocess.run(
+                ["xcrun", "--show-sdk-path"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+            if sdk_path:
+                args.append(f"-isysroot{sdk_path}")
+                args.append(f"-isystem{sdk_path}/usr/include/c++/v1")
+                args.append(f"-isystem{sdk_path}/usr/include")
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    return tuple(args)
+
+
 def _build_translation_unit(config: WrapperConfig, header: Path):
     cindex = _require_clang()
     index = cindex.Index.create()
@@ -145,9 +186,32 @@ def _build_translation_unit(config: WrapperConfig, header: Path):
             break
     if not arguments:
         arguments.extend(config.compilation.clang_args)
+        arguments.extend(_default_system_include_args())
         arguments.extend(f"-I{Path(include_dir).resolve()}" for include_dir in config.compilation.include_dirs)
         arguments.extend(f"-D{define}" for define in config.compilation.defines)
-    return index.parse(str(header.resolve()), args=arguments)
+    translation_unit = index.parse(str(header.resolve()), args=arguments)
+    _check_diagnostics(translation_unit, header)
+    return translation_unit
+
+
+def _check_diagnostics(translation_unit, header: Path) -> None:
+    cindex = _require_clang()
+    serious = [
+        diagnostic for diagnostic in translation_unit.diagnostics if diagnostic.severity >= cindex.Diagnostic.Error
+    ]
+    if not serious:
+        return
+    messages = "\n".join(
+        f"  {diagnostic.severity}: {diagnostic.spelling} ({diagnostic.location})" for diagnostic in serious
+    )
+    raise RuntimeError(
+        f"clang reported {len(serious)} error(s)/fatal error(s) parsing '{header}'. This usually means "
+        "the compiler couldn't find standard-library/system headers (missing -isysroot, missing "
+        "compile_commands.json, or a missing include dir) -- when that happens, clang's C++ error "
+        "recovery silently reinterprets unresolved types (e.g. 'const std::string&' becomes 'int'), "
+        "which would otherwise make this tool silently emit wrong bindings instead of failing loudly. "
+        f"Fix the compilation config and rerun. Diagnostics:\n{messages}"
+    )
 
 
 def _cursor_file_path(cursor) -> Path | None:
@@ -196,13 +260,26 @@ def _collect_enum_cursors(translation_units, config: WrapperConfig, allowed_head
     enums: dict[str, object] = {}
     for translation_unit in translation_units:
         for cursor in _iter_children(translation_unit.cursor):
+            # `_iter_children` walks EVERY descendant of the whole translation unit,
+            # including cursors deep inside transitively-included system headers this
+            # generator was never going to use anyway (e.g. an Apple SDK header pulled
+            # in by a plain `#include <cstdint>`). The location check
+            # (`_is_in_allowed_headers`, via `cursor.location.file`) must run before
+            # `cursor.kind` is touched on any of those: some third-party `libclang`
+            # PyPI builds have real gaps in their `CursorKind` id->name table for
+            # certain system-header-only cursor kinds (seen in practice: IDs 420-437,
+            # including `CXCursor_FlagEnum`), and `.kind` raises `ValueError` for any
+            # cursor that happens to hit one of those gaps -- crashing the whole
+            # generator on cursors it was always going to discard. See TODOS.md's
+            # "src/wrappergen/'s own generator crashes on this dev machine" entry for
+            # the full diagnosis.
+            if not _is_in_allowed_headers(cursor, allowed_headers):
+                continue
             if cursor.kind != cindex.CursorKind.ENUM_DECL:
                 continue
             if not cursor.is_definition():
                 continue
             if not _is_top_level_type(cursor):
-                continue
-            if not _is_in_allowed_headers(cursor, allowed_headers):
                 continue
             cpp_name = _qualified_name(cursor)
             if not cpp_name or not _is_in_allowed_namespace(cpp_name, config):
@@ -220,13 +297,15 @@ def _collect_class_cursors(translation_units, config: WrapperConfig, allowed_hea
     classes: dict[str, object] = {}
     for translation_unit in translation_units:
         for cursor in _iter_children(translation_unit.cursor):
+            # Filter by location before touching `.kind` -- see the identical check in
+            # `_collect_enum_cursors` above for why the order matters here.
+            if not _is_in_allowed_headers(cursor, allowed_headers):
+                continue
             if cursor.kind not in {cindex.CursorKind.CLASS_DECL, cindex.CursorKind.STRUCT_DECL}:
                 continue
             if not cursor.is_definition():
                 continue
             if not _is_top_level_type(cursor):
-                continue
-            if not _is_in_allowed_headers(cursor, allowed_headers):
                 continue
             cpp_name = _qualified_name(cursor)
             if not cpp_name or not _is_in_allowed_namespace(cpp_name, config):
@@ -266,10 +345,49 @@ def _handle_kind(cpp_name: str, config: WrapperConfig) -> str:
     return config.class_handle_kinds.get(cpp_name, config.default_class_handle_kind)
 
 
+def _native_size_hint(cpp_name: str, config: WrapperConfig) -> int:
+    return config.class_native_size_hints.get(cpp_name, config.default_class_native_size_hint)
+
+
+def _exact_pointee_class_key(clang_type, class_models_by_cpp: dict[str, ClassModel]) -> str | None:
+    """Resolves a pointer/reference clang `Type` to its pointee's exact, fully-qualified
+    class name via the cursor graph (`Type.get_pointee().get_declaration()`), bypassing
+    `resolve_cpp_type_key`'s bare-leaf-name string matching entirely.
+
+    Needed because that string-based fallback is genuinely ambiguous whenever two
+    selected classes share a leaf name in different namespaces -- exactly the
+    `express::entity` / `ifcopenshell::entity` collision `class_names` already works
+    around for *py_name* assignment (research/06-wrappergen-spike-results.md), but which
+    silently drops any *unqualified* pointer/reference to either one instead (e.g.
+    `ifcopenshell::declaration::as_entity() const -> const entity*`, spelled `entity`
+    from inside the `ifcopenshell` namespace, has 2 leaf-name matches so
+    `resolve_cpp_type_key` returns `None` and `_resolve_return_adapter` drops the whole
+    method) -- a real functional gap in the schema-introspection surface (no way to
+    safely downcast a generic `declaration` handle to `entity`), found while building
+    Phase 1's full primitive-binding config, not spike scope.
+    """
+    if clang_type is None:
+        return None
+    cindex = _require_clang()
+    pointee_type = clang_type.get_pointee()
+    if pointee_type is None or pointee_type.kind == cindex.TypeKind.INVALID:
+        return None
+    declaration_cursor = pointee_type.get_declaration()
+    if declaration_cursor is None or declaration_cursor.kind == cindex.CursorKind.NO_DECL_FOUND:
+        return None
+    qualified_name = _qualified_name(declaration_cursor)
+    if not qualified_name:
+        return None
+    normalized = normalize_cpp_type(qualified_name)
+    return normalized if normalized in class_models_by_cpp else None
+
+
 def _resolve_parameter_adapter(
     cpp_type: str,
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
+    class_models_by_cpp: dict[str, ClassModel] | None = None,
+    clang_type=None,
 ) -> str | None:
     canonical = normalize_cpp_type(cpp_type)
     if canonical in scalar_adapters:
@@ -277,6 +395,20 @@ def _resolve_parameter_adapter(
     enum_key = resolve_cpp_type_key(cpp_type, set(enum_cursors))
     if enum_key is not None:
         return enum_adapter_name(enum_key)
+    # Note: unlike `_resolve_return_adapter`, this used to stop here, meaning any
+    # method/constructor with a class-handle-typed *parameter* (by value, pointer,
+    # or reference) was silently dropped entirely by `_build_parameter_models`
+    # returning None -- not just that one parameter, the whole callable. Handle
+    # adapters are already fully supported on the emission side (`_cpp_argument`,
+    # `_parameter_c_type`, both Python-extension parameter branches already handle
+    # `is_handle_adapter`) -- this was purely a discovery-side gap.
+    if class_models_by_cpp is not None:
+        exact = _exact_pointee_class_key(clang_type, class_models_by_cpp)
+        if exact is not None:
+            return handle_adapter_name(exact)
+        pointee = resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
+        if pointee is not None:
+            return handle_adapter_name(pointee)
     return None
 
 
@@ -293,6 +425,7 @@ def _resolve_return_adapter(
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
     class_models_by_cpp: dict[str, ClassModel],
+    clang_type=None,
 ) -> str | None:
     canonical = normalize_cpp_type(cpp_type)
     if canonical in scalar_adapters:
@@ -301,11 +434,24 @@ def _resolve_return_adapter(
     if enum_key is not None:
         return enum_adapter_name(enum_key)
     vector_inner = _vector_inner_type(cpp_type)
+    if vector_inner is not None and vector_inner == normalize_cpp_type("std::string"):
+        # `std::vector<std::string>` -- e.g. `Header_section_schema::file_description
+        # ::description()`/`file_name::author()`/`file_name::organization()`/
+        # `file_schema::schema_identifiers()` (Phase EX-3 chunk 1). Checked before the
+        # class-handle sequence resolution below: `std::string` is never itself a
+        # registered `ClassModel`, so `resolve_cpp_type_key(vector_inner,
+        # class_models_by_cpp)` would just fail this method's discovery entirely (as it
+        # silently did for these exact methods before this chunk) rather than fall
+        # through to something else -- see `conventions.py`'s `is_sequence_of_string_adapter`
+        # doc comment for why this is a distinct, simpler adapter than `sequence:`/
+        # `sequence_of_variant:`.
+        return "sequence_of_string"
     if vector_inner:
         sequence_key = resolve_cpp_type_key(vector_inner, set(class_models_by_cpp))
         if sequence_key is not None:
             return sequence_adapter_name(sequence_key)
-    pointee = resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
+    exact = _exact_pointee_class_key(clang_type, class_models_by_cpp)
+    pointee = exact if exact is not None else resolve_cpp_type_key(strip_pointer(cpp_type), set(class_models_by_cpp))
     if pointee is not None:
         target = class_models_by_cpp[pointee]
         if canonical.endswith("*") and target.handle_kind == "shared_ptr":
@@ -344,11 +490,14 @@ def _build_parameter_models(
     config: WrapperConfig,
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
+    class_models_by_cpp: dict[str, ClassModel] | None = None,
 ) -> list[ParameterModel] | None:
     parameter_specs = _parse_parameter_specs(cursor)
     parameter_models: list[ParameterModel] = []
     for index, parameter in enumerate(cursor.get_arguments()):
-        adapter = _resolve_parameter_adapter(parameter.type.spelling, scalar_adapters, enum_cursors)
+        adapter = _resolve_parameter_adapter(
+            parameter.type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp, clang_type=parameter.type
+        )
         if adapter is None:
             return None
         spec = parameter_specs[index] if index < len(parameter_specs) else _ParameterSpec(False, None)
@@ -407,6 +556,25 @@ def _finalize_overload_names(callables: list[CallableModel]) -> None:
                     else f"{callable_model.py_name}_overload_{index}"
                 )
                 callable_model.c_name = normalize_identifier(callable_model.py_name)
+    # The parameter-name-based suffix above assumes distinct overloads have distinct
+    # parameter *names* -- not guaranteed when clang can't recover a name for an
+    # unnamed parameter (falls back to the same positional "arg0", "arg1", ... for every
+    # such overload, see `_parameter_python_name`). Found at full-header-set scale by
+    # this spike (`parameter_type::is(const std::string&)` vs.
+    # `parameter_type::is(const named_type*)`, both with an unnamed parameter,
+    # research/06-wrappergen-spike-results.md): re-check for residual collisions after
+    # the pass above and force them apart with a numeric suffix rather than silently
+    # emitting two same-named methods.
+    residual_groups: dict[str, list[CallableModel]] = defaultdict(list)
+    for callable_model in callables:
+        residual_groups[callable_model.py_name].append(callable_model)
+    for group in residual_groups.values():
+        if len(group) == 1:
+            continue
+        for index, callable_model in enumerate(group, start=1):
+            callable_model.py_name = f"{callable_model.py_name}_overload_{index}"
+            if callable_model.kind != "constructor":
+                callable_model.c_name = normalize_identifier(callable_model.py_name)
 
 
 def _deduplicate_callables(callables: list[CallableModel]) -> list[CallableModel]:
@@ -432,8 +600,11 @@ def _discover_constructors(
     config: WrapperConfig,
     scalar_adapters: dict[str, str],
     enum_cursors: dict[str, object],
+    class_models_by_cpp: dict[str, ClassModel],
 ) -> list[CallableModel]:
     cindex = _require_clang()
+    if _matches_ignore(owner.cpp_name, config.ignore.no_constructors):
+        return []
     constructors: list[CallableModel] = []
     for child in class_cursor.get_children():
         if child.kind != cindex.CursorKind.CONSTRUCTOR:
@@ -442,7 +613,7 @@ def _discover_constructors(
             continue
         if _is_deleted(child) or _is_copy_or_move_constructor(child, owner.cpp_name):
             continue
-        parameters = _build_parameter_models(child, config, scalar_adapters, enum_cursors)
+        parameters = _build_parameter_models(child, config, scalar_adapters, enum_cursors, class_models_by_cpp)
         if parameters is None:
             continue
         callable_model = CallableModel(
@@ -484,11 +655,11 @@ def _discover_methods(
         if _matches_ignore(qualified_name, config.ignore.methods):
             continue
         return_adapter = _resolve_return_adapter(
-            child.result_type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp
+            child.result_type.spelling, scalar_adapters, enum_cursors, class_models_by_cpp, clang_type=child.result_type
         )
         if return_adapter is None:
             continue
-        parameters = _build_parameter_models(child, config, scalar_adapters, enum_cursors)
+        parameters = _build_parameter_models(child, config, scalar_adapters, enum_cursors, class_models_by_cpp)
         if parameters is None:
             continue
         methods.append(
@@ -542,11 +713,14 @@ def build_module_model(config: WrapperConfig) -> ModuleModel:
             handle_kind=_handle_kind(cpp_name, config),
             owner_cpp_name=owner_cpp_name,
             owner_py_name=owner_py_name,
+            native_size_hint=_native_size_hint(cpp_name, config),
         )
 
     for normalized_cpp_name, cursor in class_cursors.items():
         owner = class_models_by_cpp[normalized_cpp_name]
-        owner.callables.extend(_discover_constructors(cursor, owner, config, scalar_adapters, enum_cursors))
+        owner.callables.extend(
+            _discover_constructors(cursor, owner, config, scalar_adapters, enum_cursors, class_models_by_cpp)
+        )
         owner.callables.extend(
             _discover_methods(cursor, owner, config, scalar_adapters, enum_cursors, class_models_by_cpp)
         )
@@ -570,11 +744,42 @@ def build_module_model(config: WrapperConfig) -> ModuleModel:
             for parameter in callable_model.parameters:
                 if is_enum_adapter(parameter.adapter):
                     used_enum_names.add(parameter.adapter.split(":", 1)[1])
+                # Same gap as the return-adapter checks above, just on the parameter side:
+                # once `_resolve_parameter_adapter` could resolve handle-typed *parameters*
+                # (not just returns), a method could reference a class purely through a
+                # parameter -- e.g. `set_attribute_value(index, const express::base&)` --
+                # without that class ever being *returned* by anything. Before this fix,
+                # such a class could be discoverable and used by a resolved parameter, yet
+                # never make it into `selected_classes`, so `emit.py` would KeyError trying
+                # to resolve it (see research/06-wrappergen-spike-results.md).
+                if parameter.adapter.startswith("handle:"):
+                    used_class_names.add(parameter.adapter.split(":", 1)[1])
+                if parameter.adapter.startswith("sequence:"):
+                    used_class_names.add(parameter.adapter.split(":", 1)[1])
 
     selected_classes: list[ClassModel] = []
     for normalized_cpp_name, class_model in class_models_by_cpp.items():
         if normalized_cpp_name in used_class_names:
             selected_classes.append(class_model)
+
+    # `_python_class_name` defaults an unconfigured class's name to its bare C++ leaf name
+    # (`cpp_leaf_name`), with no collision detection -- two classes in different namespaces
+    # that happen to share a leaf name (e.g. `express::entity` and `ifcopenshell::entity`,
+    # found by this spike at full-header-set scale, see
+    # research/06-wrappergen-spike-results.md) would otherwise silently emit two same-named
+    # classes into the Python/N-API/TS output. Fail loudly instead -- `config.class_names`
+    # is the fix, same as `class_owner_types`/`class_handle_kinds` already are for their own
+    # per-class overrides.
+    py_names_by_class: dict[str, list[str]] = defaultdict(list)
+    for class_model in selected_classes:
+        py_names_by_class[class_model.py_name].append(class_model.cpp_name)
+    colliding = {py_name: cpp_names for py_name, cpp_names in py_names_by_class.items() if len(cpp_names) > 1}
+    if colliding:
+        details = "; ".join(f"'{py_name}' <- {cpp_names}" for py_name, cpp_names in sorted(colliding.items()))
+        raise RuntimeError(
+            f"Multiple classes would be emitted under the same Python/N-API/TS name: {details}. "
+            "Disambiguate with `WrapperConfig.class_names`."
+        )
 
     enum_models_by_cpp: dict[str, EnumModel] = {}
     for normalized_cpp_name in sorted(used_enum_names):

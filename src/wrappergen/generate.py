@@ -26,8 +26,23 @@ def _existing_directories(paths: list[Path]) -> list[str]:
     return results
 
 
+# These headers reference `rocksdb::` types (`rocksdb::DB*`, `rocksdb::Iterator`, ...) as ordinary,
+# unguarded member/field types -- only the *method bodies* that use them are wrapped in
+# `#ifdef IFOPSH_WITH_ROCKSDB`, the type usage in member declarations is not. That means they fail to
+# parse standalone unless real RocksDB headers are on the include path, independent of whether
+# IFOPSH_WITH_ROCKSDB is defined (a pre-existing ifcparse issue, out of scope here -- see
+# `06-wrappergen-spike-results.md`). Excluded from discovery so a default `generate.py` run doesn't
+# hard-fail on a class discovery.py has no reason to need in the first place (`file`/`entity_instance`
+# don't touch the RocksDB storage backend at all).
+_HEADERS_REQUIRING_ROCKSDB = {"rocksdb_map_adapter.h", "rocksdb_set_view.h"}
+
+
 def _discover_headers(src_ifcparse: Path) -> list[str]:
-    return [str(path.resolve()) for path in sorted(src_ifcparse.glob("*.h")) if path.parent.name != "schemas"]
+    return [
+        str(path.resolve())
+        for path in sorted(src_ifcparse.glob("*.h"))
+        if path.parent.name != "schemas" and path.name not in _HEADERS_REQUIRING_ROCKSDB
+    ]
 
 
 def _discover_boost_include_dirs() -> list[Path]:

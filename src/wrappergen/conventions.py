@@ -91,6 +91,18 @@ def enum_adapter_target(adapter: str) -> str:
     return adapter.split(":", 1)[1]
 
 
+def variant_adapter_name(cpp_name: str) -> str:
+    return f"variant:{normalize_cpp_type(cpp_name)}"
+
+
+def is_variant_adapter(adapter: str) -> bool:
+    return adapter.startswith("variant:")
+
+
+def variant_adapter_target(adapter: str) -> str:
+    return adapter.split(":", 1)[1]
+
+
 def sequence_adapter_name(cpp_name: str) -> str:
     return f"sequence:{normalize_cpp_type(cpp_name)}"
 
@@ -101,6 +113,50 @@ def is_sequence_adapter(adapter: str) -> bool:
 
 def sequence_adapter_target(adapter: str) -> str:
     return adapter.split(":", 1)[1]
+
+
+def sequence_of_variant_adapter_name(cpp_type: str) -> str:
+    """A `std::vector<...>`-of-variant return (e.g.
+    `get_all_attribute_values() -> std::vector<attribute_value_variant>`,
+    Phase 1's disclosed, narrower stand-in for Python's fully-recursive
+    `get_info_cpp` -- research/06-wrappergen-spike-results.md SS4). Distinct from
+    the plain `sequence:` adapter (which targets an ordinary `ClassModel`,
+    walked via the per-class list `_size`/`_get`/`_free` triplet): a
+    sequence-of-variant is returned eagerly, by value, as a
+    `{variant}_list_t{count, items}` struct built directly from the
+    variant-conversion helpers `emit_c_api_implementation` already emits for
+    the single-value case -- see `_variant_list_c_type`.
+    """
+    return f"sequence_of_variant:{normalize_cpp_type(cpp_type)}"
+
+
+def is_sequence_of_variant_adapter(adapter: str) -> bool:
+    return adapter.startswith("sequence_of_variant:")
+
+
+def sequence_of_variant_adapter_target(adapter: str) -> str:
+    return adapter.split(":", 1)[1]
+
+
+# A `std::vector<std::string>` return -- e.g. `Header_section_schema::file_description
+# ::description()`/`file_name::author()`/`file_name::organization()`/
+# `file_schema::schema_identifiers()` (Phase EX-3 chunk 1's spf_header sub-entity
+# accessors, planning/ifcopenshell-ts/70-express-rules-plan.md). Distinct from both
+# `sequence:` (a vector of a *class handle*, walked via the per-class list
+# `_size`/`_get`/`_free` triplet) and `sequence_of_variant:` (a vector of the
+# discriminated-union `attribute_value_variant`, whose ENTITY_INSTANCE case needs an
+# owner-propagation chain back to `ifcopenshell::file` that a caller without one -- e.g.
+# `ifcopenshell::spf_header`, see `napi_binding.py`'s `_inject_header_primitives` --
+# can't satisfy): this adapter's element type is always a plain, ownerless `std::string`,
+# so it carries no handle/owner machinery at all -- a fixed C struct
+# (`{prefix}_string_list_t`, `emit.py`'s `_string_list_c_type`), not a per-target-type
+# parameterized name like `sequence:`/`sequence_of_variant:` need, hence no
+# corresponding `..._target()` accessor here. Flagged as a disclosed, deliberate scope
+# cut in `napi_binding.py`'s `_inject_entity_instance_primitives` doc comment (as
+# "a third new adapter kind ('sequence of scalar')... left for a follow-up") before this
+# chunk added it.
+def is_sequence_of_string_adapter(adapter: str) -> bool:
+    return adapter == "sequence_of_string"
 
 
 def cpp_type_lists_match(actual_types: list[str], expected_types: list[str]) -> bool:
