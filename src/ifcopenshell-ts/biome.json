@@ -1,0 +1,25 @@
+{
+	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"files": {
+		"ignore": [
+			"dist",
+			"node_modules",
+			"native/build",
+			"src/native/ifcopenshell_native.ts",
+			"src/generated",
+			"data",
+			"test/fixtures/reference/**/*.golden.json",
+			"test/fixtures/mutations/**/*.golden.json"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"lineWidth": 120
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true
+		}
+	}
+}
