@@ -2101,20 +2101,73 @@ function pushAll<T>(target: T[], items: readonly T[]): void {
 }
 
 /**
+ * True iff every real inverse of `instance` (`file.getInverse`) has an id in
+ * `allowedIds` -- real upstream's `ifc_file._is_referenced_only_in(instance,
+ * allowed_ids)`, introduced by the real upstream correctness fix to `remove_deep2`
+ * (`removeDeep2`'s own header comment, below, tells the full story). Real upstream
+ * backs this with a native C++ helper of the same name that answers this without
+ * materializing any inverse list; this port has no such primitive (confirmed: grepped
+ * `src/ifcparse/*.h`/`*.cpp` and this port's own `src/wrappergen/` -- nothing by this
+ * name, nor by `_ids_referenced_only_within` below). That's not a primitive-layer gap
+ * worth flagging, though: every check `removeDeep2` needs is fully expressible with
+ * this port's own already-available `file.getInverse`/`getTotalInverses` -- just one
+ * JS-side inverse-list materialization per call instead of a short-circuiting native
+ * loop, not a missing capability.
+ */
+function isReferencedOnlyIn(file: IfcFile, instance: EntityInstance, allowedIds: ReadonlySet<number>): boolean {
+	if (file.getTotalInverses(instance) === 0) return true;
+	for (const inverse of file.getInverse(instance) as Set<EntityInstance>) {
+		const inverseId = inverse.id();
+		if (!inverseId || !allowedIds.has(inverseId)) return false;
+	}
+	return true;
+}
+
+/**
+ * The subset of `instances`' own ids for which `isReferencedOnlyIn(..., allowedIds)`
+ * holds -- real upstream's `ifc_file._ids_referenced_only_within(ids)`. Dedupes by id:
+ * the same underlying entity can appear more than once across `instances` (`removeDeep2`
+ * calls this with `subgraph`, which is `traverse()`'s result concatenated with
+ * `alsoConsider`, and the two can overlap).
+ */
+function idsReferencedOnlyWithin(
+	file: IfcFile,
+	instances: Iterable<EntityInstance>,
+	allowedIds: ReadonlySet<number>,
+): Set<number> {
+	const seen = new Set<number>();
+	const result = new Set<number>();
+	for (const instance of instances) {
+		const id = instance.id();
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		if (isReferencedOnlyIn(file, instance, allowedIds)) result.add(id);
+	}
+	return result;
+}
+
+/**
  * Python: `remove_deep2(ifc_file, element, also_consider=[], do_not_delete=set()) ->
  * None`.
  *
  * Recursively purges a subgraph safely, starting at an element.
  *
  * This should always be used instead of `removeDeep`. See #1812. The start element
- * must have no inverses. The subgraph to be purged is calculated using all forward
- * relationships determined by `traverse()`.
+ * must have no inverses (or only inverses inside `alsoConsider`). The subgraph to be
+ * purged is calculated using all forward relationships determined by `traverse()`.
  *
- * The deletion process starts at `element` and traverses forward through the subgraph.
- * Each subelement is checked for any inverses outside the subgraph. If there are none
- * outside, it may be safely purged. If there are inverses that aren't part of this
- * subgraph, that subelement, and all of its subelements (i.e. that entire branch), will
- * not be deleted, as it is used elsewhere.
+ * The deletion process starts at `element` and traverses forward through the subgraph,
+ * building an initial set of deletion candidates: a subelement is a candidate if every
+ * real inverse of it lands somewhere inside the subgraph (`traverse(element)` plus
+ * `alsoConsider`). But the subgraph can itself contain members that are going to be
+ * *kept* -- something outside the subgraph still references them (e.g. an
+ * `IfcRepresentationMap` other products still map), or they're in `doNotDelete` -- and a
+ * candidate referenced only by one of those kept members would otherwise be deleted out
+ * from under it, corrupting the survivor. So after the initial pass, the candidates are
+ * re-checked, repeatedly: a candidate may only be deleted if every real referrer of it is
+ * either also a candidate that's still being deleted, or in `alsoConsider`. Keeping one
+ * candidate can in turn force keeping candidates *it* referenced, so this repeats until
+ * a full pass keeps nothing new.
  *
  * For simple subgraphs, `traverse()` is sufficient to fully represent all related
  * subelements. When it isn't, `alsoConsider` may be used -- typically inverses further
@@ -2140,30 +2193,41 @@ export function removeDeep2(
 ): void {
 	const file = ifcFile ?? (element.file as IfcFile);
 
-	const totalInverses = file.getTotalInverses(element);
-	if (totalInverses > 0) {
-		const areInversesContained = (): boolean => {
-			let alsoConsideredInverses = 0;
-			for (const consideredElement of alsoConsider) {
-				const traverse = file.traverse(consideredElement, 1);
-				if (traverse.some((e) => e.equals(element))) {
-					alsoConsideredInverses += 1;
-					if (totalInverses === alsoConsideredInverses) return true;
-				}
-			}
-			return false;
-		};
-		if (!areInversesContained()) return;
+	const alsoConsiderIds = new Set<number>();
+	for (const e of alsoConsider) {
+		const id = e.id();
+		if (id) alsoConsiderIds.add(id);
+	}
+	const doNotDeleteIds = new Set<number>();
+	for (const e of doNotDelete) {
+		const id = e.id();
+		if (id) doNotDeleteIds.add(id);
 	}
 
-	const doNotDeleteSet = new EntityInstanceSet();
-	doNotDeleteSet.update(doNotDelete);
+	// The starting element must either have no inverses, or only "safe" inverses in
+	// `alsoConsider` -- the same direct "every real inverse has an id in this allowed
+	// set" check the rest of this function uses, replacing the old, more roundabout
+	// `alsoConsider`-traversal-based check (which counted how many `alsoConsider`
+	// elements' 1-level traversal reached `element`, and compared that count against
+	// `getTotalInverses(element)` -- a proxy for "every inverse is in `alsoConsider`"
+	// that breaks down whenever an `alsoConsider` element isn't itself a *direct*
+	// inverse of `element`, or two `alsoConsider` elements both traverse to it).
+	if (!isReferencedOnlyIn(file, element, alsoConsiderIds)) return;
 
 	const toDelete = new EntityInstanceSet();
 	const subgraph: EntityInstance[] = file.traverse(element, null, true);
 	pushAll(subgraph, alsoConsider);
-	const subgraphSet = new EntityInstanceSet();
-	subgraphSet.update(subgraph);
+	const subgraphIds = new Set<number>();
+	for (const e of subgraph) {
+		const id = e.id();
+		if (id) subgraphIds.add(id);
+	}
+	// Which subgraph members have every real inverse landing somewhere inside the
+	// subgraph -- computed once, up front, exactly like real upstream's own
+	// `_ids_referenced_only_within(subgraph_ids)` call. This says nothing yet about
+	// whether a given member's referrers themselves survive; that's what the
+	// iterative re-check below is for.
+	const fullyContainedSubgraphIds = idsReferencedOnlyWithin(file, subgraph, subgraphIds);
 
 	const subelementQueue: EntityInstance[] = [element];
 	const processedIds = new Set<number>();
@@ -2174,29 +2238,62 @@ export function removeDeep2(
 		if (
 			subelementId &&
 			!processedIds.has(subelementId) &&
-			!doNotDeleteSet.has(subelement) &&
-			(file.getTotalInverses(subelement) < 2 ||
-				[...(file.getInverse(subelement) as Set<EntityInstance>)].every((inv) => subgraphSet.has(inv)))
+			!doNotDeleteIds.has(subelementId) &&
+			fullyContainedSubgraphIds.has(subelementId)
 		) {
 			toDelete.add(subelement);
 			pushAll(subelementQueue, file.traverse(subelement, 1).slice(1));
-			// See #3052 (Python's own comment, ported verbatim): IfcOpenShell is
-			// extremely slow removing an element that has an inverse referencing it
-			// through a big list (e.g. IfcPolygonalFaceSet.Faces with tens of
-			// thousands of IfcIndexedPolygonalFace). Since `subelement` is already
-			// confirmed for deletion, clear any large (>10, an arbitrary threshold)
-			// list attribute on it now to sidestep that cost -- purely a performance
-			// workaround, not an observable behavior change, since `subelement` is
-			// being deleted regardless.
-			const count = subelement.attributeCount();
-			for (let i = 0; i < count; i++) {
-				const attribute = subelement.getByIndex(i);
-				if (Array.isArray(attribute) && attribute.length > 10) {
-					subelement.setByIndex(i, []);
-				}
-			}
 		}
 		processedIds.add(subelementId);
+	}
+
+	// Nothing may be deleted while something that survives still references it: re-check
+	// the candidates against what actually goes, and repeat until the check stops
+	// finding anything.
+	//
+	// Who may reference a candidate without stopping its deletion: the candidates
+	// themselves (they go too) and `alsoConsider` (referrers we were told to tolerate).
+	const allowedReferrerIds = new Set<number>(alsoConsiderIds);
+	for (const e of toDelete.toSet()) {
+		const id = e.id();
+		if (id) allowedReferrerIds.add(id);
+	}
+
+	// Repeat because keeping one candidate can force keeping its own children, which
+	// then need re-checking too.
+	for (;;) {
+		const candidates = [...toDelete.toSet()];
+		if (candidates.length === 0) break;
+		// Anything not fully contained in `allowedReferrerIds` has a referrer that
+		// survives, so it must survive too.
+		const newlyKept = candidates.filter((e) => !isReferencedOnlyIn(file, e, allowedReferrerIds));
+		// Nothing dropped out this round: the remaining candidates are safe to delete.
+		if (newlyKept.length === 0) break;
+		for (const e of newlyKept) {
+			// It stays, so it is no longer scheduled for deletion...
+			toDelete.delete(e);
+			// ...and no longer counts as an allowed referrer: its own children get
+			// re-judged next round.
+			const id = e.id();
+			if (id) allowedReferrerIds.delete(id);
+		}
+	}
+
+	// See #3052 (Python's own comment, ported verbatim): IfcOpenShell is extremely slow
+	// removing an element that has an inverse referencing it through a big list (e.g.
+	// IfcPolygonalFaceSet.Faces with tens of thousands of IfcIndexedPolygonalFace).
+	// Elements that are going to be deleted have any large (>10, an arbitrary threshold)
+	// list attribute cleared first to sidestep that cost. Only elements that survived
+	// the re-check above (i.e. are certain to go) are cleared here -- a kept element
+	// must stay intact.
+	for (const subelement of toDelete.toSet()) {
+		const count = subelement.attributeCount();
+		for (let i = 0; i < count; i++) {
+			const attribute = subelement.getByIndex(i);
+			if (Array.isArray(attribute) && attribute.length > 10) {
+				subelement.setByIndex(i, []);
+			}
+		}
 	}
 
 	const existingToDelete = file.toDelete;
