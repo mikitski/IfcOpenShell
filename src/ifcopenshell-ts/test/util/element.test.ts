@@ -2257,6 +2257,174 @@ describe("util.element removeDeep2 (IFC4)", () => {
 		expect(() => file.byId(elementId)).toThrow();
 		expect(() => file.byId(ownerId)).toThrow();
 	});
+
+	// Ported from real upstream's `b8a7b33f2a90153abc1bf0bb9bc4530842d6b4f7`
+	// (`test_keeping_what_a_kept_subgraph_member_still_references`), the same-day
+	// commit that fixed a real correctness bug in `remove_deep2`: the old algorithm
+	// judged each deletion candidate against the *whole* forward subgraph computed
+	// once upfront, so a candidate referenced only by another subgraph member was
+	// deleted even when that member itself survives (kept alive by something outside
+	// the subgraph, or by `alsoConsider`/`doNotDelete`) -- corrupting the survivor.
+	// This fixture would fail under the pre-fix algorithm: `sharedPoint` is reachable
+	// both from wall 1's own (to-be-deleted) polyline and from a representation map's
+	// polyline that wall 2 still maps, so the old code deleted it out from under the
+	// map, corrupting wall 2's representation.
+	test("keeps a point shared by a to-be-deleted polyline and a representation map still used elsewhere", () => {
+		const file = createTestFile("IFC4");
+		const ctx = file.createEntity("IfcGeometricRepresentationContext");
+		ctx.set("ContextType", "Model");
+		ctx.set("CoordinateSpaceDimension", 3);
+		ctx.set("Precision", 1e-5);
+
+		const sharedPoint = file.createEntity("IfcCartesianPoint", [1, 1, 0]);
+		const mapPoint = file.createEntity("IfcCartesianPoint", [2, 2, 0]);
+		const ownPoint = file.createEntity("IfcCartesianPoint", [3, 3, 0]);
+		const mapPolyline = file.createEntity("IfcPolyline", [sharedPoint, mapPoint]);
+
+		const mapShapeRepresentation = file.createEntity("IfcShapeRepresentation");
+		mapShapeRepresentation.set("ContextOfItems", ctx);
+		mapShapeRepresentation.set("RepresentationIdentifier", "Body");
+		mapShapeRepresentation.set("RepresentationType", "Curve3D");
+		mapShapeRepresentation.set("Items", [mapPolyline]);
+
+		const mapOrigin = file.createEntity("IfcAxis2Placement3D");
+		mapOrigin.set("Location", file.createEntity("IfcCartesianPoint", [0, 0, 0]));
+
+		const representationMap = file.createEntity("IfcRepresentationMap");
+		representationMap.set("MappingOrigin", mapOrigin);
+		representationMap.set("MappedRepresentation", mapShapeRepresentation);
+
+		function wall(name: string, ownItems: EntityInstance[]): EntityInstance {
+			const transformOperator = file.createEntity("IfcCartesianTransformationOperator3D");
+			transformOperator.set("LocalOrigin", file.createEntity("IfcCartesianPoint", [0, 0, 0]));
+			transformOperator.set("Scale", 1.0);
+
+			const mappedItem = file.createEntity("IfcMappedItem");
+			mappedItem.set("MappingSource", representationMap);
+			mappedItem.set("MappingTarget", transformOperator);
+
+			const representation = file.createEntity("IfcShapeRepresentation");
+			representation.set("ContextOfItems", ctx);
+			representation.set("RepresentationIdentifier", "Body");
+			representation.set("RepresentationType", "Curve3D");
+			representation.set("Items", [...ownItems, mappedItem]);
+
+			const productShape = file.createEntity("IfcProductDefinitionShape");
+			productShape.set("Representations", [representation]);
+
+			const w = file.createEntity("IfcWall");
+			w.set("GlobalId", guid.new());
+			w.set("Name", name);
+			w.set("Representation", productShape);
+			return w;
+		}
+
+		const ownPolyline = file.createEntity("IfcPolyline", [sharedPoint, ownPoint]);
+		const wall1 = wall("wall 1", [ownPolyline]);
+		const wall2 = wall("wall 2", []);
+
+		const wall1Representation = wall1.get("Representation") as EntityInstance;
+		const ownPolylineId = ownPolyline.id();
+		const ownPointId = ownPoint.id();
+
+		subject.removeDeep2(file, wall1Representation, [wall1]);
+
+		expect(wall1.get("Representation")).toBeFalsy();
+		expect(() => file.byId(ownPolylineId)).toThrow();
+		expect(() => file.byId(ownPointId)).toThrow();
+
+		// The representation map (and everything it needs) survives, intact, for wall 2.
+		expect(() => file.byId(representationMap.id())).not.toThrow();
+		const survivingPoints = mapPolyline.get("Points") as EntityInstance[];
+		expect(survivingPoints.map((p) => p.id())).toEqual([sharedPoint.id(), mapPoint.id()]);
+
+		const wall2Representation = wall2.get("Representation") as EntityInstance;
+		const wall2ShapeRepresentation = (wall2Representation.get("Representations") as EntityInstance[])[0];
+		const wall2MappedItem = (wall2ShapeRepresentation.get("Items") as EntityInstance[])[0];
+		expect((wall2MappedItem.get("MappingSource") as EntityInstance).id()).toBe(representationMap.id());
+	});
+
+	// Ported from real upstream's `b8a7b33f2a90153abc1bf0bb9bc4530842d6b4f7`
+	// (`test_keeping_the_chain_behind_a_kept_subgraph_member`): keeping a subgraph
+	// member alive must also keep what *it* forward-references, transitively. Here the
+	// representation map's `MappingOrigin` placement is also wall 1's own solid's
+	// `Position` -- deleting wall 1's own solid must not take the placement (or the
+	// placement's own `Location` point) down with it, since the map still needs both.
+	// This fixture would fail under the pre-fix algorithm for the same reason as
+	// above: the placement's only two referrers (the solid, and the map) both happen
+	// to be forward-reachable from `element` (the map is reachable via wall 1's own
+	// mapped item), so the old whole-subgraph check saw the placement as "fully
+	// contained" and deleted it, even though the map itself was never going to be
+	// deleted (it has an outside referrer: wall 2's own mapped item).
+	test("keeps the placement (and its own location point) a kept representation map still needs", () => {
+		const file = createTestFile("IFC4");
+		const ctx = file.createEntity("IfcGeometricRepresentationContext");
+		ctx.set("ContextType", "Model");
+		ctx.set("CoordinateSpaceDimension", 3);
+		ctx.set("Precision", 1e-5);
+
+		const location = file.createEntity("IfcCartesianPoint", [0, 0, 0]);
+		const placement = file.createEntity("IfcAxis2Placement3D");
+		placement.set("Location", location);
+
+		const mapShapeRepresentation = file.createEntity("IfcShapeRepresentation");
+		mapShapeRepresentation.set("ContextOfItems", ctx);
+		mapShapeRepresentation.set("RepresentationIdentifier", "Body");
+		mapShapeRepresentation.set("RepresentationType", "Curve3D");
+		mapShapeRepresentation.set("Items", []);
+
+		const representationMap = file.createEntity("IfcRepresentationMap");
+		representationMap.set("MappingOrigin", placement);
+		representationMap.set("MappedRepresentation", mapShapeRepresentation);
+
+		function wall(name: string, ownItems: EntityInstance[]): EntityInstance {
+			const transformOperator = file.createEntity("IfcCartesianTransformationOperator3D");
+			transformOperator.set("LocalOrigin", file.createEntity("IfcCartesianPoint", [0, 0, 0]));
+			transformOperator.set("Scale", 1.0);
+
+			const mappedItem = file.createEntity("IfcMappedItem");
+			mappedItem.set("MappingSource", representationMap);
+			mappedItem.set("MappingTarget", transformOperator);
+
+			const representation = file.createEntity("IfcShapeRepresentation");
+			representation.set("ContextOfItems", ctx);
+			representation.set("RepresentationIdentifier", "Body");
+			representation.set("RepresentationType", "Curve3D");
+			representation.set("Items", [...ownItems, mappedItem]);
+
+			const productShape = file.createEntity("IfcProductDefinitionShape");
+			productShape.set("Representations", [representation]);
+
+			const w = file.createEntity("IfcWall");
+			w.set("GlobalId", guid.new());
+			w.set("Name", name);
+			w.set("Representation", productShape);
+			return w;
+		}
+
+		const profile = file.createEntity("IfcRectangleProfileDef");
+		profile.set("ProfileType", "AREA");
+		profile.set("XDim", 1.0);
+		profile.set("YDim", 1.0);
+
+		const solid = file.createEntity("IfcExtrudedAreaSolid");
+		solid.set("SweptArea", profile);
+		solid.set("Position", placement);
+		solid.set("ExtrudedDirection", file.createEntity("IfcDirection", [0, 0, 1]));
+		solid.set("Depth", 1.0);
+
+		const wall1 = wall("wall 1", [solid]);
+		wall("wall 2", []);
+
+		const wall1Representation = wall1.get("Representation") as EntityInstance;
+		const solidId = solid.id();
+
+		subject.removeDeep2(file, wall1Representation, [wall1]);
+
+		expect(() => file.byId(solidId)).toThrow();
+		expect((representationMap.get("MappingOrigin") as EntityInstance).id()).toBe(placement.id());
+		expect((placement.get("Location") as EntityInstance).id()).toBe(location.id());
+	});
 });
 
 // Python: `TestBatchRemoveDeep2IFC4`.

@@ -8,6 +8,51 @@ enough context that someone picking it up later understands the motivation and s
 Surfaced by `/plan-eng-review` on `planning/ifcopenshell-ts/`, 2026-09-04, plus operational findings
 from Phase 0 implementation.
 
+### Upstream sync (separate, later finding, not part of the 4-chunk plan below): `util/element.ts`'s `removeDeep2` correctness fix -- LANDED
+
+**What:** Real upstream (`IfcOpenShell/IfcOpenShell`, not this fork's own prior upstream-sync
+investigation/chunks below -- found independently, 2026-09-28, well after those 4 chunks were
+scoped and landed) fixed a real correctness bug in `ifcopenshell.util.element.remove_deep2` over the
+weekend of 2026-09-27/28: `b8a7b33f2a90153abc1bf0bb9bc4530842d6b4f7` (main fix), plus
+`eaab54615a3fc137815ee69351e8be32fc729f3b` (a same-day rename of a helper `remove_deep2` depends on,
+landed just before the fix, for full context).
+
+**The real bug:** `remove_deep2` walks forward from a starting element, deciding which subgraph
+members are safe to delete. The old logic judged each candidate against the *whole* subgraph
+(computed once, upfront) -- a candidate was deletable if every real inverse/referrer of it was
+somewhere in that subgraph, whether or not that referrer itself ends up kept or deleted. Bug: if
+candidate A is referenced only by B, and B is itself a subgraph member that turns out to survive
+(because B has its own external reference, or B is in `also_consider`/`do_not_delete`), the old code
+still deleted A -- corrupting B, which still pointed at A. Real upstream's own new test
+(`test_keeping_what_a_kept_subgraph_member_still_references`): a point shared between a product's
+own polyline (deleted) and a polyline inside an `IfcRepresentationMap` other products still use
+(survives) got deleted right out from under the surviving map, corrupting every other product that
+maps it. The fix re-checks candidates iteratively after the initial pass: a candidate may only be
+deleted if every real referrer of it is either also a candidate still being deleted, or in
+`also_consider` -- repeated until nothing changes (keeping one candidate can force keeping its own
+children, which then need re-checking too). The fix also simplifies the function's own early-exit
+guard (is `element` itself safe to start from) to use this same direct check.
+
+**This port:** confirmed the same bug was present in `src/ifcopenshell-ts/src/util/element.ts`'s
+`removeDeep2` (a static `subgraphSet`/`fully_contained_subgraph_ids`-style check computed once
+upfront, never revisited) and fixed it with the same iterative re-check algorithm, plus the same
+early-exit-guard simplification (replacing a convoluted `alsoConsider`-traversal-based
+`areInversesContained()` helper with the same direct "every real inverse has an id in this allowed
+set" check used everywhere else in the function). Real upstream backs its fix with 2 new native C++
+helpers (`_is_referenced_only_in`, `_ids_referenced_only_within`) that answer "does every referrer of
+X have an id in this set" without materializing inverse lists in the host language; **this port does
+not have, and did not add, equivalent native primitives** (confirmed: grepped `src/ifcparse/*.h`/
+`*.cpp` and this port's own `src/wrappergen/` -- nothing by these names). This is *not* a
+primitive-layer gap, though: the fix was fully achievable in plain TypeScript using this port's own
+already-available `file.getInverse`/`file.getTotalInverses` (which already materialize the real,
+full inverse set -- this port's own established pattern for this kind of check elsewhere in the same
+function), just less C++-optimized than upstream's new native helpers. Regression tests ported:
+`test_keeping_what_a_kept_subgraph_member_still_references` and
+`test_keeping_the_chain_behind_a_kept_subgraph_member` (both confirmed to fail against the pre-fix
+algorithm and pass after). The optional `f2b0546a5` follow-up (replacing the manual large-list-
+clearing `#3052` workaround with `file.batch()`/`file.unbatch()`) was intentionally left unadopted --
+see the PR for the reason.
+
 ### Upstream sync: ~22 real changes in real `IfcOpenShell/IfcOpenShell` since the fork point need review/porting -- scoped 2026-09-26, ALL 4 CHUNKS LANDED
 
 Real upstream is 584 commits ahead of this fork's fork-point (`2c1d445d5`); this fork is 263 ahead.
